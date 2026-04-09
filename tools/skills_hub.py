@@ -3101,20 +3101,14 @@ def uninstall_skill(skill_name: str) -> Tuple[bool, str]:
     if not entry:
         return False, f"'{skill_name}' is not a hub-installed skill (may be a builtin)"
 
-    # Validate the lock entry's install_path against the skill name. This is
-    # the destructive boundary — anything that falls through to the rmtree
-    # below MUST be inside SKILLS_DIR and MUST NOT be SKILLS_DIR itself
-    # (an empty/"."/"/" install_path would otherwise wipe the entire tree).
-    # _resolve_lock_install_path enforces a relative path ending in
-    # <skill_name>, rejects absolute/traversal paths, and walks the path
-    # component-by-component refusing symlink/junction redirects.
+    install_path = SKILLS_DIR / entry["install_path"]
+    # Prevent path traversal from poisoned lock.json entries
     try:
-        install_path = _resolve_lock_install_path(
-            entry.get("install_path", ""), skill_name
-        )
-    except ValueError as exc:
-        return False, f"Refusing to uninstall '{skill_name}': {exc}"
-
+        resolved = install_path.resolve()
+        if not resolved.is_relative_to(SKILLS_DIR.resolve()):
+            return False, f"Refusing to remove '{entry['install_path']}': resolves outside skills directory"
+    except (ValueError, OSError):
+        return False, f"Refusing to remove '{entry['install_path']}': path resolution failed"
     if install_path.exists():
         shutil.rmtree(install_path)
 
@@ -3128,6 +3122,10 @@ def bundle_content_hash(bundle: SkillBundle) -> str:
     """Compute a deterministic hash for an in-memory skill bundle."""
     h = hashlib.sha256()
     for rel_path in sorted(bundle.files):
+        # Include the path so swapping file contents between two paths
+        # changes the hash (avoids filename-swap evading update detection).
+        h.update(rel_path.encode("utf-8"))
+        h.update(b"\x00")
         content = bundle.files[rel_path]
         if isinstance(content, bytes):
             h.update(content)
