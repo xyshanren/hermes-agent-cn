@@ -5570,15 +5570,16 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         else:
             print("  Recent sessions:")
         print()
-        print(f"  {'Title':<32} {'Preview':<40} {'Last Active':<13} {'ID'}")
-        print(f"  {'─' * 32} {'─' * 40} {'─' * 13} {'─' * 24}")
-        for session in sessions:
+        print(f"  {'#':<3} {'Title':<32} {'Preview':<40} {'Last Active':<13} {'ID'}")
+        print(f"  {'─' * 3} {'─' * 32} {'─' * 40} {'─' * 13} {'─' * 24}")
+        for idx, session in enumerate(sessions, start=1):
             title = session.get("title") or "—"
             preview = (session.get("preview") or "")[:38]
             last_active = _relative_time(session.get("last_active"))
-            print(f"  {title:<32} {preview:<40} {last_active:<13} {session['id']}")
+            print(f"  {idx:<3} {title:<32} {preview:<40} {last_active:<13} {session['id']}")
         print()
-        print("  Use /resume <session id or title> to continue where you left off.")
+        print("  Use /resume <number>, /resume <session id>, or /resume <session title> to continue.")
+        print("  Example: /resume 2")
         print()
         return True
 
@@ -5819,6 +5820,286 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         return True
 
 
+        if not target:
+            _cprint("  Usage: /resume <number|session_id_or_title>")
+            if self._show_recent_sessions(reason="resume"):
+                return
+            _cprint("  Tip:   Use /history or `hermes sessions list` to find sessions.")
+            return
+
+        if not self._session_db:
+            from hermes_state import format_session_db_unavailable
+            _cprint(f"  {format_session_db_unavailable()}")
+            return
+
+        # Resolve numbered selection, title, or ID
+        if target.isdigit():
+            sessions = self._list_recent_sessions(limit=10)
+            index = int(target)
+            if index < 1 or index > len(sessions):
+                _cprint(f"  Resume index {index} is out of range.")
+                _cprint("  Use /resume with no arguments to see available sessions.")
+                return
+            selected = sessions[index - 1]
+            target_id = selected["id"]
+        else:
+            from hermes_cli.main import _resolve_session_by_name_or_id
+            resolved = _resolve_session_by_name_or_id(target)
+            target_id = resolved or target
+
+        session_meta = self._session_db.get_session(target_id)
+        if not session_meta:
+            _cprint(f"  Session not found: {target}")
+            _cprint("  Use /history or `hermes sessions list` to see available sessions.")
+            return
+
+        # If the target is the empty head of a compression chain, redirect to
+        # the descendant that actually holds the transcript. See #15000.
+        try:
+            resolved_id = self._session_db.resolve_resume_session_id(target_id)
+        except Exception:
+            resolved_id = target_id
+        if resolved_id and resolved_id != target_id:
+            _cprint(
+                f"  Session {target_id} was compressed into {resolved_id}; "
+                f"resuming the descendant with your transcript."
+            )
+            target_id = resolved_id
+            resolved_meta = self._session_db.get_session(target_id)
+            if resolved_meta:
+                session_meta = resolved_meta
+
+        if target_id == self.session_id:
+            _cprint("  Already on that session.")
+            return
+
+        old_session_id = self.session_id
+        # End current session
+        try:
+            self._session_db.end_session(self.session_id, "resumed_other")
+        except Exception:
+            pass
+
+        # Switch to the target session
+        self.session_id = target_id
+        self._resumed = True
+        self._pending_title = None
+        _sync_process_session_id(target_id)
+
+        # Load conversation history (strip transcript-only metadata entries)
+        restored = self._session_db.get_messages_as_conversation(target_id)
+        restored = [m for m in (restored or []) if m.get("role") != "session_meta"]
+        self.conversation_history = restored
+
+        # Re-open the target session so it's not marked as ended
+        try:
+            self._session_db.reopen_session(target_id)
+        except Exception:
+            pass
+
+        # Sync the agent if already initialised
+        if self.agent:
+            self.agent.session_id = target_id
+            self.agent.reset_session_state()
+            if hasattr(self.agent, "_last_flushed_db_idx"):
+                self.agent._last_flushed_db_idx = len(self.conversation_history)
+            if hasattr(self.agent, "_todo_store"):
+                try:
+                    from tools.todo_tool import TodoStore
+                    self.agent._todo_store = TodoStore()
+                except Exception:
+                    pass
+            if hasattr(self.agent, "_invalidate_system_prompt"):
+                self.agent._invalidate_system_prompt()
+
+            # Notify memory providers that session_id rotated to a resumed
+            # session. reset=False — the provider's accumulated state is
+            # still valid; it just needs to target the new session_id for
+            # subsequent writes. See #6672.
+            try:
+                _mm = getattr(self.agent, "_memory_manager", None)
+                if _mm is not None:
+                    _mm.on_session_switch(
+                        target_id,
+                        parent_session_id=old_session_id or "",
+                        reset=False,
+                        reason="resume",
+                    )
+            except Exception:
+                pass
+
+        title_part = f" \"{session_meta['title']}\"" if session_meta.get("title") else ""
+        msg_count = len([m for m in self.conversation_history if m.get("role") == "user"])
+        if self.conversation_history:
+            _cprint(
+                f"  ↻ Resumed session {target_id}{title_part}"
+                f" ({msg_count} user message{'s' if msg_count != 1 else ''},"
+                f" {len(self.conversation_history)} total)"
+            )
+            self._display_resumed_history()
+        else:
+            _cprint(f"  ↻ Resumed session {target_id}{title_part} — no messages, starting fresh.")
+
+    def _handle_sessions_command(self, cmd_original: str) -> None:
+        """Handle /sessions [list|<id_or_title>] — browse or resume previous sessions.
+
+        Without arguments, prints the same recent-sessions table that /resume
+        shows when called without a target, and tells the user how to resume.
+        With an explicit subcommand or target, delegates to the resume flow so
+        ``/sessions <id>`` and ``/resume <id>`` behave identically.
+
+        The TUI ships an interactive picker overlay for this command; the
+        classic CLI prints an inline list because there is no equivalent
+        overlay primitive here. Without this handler the canonical name
+        ``sessions`` falls through ``process_command``'s elif chain and
+        prints ``Unknown command: sessions`` even though the command is
+        registered in the central COMMAND_REGISTRY.
+        """
+        parts = cmd_original.split(None, 1)
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        sub = arg.lower()
+
+        # Bare /sessions or /sessions list — show recent sessions inline.
+        if not arg or sub in {"list", "ls", "browse"}:
+            if not self._session_db:
+                from hermes_state import format_session_db_unavailable
+                _cprint(f"  {format_session_db_unavailable()}")
+                return
+            if not self._show_recent_sessions(reason="sessions"):
+                _cprint("  (._.) No previous sessions yet.")
+            return
+
+        # /sessions <id_or_title> behaves the same as /resume <id_or_title>.
+        self._handle_resume_command(f"/resume {arg}")
+
+    def _handle_branch_command(self, cmd_original: str) -> None:
+        """Handle /branch [name] — fork the current session into a new independent copy.
+
+        Copies the full conversation history to a new session so the user can
+        explore a different approach without losing the original session state.
+        Inspired by Claude Code's /branch command.
+        """
+        if not self.conversation_history:
+            _cprint("  No conversation to branch — send a message first.")
+            return
+
+        if not self._session_db:
+            from hermes_state import format_session_db_unavailable
+            _cprint(f"  {format_session_db_unavailable()}")
+            return
+
+        parts = cmd_original.split(None, 1)
+        branch_name = parts[1].strip() if len(parts) > 1 else ""
+
+        # Generate the new session ID
+        now = datetime.now()
+        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+        short_uuid = uuid.uuid4().hex[:6]
+        new_session_id = f"{timestamp_str}_{short_uuid}"
+
+        # Determine branch title
+        if branch_name:
+            branch_title = branch_name
+        else:
+            # Auto-generate from the current session title
+            current_title = None
+            if self._session_db:
+                current_title = self._session_db.get_session_title(self.session_id)
+            base = current_title or "branch"
+            branch_title = self._session_db.get_next_title_in_lineage(base)
+
+        # Save the current session's state before branching
+        parent_session_id = self.session_id
+
+        # End the old session
+        try:
+            self._session_db.end_session(self.session_id, "branched")
+        except Exception:
+            pass
+
+        # Create the new session with parent link
+        try:
+            self._session_db.create_session(
+                session_id=new_session_id,
+                source=os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                model=self.model,
+                model_config={
+                    "max_iterations": self.max_turns,
+                    "reasoning_config": self.reasoning_config,
+                },
+                parent_session_id=parent_session_id,
+            )
+        except Exception as e:
+            _cprint(f"  Failed to create branch session: {e}")
+            return
+
+        # Copy conversation history to the new session
+        for msg in self.conversation_history:
+            try:
+                self._session_db.append_message(
+                    session_id=new_session_id,
+                    role=msg.get("role", "user"),
+                    content=msg.get("content"),
+                    tool_name=msg.get("tool_name") or msg.get("name"),
+                    tool_calls=msg.get("tool_calls"),
+                    tool_call_id=msg.get("tool_call_id"),
+                    reasoning=msg.get("reasoning"),
+                )
+            except Exception:
+                pass  # Best-effort copy
+
+        # Set title on the branch
+        try:
+            self._session_db.set_session_title(new_session_id, branch_title)
+        except Exception:
+            pass
+
+        # Switch to the new session
+        self.session_id = new_session_id
+        self.session_start = now
+        self._pending_title = None
+        self._resumed = True  # Prevents auto-title generation
+        _sync_process_session_id(new_session_id)
+
+        # Sync the agent
+        if self.agent:
+            self.agent.session_id = new_session_id
+            self.agent.session_start = now
+            self.agent.reset_session_state()
+            if hasattr(self.agent, "_last_flushed_db_idx"):
+                self.agent._last_flushed_db_idx = len(self.conversation_history)
+            if hasattr(self.agent, "_todo_store"):
+                try:
+                    from tools.todo_tool import TodoStore
+                    self.agent._todo_store = TodoStore()
+                except Exception:
+                    pass
+            if hasattr(self.agent, "_invalidate_system_prompt"):
+                self.agent._invalidate_system_prompt()
+
+            # Notify memory providers that session_id forked to a new branch.
+            # reset=False — the branched session carries the transcript
+            # forward, so provider state tracks the lineage. parent_session_id
+            # links the branch back to the original. See #6672.
+            try:
+                _mm = getattr(self.agent, "_memory_manager", None)
+                if _mm is not None:
+                    _mm.on_session_switch(
+                        new_session_id,
+                        parent_session_id=parent_session_id or "",
+                        reset=False,
+                        reason="branch",
+                    )
+            except Exception:
+                pass
+
+        msg_count = len([m for m in self.conversation_history if m.get("role") == "user"])
+        _cprint(
+            f"  ⑂ Branched session \"{branch_title}\""
+            f" ({msg_count} user message{'s' if msg_count != 1 else ''})"
+        )
+        _cprint(f"  Original session: {parent_session_id}")
+        _cprint(f"  Branch session:   {new_session_id}")
 
     def save_conversation(self):
         """Save the current conversation to a JSON snapshot under ~/.hermes/sessions/saved/.
