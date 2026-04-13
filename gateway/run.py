@@ -16541,6 +16541,17 @@ class GatewayRunner:
                 log_message="agent:step hook scheduling error",
             )
 
+        # Bridge sync event_callback → async hooks.emit for lifecycle events
+        # (e.g. session:compress fires after context compression splits a session)
+        def _event_callback_sync(event_type: str, context: dict) -> None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _hooks_ref.emit(event_type, context),
+                    _loop_for_step,
+                )
+            except Exception as _e:
+                logger.debug("event_callback hook error: %s", _e)
+
         # Bridge sync status_callback → async adapter.send for context pressure
         _status_adapter = self.adapters.get(source.platform)
         _status_chat_id = source.chat_id
@@ -16854,6 +16865,38 @@ class GatewayRunner:
             agent.stream_delta_callback = _stream_delta_cb
             agent.interim_assistant_callback = _interim_assistant_cb if _want_interim_messages else None
             agent.status_callback = _status_callback_sync
+            # Credits / out-of-band notices (usage bands, depletion, restored).
+            # Messaging has no persistent status bar, so each notice is a
+            # standalone push: render to a single plaintext line and deliver via
+            # the shared _deliver_platform_notice rail (honors private/public +
+            # thread metadata). Fires from the agent's sync worker thread, so we
+            # hop onto the gateway loop with safe_schedule_threadsafe - same
+            # pattern as _status_callback_sync. The fired-once latch lives on the
+            # cached agent and persists across turns, so a band crosses -> one
+            # push (no per-turn re-nag). Recovery ("✓ Credit access restored")
+            # rides the same show path (it's emitted as a success notice, not a
+            # clear). The clear callback is a no-op: a sent platform message
+            # can't be cleanly retracted, and the band already fired once.
+            def _notice_callback_sync(notice) -> None:
+                if not _status_adapter or not _run_still_current():
+                    return
+                try:
+                    line = render_notice_line(notice)
+                except Exception:
+                    logger.debug("render_notice_line failed", exc_info=True)
+                    return
+                if not line:
+                    return
+                safe_schedule_threadsafe(
+                    self._deliver_platform_notice(source, line),
+                    _loop_for_step,
+                    logger=logger,
+                    log_message="notice_callback delivery scheduling error",
+                )
+
+            agent.notice_callback = _notice_callback_sync
+            agent.notice_clear_callback = None
+            agent.event_callback = _event_callback_sync
             agent.reasoning_config = reasoning_config
             agent.service_tier = self._service_tier
             agent.request_overrides = turn_route.get("request_overrides") or {}
