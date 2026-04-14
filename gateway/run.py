@@ -15926,6 +15926,8 @@ class GatewayRunner:
             if _env_tp and not _tool_progress_configured
             else (_resolved_tp or _env_tp or "all")
         )
+        # Tool progress style: "accumulate" (edit single msg) or "separate" (one msg per tool)
+        progress_style = resolve_display_setting(user_config, platform_key, "tool_progress_style") or "accumulate"
         # Disable tool progress for webhooks - they don't support message editing,
         # so each progress line would be sent as a separate message.
         from gateway.config import Platform
@@ -16149,7 +16151,7 @@ class GatewayRunner:
 
             progress_lines = []      # Accumulated tool lines for the CURRENT editable bubble
             progress_msg_id = None   # ID of the current progress message to edit
-            can_edit = True          # False once an edit fails (platform doesn't support it)
+            can_edit = progress_style != "separate"  # "separate" = one message per tool (pre-v0.9 behavior)
             _last_edit_ts = 0.0      # Throttle edits to avoid Telegram flood control
             _PROGRESS_EDIT_INTERVAL = 1.5  # Minimum seconds between edits
 
