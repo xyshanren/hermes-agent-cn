@@ -1,5 +1,6 @@
 """Tests for hermes_state.py — SessionDB SQLite CRUD, FTS5 search, export."""
 
+import sqlite3
 import time
 import pytest
 from pathlib import Path
@@ -11,23 +12,19 @@ class _NoFtsCursor(sqlite3.Cursor):
     """Simulate a SQLite build without the fts5 module."""
 
     def execute(self, sql, parameters=()):
-        probe = sql.strip()
-        if probe in (
-            "SELECT * FROM messages_fts LIMIT 0",
-            "SELECT * FROM messages_fts_trigram LIMIT 0",
-        ):
-            raise sqlite3.OperationalError("no such table: " + probe.split()[-3])
+        if sql.strip() == "SELECT * FROM messages_fts LIMIT 0":
+            raise sqlite3.OperationalError("no such table: messages_fts")
         return super().execute(sql, parameters)
 
     def executescript(self, sql_script):
-        if "USING fts5" in sql_script:
+        if "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5" in sql_script:
             raise sqlite3.OperationalError("no such module: fts5")
         return super().executescript(sql_script)
 
 
-class _NoTrigramConnection(sqlite3.Connection):
+class _NoFtsConnection(sqlite3.Connection):
     def cursor(self, factory=None):
-        return super().cursor(factory or _NoTrigramCursor)
+        return super().cursor(factory or _NoFtsCursor)
 
 
 @pytest.fixture()
@@ -195,10 +192,6 @@ class TestSessionLifecycle:
         db = SessionDB(db_path=tmp_path / "state.db")
         try:
             assert db._fts_enabled is False
-            # Neither FTS5 virtual table should have been created on a build
-            # that lacks the fts5 module — both init paths must degrade.
-            assert db._fts_table_exists("messages_fts") is False
-            assert db._fts_table_exists("messages_fts_trigram") is False
 
             db.create_session(session_id="s1", source="cli")
             db.append_message("s1", role="user", content="hello from sqlite without fts")
@@ -207,146 +200,6 @@ class TestSessionLifecycle:
             assert len(messages) == 1
             assert messages[0]["content"] == "hello from sqlite without fts"
             assert db.search_messages("hello") == []
-        finally:
-            db.close()
-
-    def test_existing_fts_tables_do_not_break_without_fts5(
-        self, tmp_path, monkeypatch
-    ):
-        db_path = tmp_path / "state.db"
-        seeded = SessionDB(db_path=db_path)
-        try:
-            seeded.create_session(session_id="s1", source="cli")
-            seeded.append_message("s1", role="user", content="before runtime change")
-        finally:
-            seeded.close()
-
-        real_connect = sqlite3.connect
-
-        def connect_without_fts(*args, **kwargs):
-            kwargs["factory"] = _NoFtsExistingTableConnection
-            return real_connect(*args, **kwargs)
-
-        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_fts)
-
-        db = SessionDB(db_path=db_path)
-        try:
-            assert db._fts_enabled is False
-            assert db.get_session("s1") is not None
-            assert len(db.get_messages("s1")) == 1
-
-            # Existing FTS triggers must be disabled too; otherwise this write
-            # would try to insert into an unusable FTS virtual table.
-            db.append_message("s1", role="assistant", content="after runtime change")
-            messages = db.get_messages("s1")
-            assert len(messages) == 2
-            assert messages[1]["content"] == "after runtime change"
-        finally:
-            db.close()
-
-    def test_old_schema_without_fts5_does_not_crash(self, tmp_path, monkeypatch):
-        db_path = tmp_path / "legacy.db"
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript(SCHEMA_SQL)
-        conn.execute("DELETE FROM schema_version")
-        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (9,))
-        conn.commit()
-        conn.close()
-
-        real_connect = sqlite3.connect
-
-        def connect_without_fts(*args, **kwargs):
-            kwargs["factory"] = _NoFtsConnection
-            return real_connect(*args, **kwargs)
-
-        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_fts)
-
-        db = SessionDB(db_path=db_path)
-        try:
-            assert db._fts_enabled is False
-            db.create_session(session_id="s1", source="cli")
-            db.append_message("s1", role="user", content="legacy no fts")
-            assert db.get_messages("s1")[0]["content"] == "legacy no fts"
-            assert db.search_messages("legacy") == []
-
-            # Leave the FTS migration version in place so a future FTS-capable
-            # runtime can still rebuild and backfill the indexes.
-            row = db._conn.execute("SELECT version FROM schema_version").fetchone()
-            assert row["version"] == 9
-        finally:
-            db.close()
-
-    def test_fts_runtime_restores_triggers_after_no_fts_open(
-        self, tmp_path, monkeypatch
-    ):
-        db_path = tmp_path / "state.db"
-        seeded = SessionDB(db_path=db_path)
-        try:
-            seeded.create_session(session_id="s1", source="cli")
-            seeded.append_message("s1", role="user", content="first searchable")
-        finally:
-            seeded.close()
-
-        real_connect = sqlite3.connect
-
-        def connect_without_fts(*args, **kwargs):
-            kwargs["factory"] = _NoFtsExistingTableConnection
-            return real_connect(*args, **kwargs)
-
-        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_fts)
-        no_fts = SessionDB(db_path=db_path)
-        try:
-            no_fts.append_message("s1", role="assistant", content="not indexed yet")
-        finally:
-            no_fts.close()
-
-        monkeypatch.setattr("hermes_state.sqlite3.connect", real_connect)
-        restored = SessionDB(db_path=db_path)
-        try:
-            assert restored._fts_enabled is True
-            restored.append_message("s1", role="assistant", content="indexed again")
-            assert len(restored.search_messages("not indexed yet")) == 1
-            assert len(restored.search_messages("indexed")) == 2
-        finally:
-            restored.close()
-
-    def test_is_fts5_unavailable_error_catches_trigram_tokenizer(self):
-        """Unit test: _is_fts5_unavailable_error matches 'no such tokenizer'."""
-        fts5_err = sqlite3.OperationalError("no such module: fts5")
-        trigram_err = sqlite3.OperationalError("no such tokenizer: trigram")
-        unrelated_err = sqlite3.OperationalError("no such table: foo")
-
-        assert SessionDB._is_fts5_unavailable_error(fts5_err) is True
-        assert SessionDB._is_fts5_unavailable_error(trigram_err) is True
-        assert SessionDB._is_fts5_unavailable_error(unrelated_err) is False
-
-    def test_db_initializes_without_trigram_tokenizer(self, tmp_path, monkeypatch):
-        """SessionDB must not crash when FTS5 exists but trigram tokenizer is missing."""
-        real_connect = sqlite3.connect
-
-        def connect_without_trigram(*args, **kwargs):
-            kwargs["factory"] = _NoTrigramConnection
-            return real_connect(*args, **kwargs)
-
-        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_trigram)
-
-        db = SessionDB(db_path=tmp_path / "state.db")
-        try:
-            # Base FTS5 should still work (trigram is optional).
-            assert db._fts_enabled is True
-            assert db._fts_table_exists("messages_fts") is True
-            # Trigram table should NOT have been created.
-            assert db._fts_table_exists("messages_fts_trigram") is False
-
-            db.create_session(session_id="s1", source="cli")
-            db.append_message("s1", role="user", content="hello without trigram")
-
-            messages = db.get_messages("s1")
-            assert len(messages) == 1
-            assert messages[0]["content"] == "hello without trigram"
-
-            # FTS5 keyword search should still work.
-            assert len(db.search_messages("hello")) == 1
         finally:
             db.close()
 

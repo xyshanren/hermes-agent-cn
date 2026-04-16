@@ -336,6 +336,7 @@ class SessionDB:
 
         self._lock = threading.Lock()
         self._write_count = 0
+        self._fts_enabled = False
         try:
             self._conn = sqlite3.connect(
                 str(self.db_path),
@@ -344,7 +345,6 @@ class SessionDB:
                 # handles contention instead of sitting in SQLite's internal
                 # busy handler for up to 30s.
                 timeout=1.0,
-                # Autocommit mode: Python's default isolation_level=""
                 # auto-starts transactions on DML, which conflicts with our
                 # explicit BEGIN IMMEDIATE.  None = we manage transactions
                 # ourselves.
@@ -868,13 +868,7 @@ class SessionDB:
                 if "fts5" not in err and "no such module" not in err:
                     raise
                 logger.warning(
-                    "SQLite FTS5 unavailable for %s; full-text session search "
-                    "disabled. This usually means Hermes is running on an "
-                    "unsupported install (e.g. a pip-installed or pip-managed "
-                    "Python whose bundled SQLite lacks FTS5) rather than a "
-                    "mainline install. Some features may be missing or behave "
-                    "differently. Install the supported way: "
-                    "https://hermes-agent.nousresearch.com (underlying error: %s)",
+                    "SQLite FTS5 unavailable for %s; full-text search disabled: %s",
                     self.db_path,
                     fts_exc,
                 )
@@ -2428,6 +2422,9 @@ class SessionDB:
         ignores ``sort``. The trigram CJK path honours ``sort`` like the main
         FTS5 path.
         """
+        if not self._fts_enabled:
+            return []
+
         if not query or not query.strip():
             return []
 
