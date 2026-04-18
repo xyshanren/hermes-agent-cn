@@ -31,6 +31,15 @@
 - **诊断工具**
   - `hermes doctor` 中文输出
 
+#### 文档
+
+- **README_CN.md** — 中文说明文档
+  - 语言导航 (EN | 中文)
+  - MemPalace + graphify 集成指南
+  - 国内用户推荐配置
+- **CHANGELOG_CN.md** — 中文变更记录
+- **README.md** — 原英文 README 添加语言导航
+
 #### 仓库信息
 
 - **Fork 源**: [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
