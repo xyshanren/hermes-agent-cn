@@ -9,7 +9,8 @@
 # Hermes Agent ☤ 中文版
 
 <p align="center">
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/文档-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
+  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/英文文档-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
+  <a href="https://hermes.xaapi.ai/"><img src="https://img.shields.io/badge/中文文档-hermes.xaapi.ai-FF6B6B?style=for-the-badge" alt="Chinese Documentation"></a>
   <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/许可证-MIT-green?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://nousresearch.com"><img src="https://img.shields.io/badge/Nous%20Research出品-blueviolet?style=for-the-badge" alt="Built by Nous Research"></a>
@@ -291,13 +292,14 @@ graphify-out/
 | 技术调研 | 整理调研笔记 | 建立知识图谱 |
 | 团队协作 | 共享决策记忆 | 统一代码理解 |
 
-> 📖 详细的安装步骤、故障排查和最佳实践见 [Hermes集成指南_MemPalace与graphify.md](Hermes集成指南_MemPalace与graphify.md)
+> 📖 详细的安装步骤、故障排查和最佳实践见 [Hermes集成指南：MemPalace与graphify](docs/Hermes集成指南_MemPalace与graphify.md)
 
 ---
 
 ## 文档
 
-所有文档位于 **[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)**：
+- 🇨🇳 **中文文档**：[hermes.xaapi.ai](https://hermes.xaapi.ai/)
+- 🇬🇧 **英文文档**：[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)
 
 | 章节 | 内容 |
 |------|------|
