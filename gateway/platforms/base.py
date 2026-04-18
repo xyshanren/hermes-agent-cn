@@ -734,25 +734,56 @@ def merge_pending_message_event(
     pending_messages: Dict[str, MessageEvent],
     session_key: str,
     event: MessageEvent,
+    *,
+    merge_text: bool = False,
 ) -> None:
     """Store or merge a pending event for a session.
 
     Photo bursts/albums often arrive as multiple near-simultaneous PHOTO
     events. Merge those into the existing queued event so the next turn sees
-    the whole burst, while non-photo follow-ups still replace the pending
-    event normally.
+    the whole burst.
+
+    When ``merge_text`` is enabled, rapid follow-up TEXT events are appended
+    instead of replacing the pending turn. This is used for Telegram bursty
+    follow-ups so a multi-part user thought is not silently truncated to only
+    the last queued fragment.
     """
     existing = pending_messages.get(session_key)
-    if (
-        existing
-        and getattr(existing, "message_type", None) == MessageType.PHOTO
-        and event.message_type == MessageType.PHOTO
-    ):
-        existing.media_urls.extend(event.media_urls)
-        existing.media_types.extend(event.media_types)
-        if event.text:
-            existing.text = BasePlatformAdapter._merge_caption(existing.text, event.text)
-        return
+    if existing:
+        existing_is_photo = getattr(existing, "message_type", None) == MessageType.PHOTO
+        incoming_is_photo = event.message_type == MessageType.PHOTO
+        existing_has_media = bool(existing.media_urls)
+        incoming_has_media = bool(event.media_urls)
+
+        if existing_is_photo and incoming_is_photo:
+            existing.media_urls.extend(event.media_urls)
+            existing.media_types.extend(event.media_types)
+            if event.text:
+                existing.text = BasePlatformAdapter._merge_caption(existing.text, event.text)
+            return
+
+        if existing_has_media or incoming_has_media:
+            if incoming_has_media:
+                existing.media_urls.extend(event.media_urls)
+                existing.media_types.extend(event.media_types)
+            if event.text:
+                if existing.text:
+                    existing.text = BasePlatformAdapter._merge_caption(existing.text, event.text)
+                else:
+                    existing.text = event.text
+            if existing_is_photo or incoming_is_photo:
+                existing.message_type = MessageType.PHOTO
+            return
+
+        if (
+            merge_text
+            and getattr(existing, "message_type", None) == MessageType.TEXT
+            and event.message_type == MessageType.TEXT
+        ):
+            if event.text:
+                existing.text = f"{existing.text}\n{event.text}" if existing.text else event.text
+            return
+
     pending_messages[session_key] = event
 
 
@@ -1260,7 +1291,7 @@ class BasePlatformAdapter(ABC):
                 path = path[1:-1].strip()
             path = path.lstrip("`\"'").rstrip("`\"',.;:)}]")
             if path:
-                media.append((path, has_voice_tag))
+                media.append((os.path.expanduser(path), has_voice_tag))
 
         # Remove MEDIA tags from content (including surrounding quote/backtick wrappers)
         if media:
@@ -1548,7 +1579,9 @@ class BasePlatformAdapter(ABC):
             # session lifecycle and its cleanup races with the running task
             # (see PR #4926).
             cmd = event.get_command()
-            if cmd in ("approve", "deny", "status", "stop", "new", "reset", "background", "restart"):
+            from hermes_cli.commands import should_bypass_active_session
+
+            if should_bypass_active_session(cmd):
                 logger.debug(
                     "[%s] Command '/%s' bypassing active-session guard for %s",
                     self.name, cmd, session_key,
@@ -1960,6 +1993,7 @@ class BasePlatformAdapter(ABC):
         chat_topic: Optional[str] = None,
         user_id_alt: Optional[str] = None,
         chat_id_alt: Optional[str] = None,
+        is_bot: bool = False,
     ) -> SessionSource:
         """Helper to build a SessionSource for this platform."""
         # Normalize empty topic to None
@@ -1976,6 +2010,7 @@ class BasePlatformAdapter(ABC):
             chat_topic=chat_topic.strip() if chat_topic else None,
             user_id_alt=user_id_alt,
             chat_id_alt=chat_id_alt,
+            is_bot=is_bot,
         )
     
     @abstractmethod

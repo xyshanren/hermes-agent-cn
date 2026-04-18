@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -40,6 +41,23 @@ from hermes_cli.colors import Colors, color
 # =============================================================================
 # Process Management (for manual gateway runs)
 # =============================================================================
+
+
+@dataclass(frozen=True)
+class GatewayRuntimeSnapshot:
+    manager: str
+    service_installed: bool = False
+    service_running: bool = False
+    gateway_pids: tuple[int, ...] = ()
+    service_scope: str | None = None
+
+    @property
+    def running(self) -> bool:
+        return self.service_running or bool(self.gateway_pids)
+
+    @property
+    def has_process_service_mismatch(self) -> bool:
+        return self.service_installed and self.running and not self.service_running
 
 def _get_service_pids() -> set:
     """Return PIDs currently managed by systemd or launchd gateway services.
@@ -157,20 +175,22 @@ def _request_gateway_self_restart(pid: int) -> bool:
     return True
 
 
-def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = False) -> list:
-    """Find PIDs of running gateway processes.
+def _append_unique_pid(pids: list[int], pid: int | None, exclude_pids: set[int]) -> None:
+    if pid is None or pid <= 0:
+        return
+    if pid == os.getpid() or pid in exclude_pids or pid in pids:
+        return
+    pids.append(pid)
 
-    Args:
-        exclude_pids: PIDs to exclude from the result (e.g. service-managed
-            PIDs that should not be killed during a stale-process sweep).
-        all_profiles: When ``True``, return gateway PIDs across **all**
-            profiles (the pre-7923 global behaviour).  ``hermes update``
-            needs this because a code update affects every profile.
-            When ``False`` (default), only PIDs belonging to the current
-            Hermes profile are returned.
+
+def _scan_gateway_pids(exclude_pids: set[int], all_profiles: bool = False) -> list[int]:
+    """Best-effort process-table scan for gateway PIDs.
+
+    This supplements the profile-scoped PID file so status views can still spot
+    a live gateway when the PID file is stale/missing, and ``--all`` sweeps can
+    discover gateways outside the current profile.
     """
-    _exclude = exclude_pids or set()
-    pids = [pid for pid in _get_service_pids() if pid not in _exclude]
+    pids: list[int] = []
     patterns = [
         "hermes_cli.main gateway",
         "hermes_cli.main --profile",
@@ -203,20 +223,24 @@ def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = Fals
         if is_windows():
             result = subprocess.run(
                 ["wmic", "process", "get", "ProcessId,CommandLine", "/FORMAT:LIST"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
+            if result.returncode != 0:
+                return []
             current_cmd = ""
-            for line in result.stdout.split('\n'):
+            for line in result.stdout.split("\n"):
                 line = line.strip()
                 if line.startswith("CommandLine="):
                     current_cmd = line[len("CommandLine="):]
                 elif line.startswith("ProcessId="):
                     pid_str = line[len("ProcessId="):]
-                    if any(p in current_cmd for p in patterns) and (all_profiles or _matches_current_profile(current_cmd)):
+                    if any(p in current_cmd for p in patterns) and (
+                        all_profiles or _matches_current_profile(current_cmd)
+                    ):
                         try:
-                            pid = int(pid_str)
-                            if pid != os.getpid() and pid not in pids and pid not in _exclude:
-                                pids.append(pid)
+                            _append_unique_pid(pids, int(pid_str), exclude_pids)
                         except ValueError:
                             pass
                     current_cmd = ""
@@ -227,9 +251,11 @@ def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = Fals
                 text=True,
                 timeout=10,
             )
-            for line in result.stdout.split('\n'):
+            if result.returncode != 0:
+                return []
+            for line in result.stdout.split("\n"):
                 stripped = line.strip()
-                if not stripped or 'grep' in stripped:
+                if not stripped or "grep" in stripped:
                     continue
 
                 pid = None
@@ -251,14 +277,135 @@ def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = Fals
 
                 if pid is None:
                     continue
-                if pid == os.getpid() or pid in pids or pid in _exclude:
-                    continue
-                if any(pattern in command for pattern in patterns) and (all_profiles or _matches_current_profile(command)):
-                    pids.append(pid)
+                if any(pattern in command for pattern in patterns) and (
+                    all_profiles or _matches_current_profile(command)
+                ):
+                    _append_unique_pid(pids, pid, exclude_pids)
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return []
 
     return pids
+
+
+def find_gateway_pids(exclude_pids: set | None = None, all_profiles: bool = False) -> list:
+    """Find PIDs of running gateway processes.
+
+    Args:
+        exclude_pids: PIDs to exclude from the result (e.g. service-managed
+            PIDs that should not be killed during a stale-process sweep).
+        all_profiles: When ``True``, return gateway PIDs across **all**
+            profiles (the pre-7923 global behaviour).  ``hermes update``
+            needs this because a code update affects every profile.
+            When ``False`` (default), only PIDs belonging to the current
+            Hermes profile are returned.
+    """
+    _exclude = set(exclude_pids or set())
+    pids: list[int] = []
+    if not all_profiles:
+        try:
+            from gateway.status import get_running_pid
+
+            _append_unique_pid(pids, get_running_pid(), _exclude)
+        except Exception:
+            pass
+    for pid in _get_service_pids():
+        _append_unique_pid(pids, pid, _exclude)
+    for pid in _scan_gateway_pids(_exclude, all_profiles=all_profiles):
+        _append_unique_pid(pids, pid, _exclude)
+    return pids
+
+
+def _probe_systemd_service_running(system: bool = False) -> tuple[bool, bool]:
+    selected_system = _select_systemd_scope(system)
+    unit_exists = get_systemd_unit_path(system=selected_system).exists()
+    if not unit_exists:
+        return selected_system, False
+    try:
+        result = _run_systemctl(
+            ["is-active", get_service_name()],
+            system=selected_system,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (RuntimeError, subprocess.TimeoutExpired):
+        return selected_system, False
+    return selected_system, result.stdout.strip() == "active"
+
+
+def _probe_launchd_service_running() -> bool:
+    if not get_launchd_plist_path().exists():
+        return False
+    try:
+        result = subprocess.run(
+            ["launchctl", "list", get_launchd_label()],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0
+
+
+def get_gateway_runtime_snapshot(system: bool = False) -> GatewayRuntimeSnapshot:
+    """Return a unified view of gateway liveness for the current profile."""
+    gateway_pids = tuple(find_gateway_pids())
+    if is_termux():
+        return GatewayRuntimeSnapshot(
+            manager="Termux / manual process",
+            gateway_pids=gateway_pids,
+        )
+
+    from hermes_constants import is_container
+
+    if is_linux() and is_container():
+        return GatewayRuntimeSnapshot(
+            manager="docker (foreground)",
+            gateway_pids=gateway_pids,
+        )
+
+    if supports_systemd_services():
+        selected_system, service_running = _probe_systemd_service_running(system=system)
+        scope_label = _service_scope_label(selected_system)
+        return GatewayRuntimeSnapshot(
+            manager=f"systemd ({scope_label})",
+            service_installed=get_systemd_unit_path(system=selected_system).exists(),
+            service_running=service_running,
+            gateway_pids=gateway_pids,
+            service_scope=scope_label,
+        )
+
+    if is_macos():
+        return GatewayRuntimeSnapshot(
+            manager="launchd",
+            service_installed=get_launchd_plist_path().exists(),
+            service_running=_probe_launchd_service_running(),
+            gateway_pids=gateway_pids,
+            service_scope="launchd",
+        )
+
+    return GatewayRuntimeSnapshot(
+        manager="manual process",
+        gateway_pids=gateway_pids,
+    )
+
+
+def _format_gateway_pids(pids: tuple[int, ...] | list[int], *, limit: int | None = 3) -> str:
+    rendered = [str(pid) for pid in pids[:limit] if pid > 0] if limit is not None else [str(pid) for pid in pids if pid > 0]
+    if limit is not None and len(pids) > limit:
+        rendered.append("...")
+    return ", ".join(rendered)
+
+
+def _print_gateway_process_mismatch(snapshot: GatewayRuntimeSnapshot) -> None:
+    if not snapshot.has_process_service_mismatch:
+        return
+    print()
+    print("⚠ Gateway process is running for this profile, but the service is not active")
+    print(f"  PID(s): {_format_gateway_pids(snapshot.gateway_pids, limit=None)}")
+    print("  This is usually a manual foreground/tmux/nohup run, so `hermes gateway`")
+    print("  can refuse to start another copy until this process stops.")
 
 
 def kill_gateway_processes(force: bool = False, exclude_pids: set | None = None,
@@ -1998,7 +2145,7 @@ _PLATFORMS = [
             {"name": "QQ_ALLOWED_USERS", "prompt": "Allowed user OpenIDs (comma-separated, leave empty for open access)", "password": False,
              "is_allowlist": True,
              "help": "Optional — restrict DM access to specific user OpenIDs."},
-            {"name": "QQ_HOME_CHANNEL", "prompt": "Home channel (user/group OpenID for cron delivery, or empty)", "password": False,
+            {"name": "QQBOT_HOME_CHANNEL", "prompt": "Home channel (user/group OpenID for cron delivery, or empty)", "password": False,
              "help": "OpenID to deliver cron results and notifications to."},
         ],
     },
@@ -2211,9 +2358,62 @@ def _setup_sms():
 
 
 def _setup_dingtalk():
-    """Configure DingTalk via the standard platform setup."""
+    """Configure DingTalk — QR scan (recommended) or manual credential entry."""
+    from hermes_cli.setup import (
+        prompt_choice, prompt_yes_no, print_info, print_success, print_warning,
+    )
+
     dingtalk_platform = next(p for p in _PLATFORMS if p["key"] == "dingtalk")
-    _setup_standard_platform(dingtalk_platform)
+    emoji = dingtalk_platform["emoji"]
+    label = dingtalk_platform["label"]
+
+    print()
+    print(color(f"  ─── {emoji} {label} Setup ───", Colors.CYAN))
+
+    existing = get_env_value("DINGTALK_CLIENT_ID")
+    if existing:
+        print()
+        print_success(f"{label} is already configured (Client ID: {existing}).")
+        if not prompt_yes_no(f"  Reconfigure {label}?", False):
+            return
+
+    print()
+    method = prompt_choice(
+        "  Choose setup method",
+        [
+            "QR Code Scan (Recommended, auto-obtain Client ID and Client Secret)",
+            "Manual Input (Client ID and Client Secret)",
+        ],
+        default=0,
+    )
+
+    if method == 0:
+        # ── QR-code device-flow authorization ──
+        try:
+            from hermes_cli.dingtalk_auth import dingtalk_qr_auth
+        except ImportError as exc:
+            print_warning(f"  QR auth module failed to load ({exc}), falling back to manual input.")
+            _setup_standard_platform(dingtalk_platform)
+            return
+
+        result = dingtalk_qr_auth()
+        if result is None:
+            print_warning("  QR auth incomplete, falling back to manual input.")
+            _setup_standard_platform(dingtalk_platform)
+            return
+
+        client_id, client_secret = result
+        save_env_value("DINGTALK_CLIENT_ID", client_id)
+        save_env_value("DINGTALK_CLIENT_SECRET", client_secret)
+        save_env_value("DINGTALK_ALLOW_ALL_USERS", "true")
+        print()
+        print_success(f"{emoji} {label} configured via QR scan!")
+    else:
+        # ── Manual entry ──
+        _setup_standard_platform(dingtalk_platform)
+        # Also enable allow-all by default for convenience
+        if get_env_value("DINGTALK_CLIENT_ID"):
+            save_env_value("DINGTALK_ALLOW_ALL_USERS", "true")
 
 
 def _setup_wecom():
@@ -2572,6 +2772,215 @@ def _setup_feishu():
         print_info(f"  Bot: {bot_name}")
 
 
+def _setup_qqbot():
+    """Interactive setup for QQ Bot — scan-to-configure or manual credentials."""
+    print()
+    print(color("  ─── 🐧 QQ Bot Setup ───", Colors.CYAN))
+
+    existing_app_id = get_env_value("QQ_APP_ID")
+    existing_secret = get_env_value("QQ_CLIENT_SECRET")
+    if existing_app_id and existing_secret:
+        print()
+        print_success("QQ Bot is already configured.")
+        if not prompt_yes_no("  Reconfigure QQ Bot?", False):
+            return
+
+    # ── Choose setup method ──
+    print()
+    method_choices = [
+        "Scan QR code to add bot automatically (recommended)",
+        "Enter existing App ID and App Secret manually",
+    ]
+    method_idx = prompt_choice("  How would you like to set up QQ Bot?", method_choices, 0)
+
+    credentials = None
+    used_qr = False
+
+    if method_idx == 0:
+        # ── QR scan-to-configure ──
+        try:
+            credentials = _qqbot_qr_flow()
+        except KeyboardInterrupt:
+            print()
+            print_warning("  QQ Bot setup cancelled.")
+            return
+        if credentials:
+            used_qr = True
+        if not credentials:
+            print_info("  QR setup did not complete. Continuing with manual input.")
+
+    # ── Manual credential input ──
+    if not credentials:
+        print()
+        print_info("  Go to https://q.qq.com to register a QQ Bot application.")
+        print_info("  Note your App ID and App Secret from the application page.")
+        print()
+        app_id = prompt("  App ID", password=False)
+        if not app_id:
+            print_warning("  Skipped — QQ Bot won't work without an App ID.")
+            return
+        app_secret = prompt("  App Secret", password=True)
+        if not app_secret:
+            print_warning("  Skipped — QQ Bot won't work without an App Secret.")
+            return
+        credentials = {"app_id": app_id.strip(), "client_secret": app_secret.strip(), "user_openid": ""}
+
+    # ── Save core credentials ──
+    save_env_value("QQ_APP_ID", credentials["app_id"])
+    save_env_value("QQ_CLIENT_SECRET", credentials["client_secret"])
+
+    user_openid = credentials.get("user_openid", "")
+
+    # ── DM security policy ──
+    print()
+    access_choices = [
+        "Use DM pairing approval (recommended)",
+        "Allow all direct messages",
+        "Only allow listed user OpenIDs",
+    ]
+    access_idx = prompt_choice("  How should direct messages be authorized?", access_choices, 0)
+    if access_idx == 0:
+        save_env_value("QQ_ALLOW_ALL_USERS", "false")
+        if user_openid:
+            print()
+            if prompt_yes_no(f"  Add yourself ({user_openid}) to the allow list?", True):
+                save_env_value("QQ_ALLOWED_USERS", user_openid)
+                print_success(f"  Allow list set to {user_openid}")
+            else:
+                save_env_value("QQ_ALLOWED_USERS", "")
+        else:
+            save_env_value("QQ_ALLOWED_USERS", "")
+        print_success("  DM pairing enabled.")
+        print_info("  Unknown users can request access; approve with `hermes pairing approve`.")
+    elif access_idx == 1:
+        save_env_value("QQ_ALLOW_ALL_USERS", "true")
+        save_env_value("QQ_ALLOWED_USERS", "")
+        print_warning("  Open DM access enabled for QQ Bot.")
+    else:
+        default_allow = user_openid or ""
+        allowlist = prompt("  Allowed user OpenIDs (comma-separated)", default_allow, password=False).replace(" ", "")
+        save_env_value("QQ_ALLOW_ALL_USERS", "false")
+        save_env_value("QQ_ALLOWED_USERS", allowlist)
+        print_success("  Allowlist saved.")
+
+    # ── Home channel ──
+    if user_openid:
+        print()
+        if prompt_yes_no(f"  Use your QQ user ID ({user_openid}) as the home channel?", True):
+            save_env_value("QQBOT_HOME_CHANNEL", user_openid)
+            print_success(f"  Home channel set to {user_openid}")
+    else:
+        print()
+        home_channel = prompt("  Home channel OpenID (for cron/notifications, or empty)", password=False)
+        if home_channel:
+            save_env_value("QQBOT_HOME_CHANNEL", home_channel.strip())
+            print_success(f"  Home channel set to {home_channel.strip()}")
+
+    print()
+    print_success("🐧 QQ Bot configured!")
+    print_info(f"  App ID: {credentials['app_id']}")
+
+
+def _qqbot_render_qr(url: str) -> bool:
+    """Try to render a QR code in the terminal. Returns True if successful."""
+    try:
+        import qrcode as _qr
+        qr = _qr.QRCode(border=1,error_correction=_qr.constants.ERROR_CORRECT_L)
+        qr.add_data(url)
+        qr.make(fit=True)
+        qr.print_ascii(invert=True)
+        return True
+    except Exception:
+        return False
+
+
+def _qqbot_qr_flow():
+    """Run the QR-code scan-to-configure flow.
+
+    Returns a dict with app_id, client_secret, user_openid on success,
+    or None on failure/cancel.
+    """
+    try:
+        from gateway.platforms.qqbot import (
+            create_bind_task, poll_bind_result, build_connect_url,
+            decrypt_secret, BindStatus,
+        )
+        from gateway.platforms.qqbot.constants import ONBOARD_POLL_INTERVAL
+    except Exception as exc:
+        print_error(f"  QQBot onboard import failed: {exc}")
+        return None
+
+    import asyncio
+    import time
+
+    MAX_REFRESHES = 3
+    refresh_count = 0
+
+    while refresh_count <= MAX_REFRESHES:
+        loop = asyncio.new_event_loop()
+
+        # ── Create bind task ──
+        try:
+            task_id, aes_key = loop.run_until_complete(create_bind_task())
+        except Exception as e:
+            print_warning(f"  Failed to create bind task: {e}")
+            loop.close()
+            return None
+
+        url = build_connect_url(task_id)
+
+        # ── Display QR code + URL ──
+        print()
+        if _qqbot_render_qr(url):
+            print(f"  Scan the QR code above, or open this URL directly:\n  {url}")
+        else:
+            print(f"  Open this URL in QQ on your phone:\n  {url}")
+            print_info("  Tip: pip install qrcode  to show a scannable QR code here")
+
+        # ── Poll loop (silent — keep QR visible at bottom) ──
+        try:
+            while True:
+                try:
+                    status, app_id, encrypted_secret, user_openid = loop.run_until_complete(
+                        poll_bind_result(task_id)
+                    )
+                except Exception:
+                    time.sleep(ONBOARD_POLL_INTERVAL)
+                    continue
+
+                if status == BindStatus.COMPLETED:
+                    client_secret = decrypt_secret(encrypted_secret, aes_key)
+                    print()
+                    print_success(f"  QR scan complete! (App ID: {app_id})")
+                    if user_openid:
+                        print_info(f"  Scanner's OpenID: {user_openid}")
+                    return {
+                        "app_id": app_id,
+                        "client_secret": client_secret,
+                        "user_openid": user_openid,
+                    }
+
+                if status == BindStatus.EXPIRED:
+                    refresh_count += 1
+                    if refresh_count > MAX_REFRESHES:
+                        print()
+                        print_warning(f"  QR code expired {MAX_REFRESHES} times — giving up.")
+                        return None
+                    print()
+                    print_warning(f"  QR code expired, refreshing... ({refresh_count}/{MAX_REFRESHES})")
+                    loop.close()
+                    break  # outer while creates a new task
+
+                time.sleep(ONBOARD_POLL_INTERVAL)
+        except KeyboardInterrupt:
+            loop.close()
+            raise
+        finally:
+            loop.close()
+
+    return None
+
+
 def _setup_signal():
     """Interactive setup for Signal messenger."""
     import shutil
@@ -2749,8 +3158,12 @@ def gateway_setup():
             _setup_signal()
         elif platform["key"] == "weixin":
             _setup_weixin()
+        elif platform["key"] == "dingtalk":
+            _setup_dingtalk()
         elif platform["key"] == "feishu":
             _setup_feishu()
+        elif platform["key"] == "qqbot":
+            _setup_qqbot()
         else:
             _setup_standard_platform(platform)
 
@@ -3110,15 +3523,18 @@ def gateway_command(args):
     elif subcmd == "status":
         deep = getattr(args, 'deep', False)
         system = getattr(args, 'system', False)
+        snapshot = get_gateway_runtime_snapshot(system=system)
         
         # Check for service first
         if supports_systemd_services() and (get_systemd_unit_path(system=False).exists() or get_systemd_unit_path(system=True).exists()):
             systemd_status(deep, system=system)
+            _print_gateway_process_mismatch(snapshot)
         elif is_macos() and get_launchd_plist_path().exists():
             launchd_status(deep)
+            _print_gateway_process_mismatch(snapshot)
         else:
             # Check for manually running processes
-            pids = find_gateway_pids()
+            pids = list(snapshot.gateway_pids)
             if pids:
                 print(f"✓ Gateway is running (PID: {', '.join(map(str, pids))})")
                 print("  (Running manually, not as a system service)")
