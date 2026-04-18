@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
+</p>
+
+<p align="center">
+  <a href="README.md">EN</a> | <a href="README_CN.md">中文</a>
+</p>
+
 # Hermes Agent ☤ 中文版
 
 <p align="center">
@@ -168,6 +176,122 @@ export HTTPS_PROXY=http://127.0.0.1:7890
 # 或在 hermes 中配置
 hermes config set http_proxy http://127.0.0.1:7890
 ```
+
+---
+
+## 🏰 MemPalace + 📊 graphify 集成
+
+Hermes 可集成 [MemPalace](https://github.com/MemPalace/mempalace)（结构化记忆系统）和 [graphify](https://github.com/safishamsi/graphify)（代码知识图谱），实现跨会话持久记忆和代码库智能理解。**两者均完全本地运行，无需云服务。**
+
+### MemPalace — AI 记忆系统
+
+MemPalace 通过 MCP 协议提供 29 个工具，让 Hermes 在对话中自动存取记忆。
+
+**核心特性：**
+- 🏰 **宫殿结构化记忆**：Wing（人/项目）→ Room（主题）→ Hall（概念类别）→ Drawer（原文）
+- 💾 **原始逐字存储**：96.6% LongMemEval 得分，零 API 调用
+- 🕸️ **知识图谱**：SQLite 存储时间有效性实体关系，支持 add/query/invalidate/timeline
+- 🔧 **29 个 MCP 工具**：搜索、写入、图谱查询、日记、隧道连接等
+
+**安装：**
+
+```bash
+# 安装
+pip install mempalace    # v3.3.0
+
+# 初始化
+mempalace init ~/.mempalace --yes
+
+# 配置 Hermes MCP（编辑 ~/.hermes/config.yaml）
+```
+
+在 `~/.hermes/config.yaml` 中添加：
+
+```yaml
+mcp_servers:
+  mempalace:
+    command: /path/to/venv/bin/python   # 用完整路径
+    args:
+      - -m
+      - mempalace.mcp_server
+    env: {}
+```
+
+**验证：**
+
+```bash
+hermes mcp test mempalace
+# ✓ Connected (1162ms) | 29 tools discovered
+```
+
+**使用示例：**
+
+```
+你: 我们上个月关于认证方案做了什么决策？
+
+Hermes: [自动调用 mempalace_search]
+根据记忆记录，团队在 2025-03-15 决定：
+- 从 Auth0 迁移到 Clerk，成本降低 40%
+- Maya 负责实施迁移
+```
+
+### graphify — 代码知识图谱
+
+graphify 通过 Hermes Skill 集成，用 `/graphify` 命令触发，自动构建代码库知识图谱。
+
+**核心特性：**
+- 📊 **多模态提取**：代码、文档、PDF、图片、视频、音频
+- 🔄 **三阶段处理**：AST 提取 → Whisper 转录 → Claude 子代理并行提取
+- 📈 **71.5x** 查询 token 减少对比读原文件
+- 🎨 **生成产物**：交互式图谱 (HTML)、可查询 JSON、审计报告 (MD)
+
+**安装：**
+
+```bash
+# 注意：PyPI 包名是 graphifyy（双 y）
+pip install graphifyy    # v0.4.18
+
+# 安装到 Hermes
+graphify install --platform hermes
+# → ~/.hermes/skills/graphify/SKILL.md
+```
+
+**验证：**
+
+```bash
+hermes skills list | grep graphify
+# graphify │ local │ local
+```
+
+**使用：**
+
+```
+/graphify .                    # 分析当前目录
+/graphify ./src                # 分析特定目录
+/graphify . --update           # 增量更新
+/graphify query "auth flow"    # 查询图谱
+```
+
+**输出产物：**
+
+```
+graphify-out/
+├── graph.html          # 交互式图谱（浏览器打开）
+├── graph.json          # 可查询 JSON
+├── GRAPH_REPORT.md     # 审计报告
+└── cache/              # SHA256 缓存（增量更新）
+```
+
+### 组合使用场景
+
+| 场景 | MemPalace | graphify |
+|------|-----------|----------|
+| 新项目开发 | 记录设计决策 | 理解代码结构 |
+| 代码审查 | 追溯历史讨论 | 快速定位相关文件 |
+| 技术调研 | 整理调研笔记 | 建立知识图谱 |
+| 团队协作 | 共享决策记忆 | 统一代码理解 |
+
+> 📖 详细的安装步骤、故障排查和最佳实践见 [Hermes集成指南_MemPalace与graphify.md](Hermes集成指南_MemPalace与graphify.md)
 
 ---
 
