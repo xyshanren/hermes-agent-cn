@@ -175,14 +175,14 @@ def run_doctor(args):
     
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│                 🩺 Hermes Doctor                        │", Colors.CYAN))
+    print(color("│                 🩺 Hermes 诊断工具                      │", Colors.CYAN))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
     
     # =========================================================================
     # Check: Python version
     # =========================================================================
     print()
-    print(color("◆ Python Environment", Colors.CYAN, Colors.BOLD))
+    print(color("◆ Python 环境", Colors.CYAN, Colors.BOLD))
     
     py_version = sys.version_info
     if py_version >= (3, 11):
@@ -207,7 +207,7 @@ def run_doctor(args):
     # Check: Required packages
     # =========================================================================
     print()
-    print(color("◆ Required Packages", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 必需的包", Colors.CYAN, Colors.BOLD))
     
     required_packages = [
         ("openai", "OpenAI SDK"),
@@ -242,7 +242,7 @@ def run_doctor(args):
     # Check: Configuration files
     # =========================================================================
     print()
-    print(color("◆ Configuration Files", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 配置文件", Colors.CYAN, Colors.BOLD))
     
     # Check ~/.hermes/.env (primary location for user config)
     env_path = HERMES_HOME / '.env'

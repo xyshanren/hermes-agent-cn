@@ -529,35 +529,35 @@ class ProviderEntry(NamedTuple):
 
 
 CANONICAL_PROVIDERS: list[ProviderEntry] = [
-    ProviderEntry("nous",           "Nous Portal",              "Nous Portal (Nous Research subscription)"),
-    ProviderEntry("openrouter",     "OpenRouter",               "OpenRouter (100+ models, pay-per-use)"),
-    ProviderEntry("anthropic",      "Anthropic",                "Anthropic (Claude models — API key or Claude Code)"),
+    ProviderEntry("nous",           "Nous Portal",              "Nous Portal（Nous Research 订阅服务）"),
+    ProviderEntry("openrouter",     "OpenRouter",               "OpenRouter（100+ 模型，按量付费）"),
+    ProviderEntry("anthropic",      "Anthropic",                "Anthropic（Claude 系列模型 — API Key 或 Claude Code）"),
     ProviderEntry("openai-codex",   "OpenAI Codex",             "OpenAI Codex"),
-    ProviderEntry("xiaomi",         "Xiaomi MiMo",              "Xiaomi MiMo (MiMo-V2 models — pro, omni, flash)"),
-    ProviderEntry("qwen-oauth",     "Qwen OAuth (Portal)",      "Qwen OAuth (reuses local Qwen CLI login)"),
+    ProviderEntry("xiaomi",         "小米 MiMo",              "小米 MiMo（MiMo-V2 系列 — pro、omni、flash）"),
+    ProviderEntry("qwen-oauth",     "通义千问 OAuth（Portal）",  "通义千问 OAuth（复用本地 Qwen CLI 登录）"),
     ProviderEntry("copilot",        "GitHub Copilot",           "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
     ProviderEntry("copilot-acp",    "GitHub Copilot ACP",       "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
-    ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face Inference Providers (20+ open models)"),
-    ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio (Gemini models — OpenAI-compatible endpoint)"),
-    ProviderEntry("deepseek",       "DeepSeek",                 "DeepSeek (DeepSeek-V3, R1, coder — direct API)"),
+    ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face 推理服务（20+ 开源模型）"),
+    ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio（Gemini 系列 — OpenAI 兼容接口）"),
+    ProviderEntry("deepseek",       "DeepSeek",                 "DeepSeek（DeepSeek-V3、R1、coder 系列 — 直连 API）"),
     ProviderEntry("xai",            "xAI",                      "xAI (Grok models — direct API)"),
-    ProviderEntry("zai",            "Z.AI / GLM",               "Z.AI / GLM (Zhipu AI direct API)"),
-    ProviderEntry("kimi-coding",    "Kimi / Kimi Coding Plan",  "Kimi Coding Plan (api.kimi.com) & Moonshot API"),
-    ProviderEntry("kimi-coding-cn", "Kimi / Moonshot (China)",  "Kimi / Moonshot China (Moonshot CN direct API)"),
-    ProviderEntry("minimax",        "MiniMax",                  "MiniMax (global direct API)"),
-    ProviderEntry("minimax-cn",     "MiniMax (China)",          "MiniMax China (domestic direct API)"),
-    ProviderEntry("alibaba",        "Alibaba Cloud (DashScope)","Alibaba Cloud / DashScope Coding (Qwen + multi-provider)"),
+    ProviderEntry("zai",            "智谱 AI / GLM",           "Z.AI / GLM（智谱 AI 直连 API）"),
+    ProviderEntry("kimi-coding",    "Kimi / Moonshot",         "Kimi Coding 套餐（api.kimi.com）及 Moonshot API"),
+    ProviderEntry("kimi-coding-cn", "Kimi / Moonshot（国内）",  "Kimi / Moonshot 国内版（Moonshot CN 直连 API）"),
+    ProviderEntry("minimax",        "MiniMax",                  "MiniMax（国际版直连 API）"),
+    ProviderEntry("minimax-cn",     "MiniMax（国内）",          "MiniMax 国内版（境内直连 API）"),
+    ProviderEntry("alibaba",        "阿里云（DashScope）",      "阿里云 / DashScope 编程助手（通义千问 + 多厂商模型）"),
     ProviderEntry("arcee",          "Arcee AI",                 "Arcee AI (Trinity models — direct API)"),
     ProviderEntry("kilocode",       "Kilo Code",                "Kilo Code (Kilo Gateway API)"),
     ProviderEntry("opencode-zen",   "OpenCode Zen",             "OpenCode Zen (35+ curated models, pay-as-you-go)"),
     ProviderEntry("opencode-go",    "OpenCode Go",              "OpenCode Go (open models, $10/month subscription)"),
     ProviderEntry("ai-gateway",     "Vercel AI Gateway",        "Vercel AI Gateway (200+ models, pay-per-use)"),
-    ProviderEntry("bedrock",        "AWS Bedrock",              "AWS Bedrock (Claude, Nova, Llama, DeepSeek — IAM or API key)"),
+    ProviderEntry("bedrock",        "AWS Bedrock",              "AWS Bedrock（Claude、Nova、Llama、DeepSeek — IAM 或 API Key）"),
 ]
 
 # Derived dicts — used throughout the codebase
 _PROVIDER_LABELS = {p.slug: p.label for p in CANONICAL_PROVIDERS}
-_PROVIDER_LABELS["custom"] = "Custom endpoint"  # special case: not a named provider
+_PROVIDER_LABELS["custom"] = "自定义端点"  # special case: not a named provider
 
 _PROVIDER_ALIASES = {
     "glm": "zai",

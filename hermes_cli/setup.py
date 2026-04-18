@@ -176,19 +176,19 @@ def is_interactive_stdin() -> bool:
 def print_noninteractive_setup_guidance(reason: str | None = None) -> None:
     """Print guidance for headless/non-interactive setup flows."""
     print()
-    print(color("⚕ Hermes Setup — Non-interactive mode", Colors.CYAN, Colors.BOLD))
+    print(color("⚕ Hermes 安装向导 — 非交互模式", Colors.CYAN, Colors.BOLD))
     print()
     if reason:
         print_info(reason)
-    print_info("The interactive wizard cannot be used here.")
+    print_info("交互式向导无法在此环境下使用。")
     print()
-    print_info("Configure Hermes using environment variables or config commands:")
+    print_info("请通过环境变量或配置命令来配置 Hermes：")
     print_info("  hermes config set model.provider custom")
     print_info("  hermes config set model.base_url http://localhost:8080/v1")
     print_info("  hermes config set model.default your-model-name")
     print()
-    print_info("Or set OPENROUTER_API_KEY / OPENAI_API_KEY in your environment.")
-    print_info("Run 'hermes setup' in an interactive terminal to use the full wizard.")
+    print_info("或者在环境中设置 OPENROUTER_API_KEY / OPENAI_API_KEY。")
+    print_info("请在交互式终端中运行 'hermes setup' 来使用完整向导。")
     print()
 
 
@@ -518,7 +518,7 @@ def _print_setup_summary(config: dict, hermes_home):
     )
     print(
         color(
-            "│              ✓ Setup Complete!                          │", Colors.GREEN
+            "│              ✓ 配置完成！                              │", Colors.GREEN
         )
     )
     print(
@@ -541,33 +541,33 @@ def _print_setup_summary(config: dict, hermes_home):
 
     print(color("─" * 60, Colors.DIM))
     print()
-    print(color("📝 To edit your configuration:", Colors.CYAN, Colors.BOLD))
+    print(color("📝 修改配置：", Colors.CYAN, Colors.BOLD))
     print()
-    print(f"   {color('hermes setup', Colors.GREEN)}          Re-run the full wizard")
-    print(f"   {color('hermes setup model', Colors.GREEN)}    Change model/provider")
-    print(f"   {color('hermes setup terminal', Colors.GREEN)} Change terminal backend")
-    print(f"   {color('hermes setup gateway', Colors.GREEN)}  Configure messaging")
-    print(f"   {color('hermes setup tools', Colors.GREEN)}    Configure tool providers")
+    print(f"   {color('hermes setup', Colors.GREEN)}          重新运行安装向导")
+    print(f"   {color('hermes setup model', Colors.GREEN)}    更换模型/提供商")
+    print(f"   {color('hermes setup terminal', Colors.GREEN)} 更换终端后端")
+    print(f"   {color('hermes setup gateway', Colors.GREEN)}  配置消息平台")
+    print(f"   {color('hermes setup tools', Colors.GREEN)}    配置工具提供商")
     print()
-    print(f"   {color('hermes config', Colors.GREEN)}         View current settings")
+    print(f"   {color('hermes config', Colors.GREEN)}         查看当前配置")
     print(
-        f"   {color('hermes config edit', Colors.GREEN)}    Open config in your editor"
+        f"   {color('hermes config edit', Colors.GREEN)}    在编辑器中打开配置文件"
     )
     print(f"   {color('hermes config set <key> <value>', Colors.GREEN)}")
-    print("                          Set a specific value")
+    print("                                 设置指定值")
     print()
-    print("   Or edit the files directly:")
+    print("   也可以直接编辑配置文件：")
     print(f"   {color(f'nano {get_config_path()}', Colors.DIM)}")
     print(f"   {color(f'nano {get_env_path()}', Colors.DIM)}")
     print()
 
     print(color("─" * 60, Colors.DIM))
     print()
-    print(color("🚀 Ready to go!", Colors.CYAN, Colors.BOLD))
+    print(color("🚀 准备就绪！", Colors.CYAN, Colors.BOLD))
     print()
-    print(f"   {color('hermes', Colors.GREEN)}              Start chatting")
-    print(f"   {color('hermes gateway', Colors.GREEN)}      Start messaging gateway")
-    print(f"   {color('hermes doctor', Colors.GREEN)}       Check for issues")
+    print(f"   {color('hermes', Colors.GREEN)}              开始对话")
+    print(f"   {color('hermes gateway', Colors.GREEN)}      启动消息网关")
+    print(f"   {color('hermes doctor', Colors.GREEN)}       检查配置问题")
     print()
 
 
@@ -636,9 +636,9 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     """
     from hermes_cli.config import load_config, save_config
 
-    print_header("Inference Provider")
-    print_info("Choose how to connect to your main chat model.")
-    print_info(f"   Guide: {_DOCS_BASE}/integrations/providers")
+    print_header("推理模型提供商")
+    print_info("选择如何连接到你的主聊天模型。")
+    print_info(f"   参考文档: {_DOCS_BASE}/integrations/providers")
     print()
 
     # Delegate to the shared hermes model flow — handles provider picker,
@@ -1059,10 +1059,10 @@ def setup_terminal_backend(config: dict):
     import platform as _platform
     import shutil
 
-    print_header("Terminal Backend")
-    print_info("Choose where Hermes runs shell commands and code.")
-    print_info("This affects tool execution, file access, and isolation.")
-    print_info(f"   Guide: {_DOCS_BASE}/developer-guide/environments")
+    print_header("终端后端")
+    print_info("选择 Hermes 运行 Shell 命令和代码的环境。")
+    print_info("这会影响工具执行、文件访问和隔离性。")
+    print_info(f"   参考文档: {_DOCS_BASE}/developer-guide/environments")
     print()
 
     current_backend = config.get("terminal", {}).get("backend", "local")
@@ -1425,8 +1425,8 @@ def _apply_default_agent_settings(config: dict):
 def setup_agent_settings(config: dict):
     """Configure agent behavior: iterations, progress display, compression, session reset."""
 
-    print_header("Agent Settings")
-    print_info(f"   Guide: {_DOCS_BASE}/user-guide/configuration")
+    print_header("Agent 设置")
+    print_info(f"   参考文档: {_DOCS_BASE}/user-guide/configuration")
     print()
 
     # ── Max Iterations ──
@@ -2171,9 +2171,9 @@ _GATEWAY_PLATFORMS = [
 
 def setup_gateway(config: dict):
     """Configure messaging platform integrations."""
-    print_header("Messaging Platforms")
-    print_info("Connect to messaging platforms to chat with Hermes from anywhere.")
-    print_info("Toggle with Space, confirm with Enter.")
+    print_header("消息平台")
+    print_info("连接消息平台，随时随地与 Hermes 对话。")
+    print_info("使用空格键切换，回车确认。")
     print()
 
     # Build checklist items, pre-selecting already-configured platforms
@@ -2841,7 +2841,7 @@ def run_setup_wizard(args):
     )
     print(
         color(
-            "│             ⚕ Hermes Agent Setup Wizard                │", Colors.MAGENTA
+            "│             ⚕ Hermes Agent 安装向导                    │", Colors.MAGENTA
         )
     )
     print(
@@ -2852,12 +2852,12 @@ def run_setup_wizard(args):
     )
     print(
         color(
-            "│  Let's configure your Hermes Agent installation.       │", Colors.MAGENTA
+            "│  让我们来配置你的 Hermes Agent。                      │", Colors.MAGENTA
         )
     )
     print(
         color(
-            "│  Press Ctrl+C at any time to exit.                     │", Colors.MAGENTA
+            "│  随时按 Ctrl+C 退出。                                  │", Colors.MAGENTA
         )
     )
     print(
@@ -2872,21 +2872,21 @@ def run_setup_wizard(args):
     if is_existing:
         # ── Returning User Menu ──
         print()
-        print_header("Welcome Back!")
-        print_success("You already have Hermes configured.")
+        print_header("欢迎回来！")
+        print_success("你已经配置过 Hermes 了。")
         print()
 
         menu_choices = [
-            "Quick Setup - configure missing items only",
-            "Full Setup - reconfigure everything",
-            "Model & Provider",
-            "Terminal Backend",
-            "Messaging Platforms (Gateway)",
-            "Tools",
-            "Agent Settings",
-            "Exit",
+            "快速配置 - 仅配置缺失项",
+            "完整配置 - 重新配置所有项",
+            "模型与提供商",
+            "终端后端",
+            "消息平台（网关）",
+            "工具配置",
+            "Agent 设置",
+            "退出",
         ]
-        choice = prompt_choice("What would you like to do?", menu_choices, 0)
+        choice = prompt_choice("你想做什么？", menu_choices, 0)
 
         if choice == 0:
             # Quick setup
@@ -2896,7 +2896,7 @@ def run_setup_wizard(args):
             # Full setup — fall through to run all sections
             pass
         elif choice == 7:
-            print_info("Exiting. Run 'hermes setup' again when ready.")
+            print_info("已退出。需要时再运行 'hermes setup'。")
             return
         elif 2 <= choice <= 6:
             # Individual section — map by key, not by position.
