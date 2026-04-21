@@ -2,6 +2,10 @@ import type { InputEvent, Key } from '@hermes/ink'
 import * as Ink from '@hermes/ink'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { setInputSelection } from '../app/inputSelectionStore.js'
+import { readClipboardText, writeClipboardText } from '../lib/clipboard.js'
+import { isActionMod, isMac } from '../lib/platform.js'
+
 type InkExt = typeof Ink & {
   stringWidth: (s: string) => number
   useDeclaredCursor: (a: { line: number; column: number; active: boolean }) => (el: any) => void
@@ -351,6 +355,28 @@ export function TextInput({
     }
   }, [value])
 
+  useEffect(() => {
+    if (!focus) {
+      return
+    }
+
+    if (selected) {
+      setInputSelection({
+        clear: () => {
+          selRef.current = null
+          setSel(null)
+        },
+        end: selected.end,
+        start: selected.start,
+        value: vRef.current
+      })
+    } else {
+      setInputSelection(null)
+    }
+
+    return () => setInputSelection(null)
+  }, [focus, selected])
+
   useEffect(
     () => () => {
       if (pasteTimer.current) {
@@ -460,12 +486,52 @@ export function TextInput({
 
   const ins = (v: string, c: number, s: string) => v.slice(0, c) + s + v.slice(c)
 
+  const pastePlainText = (text: string) => {
+    const cleaned = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+    if (!cleaned) {
+      return
+    }
+
+    const range = selRange()
+    const nextValue = range
+      ? vRef.current.slice(0, range.start) + cleaned + vRef.current.slice(range.end)
+      : vRef.current.slice(0, curRef.current) + cleaned + vRef.current.slice(curRef.current)
+    const nextCursor = range ? range.start + cleaned.length : curRef.current + cleaned.length
+
+    commit(nextValue, nextCursor)
+  }
+
   useInput(
     (inp: string, k: Key, event: InputEvent) => {
       const eventRaw = event.keypress.raw
 
-      if (eventRaw === '\x1bv' || eventRaw === '\x1bV') {
-        return void emitPaste({ cursor: curRef.current, hotkey: true, text: '', value: vRef.current })
+      if (eventRaw === '\x1bv' || eventRaw === '\x1bV' || eventRaw === '\x16' || (isMac && k.meta && inp.toLowerCase() === 'v')) {
+        if (cbPaste.current) {
+          return void emitPaste({ cursor: curRef.current, hotkey: true, text: '', value: vRef.current })
+        }
+
+        if (isMac) {
+          void readClipboardText().then(text => {
+            if (text) {
+              pastePlainText(text)
+            }
+          })
+        }
+
+        return
+      }
+
+      if (isMac && k.meta && inp.toLowerCase() === 'c') {
+        const range = selRange()
+
+        if (range) {
+          const text = vRef.current.slice(range.start, range.end)
+
+          void writeClipboardText(text)
+        }
+
+        return
       }
 
       if (
@@ -491,26 +557,26 @@ export function TextInput({
 
       let c = curRef.current
       let v = vRef.current
-      const mod = k.ctrl || k.meta
+      const mod = isActionMod(k)
       const range = selRange()
       const delFwd = k.delete || fwdDel.current
 
-      if (k.ctrl && inp === 'z') {
+      if (mod && inp === 'z') {
         return swap(undo, redo)
       }
 
-      if ((k.ctrl && inp === 'y') || (k.meta && k.shift && inp === 'z')) {
+      if ((mod && inp === 'y') || (mod && k.shift && inp === 'z')) {
         return swap(redo, undo)
       }
 
-      if (k.ctrl && inp === 'a') {
+      if (mod && inp === 'a') {
         return selectAll()
       }
 
       if (k.home) {
         clearSel()
         c = 0
-      } else if (k.end || (k.ctrl && inp === 'e')) {
+      } else if (k.end || (mod && inp === 'e')) {
         clearSel()
         c = v.length
       } else if (k.leftArrow) {
@@ -529,10 +595,10 @@ export function TextInput({
           clearSel()
           c = mod ? wordRight(v, c) : nextPos(v, c)
         }
-      } else if (k.meta && inp === 'b') {
+      } else if (mod && inp === 'b') {
         clearSel()
         c = wordLeft(v, c)
-      } else if (k.meta && inp === 'f') {
+      } else if (mod && inp === 'f') {
         clearSel()
         c = wordRight(v, c)
       } else if (range && (k.backspace || delFwd)) {
@@ -555,7 +621,7 @@ export function TextInput({
         } else {
           v = v.slice(0, c) + v.slice(nextPos(v, c))
         }
-      } else if (k.ctrl && inp === 'w') {
+      } else if (mod && inp === 'w') {
         if (range) {
           v = v.slice(0, range.start) + v.slice(range.end)
           c = range.start
@@ -567,7 +633,7 @@ export function TextInput({
         } else {
           return
         }
-      } else if (k.ctrl && inp === 'u') {
+      } else if (mod && inp === 'u') {
         if (range) {
           v = v.slice(0, range.start) + v.slice(range.end)
           c = range.start
@@ -575,7 +641,7 @@ export function TextInput({
           v = v.slice(c)
           c = 0
         }
-      } else if (k.ctrl && inp === 'k') {
+      } else if (mod && inp === 'k') {
         if (range) {
           v = v.slice(0, range.start) + v.slice(range.end)
           c = range.start
@@ -646,6 +712,15 @@ export function TextInput({
         const next = offsetFromPosition(display, e.localRow ?? 0, e.localCol ?? 0, columns)
         setCur(next)
         curRef.current = next
+      }}
+      onMouseDown={(e: { button: number }) => {
+        // Right-click to paste: route through the same hotkey path as
+        // Alt+V so the composer's clipboard RPC (text or image) handles it.
+        if (!focus || e.button !== 2) {
+          return
+        }
+
+        emitPaste({ cursor: curRef.current, hotkey: true, text: '', value: vRef.current })
       }}
       ref={boxRef}
     >
