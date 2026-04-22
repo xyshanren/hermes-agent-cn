@@ -224,11 +224,19 @@ npm run tauri build
 
 **前置条件：**
 - WSL2 中已安装 Hermes Agent 并配置 API Server
-- `.env` 中设置 `API_SERVER_ENABLED=true`、`API_SERVER_HOST=0.0.0.0`、`API_SERVER_KEY=hermes-local-dev-key`
+- 在 Hermes Agent 的 `.env` 文件（位于 WSL2 的 `~/.hermes/` 或项目目录）中设置：
+  ```bash
+  API_SERVER_ENABLED=true
+  API_SERVER_HOST=0.0.0.0
+  API_SERVER_KEY=hermes-local-dev-key
+  ```
 
 **配置 WSL 发行版：**
 
-如果你的 WSL2 发行版不是默认的 `Ubuntu-24.04.4`，在 exe 同目录下创建 `config.json`：
+如果你的 WSL2 发行版不是默认的 `Ubuntu-24.04.4`，在 Hermes Tray 安装目录（exe 文件所在目录）下创建 `config.json`：
+
+- **安装版：** 安装目录，如 `C:\Program Files\Hermes Tray\` 或用户选择的安装路径
+- **便携版：** exe 文件所在文件夹
 
 ```json
 {
