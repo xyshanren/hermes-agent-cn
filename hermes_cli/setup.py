@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from hermes_cli.nous_subscription import (
-    apply_nous_provider_defaults,
+    apply_nous_managed_defaults,
     get_nous_subscription_features,
 )
 from tools.tool_backend_helpers import managed_nous_tools_enabled
@@ -836,7 +836,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
 
 
     if selected_provider == "nous" and nous_subscription_selected:
-        changed_defaults = apply_nous_provider_defaults(config)
+        changed_defaults = apply_nous_managed_defaults(config)
         current_tts = str(config.get("tts", {}).get("provider") or "edge")
         if "tts" in changed_defaults:
             print_success("TTS provider set to: OpenAI TTS via your Nous subscription")

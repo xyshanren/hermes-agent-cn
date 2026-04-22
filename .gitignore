@@ -68,3 +68,8 @@ mini-swe-agent/
 .nix-stamps/
 result
 website/static/api/skills-index.json
+
+# Runtime artifacts
+entities.json
+graphify-out/
+mempalace.yaml

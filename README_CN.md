@@ -180,6 +180,47 @@ hermes config set http_proxy http://127.0.0.1:7890
 
 ---
 
+## 🖥️ Hermes Tray 桌面端
+
+Hermes Tray 是 Hermes Agent 的 Windows 原生桌面客户端，基于 Tauri 2 构建。提供系统托盘集成和内置聊天界面，无需浏览器即可与 Hermes 对话。
+
+**架构：**
+
+```
+Windows 桌面 (Tauri 2 WebView)
+  │
+  ├─ 系统托盘 ─ 启动/停止 Gateway，状态指示
+  ├─ 聊天界面 ─ 内嵌 WebView，流式对话
+  │
+  └─ Rust 代理层 ─→ Hermes Gateway (WSL2)
+                      http://<wsl-ip>:8642
+```
+
+**功能：**
+- 🔔 系统托盘：启动/停止 Hermes Gateway，实时连接状态
+- 💬 聊天 UI：流式 SSE 对话，支持 OpenAI 兼容 API
+- 🔗 WSL2 自动检测：自动发现 WSL2 实例 IP，无需手动配置
+- 🔒 本地通信：所有数据不离开本机，Rust 层直接代理请求
+
+**安装：**
+
+```bash
+# 从源码构建（需要 Node.js 18+）
+git clone https://github.com/xyshanren/hermes-agent-cn.git
+cd hermes-agent-cn/hermes-tray
+npm install
+npm run tauri build
+# 输出：src-tauri/target/release/hermes-tray-tauri.exe (~83MB)
+```
+
+**前置条件：**
+- WSL2 中已安装 Hermes Agent 并配置 API Server
+- `.env` 中设置 `API_SERVER_ENABLED=true`、`API_SERVER_HOST=0.0.0.0`、`API_SERVER_KEY=hermes-local-dev-key`
+
+> ⚠️ Hermes Tray 目前处于 Phase 1 阶段，基本聊天功能可用。Phase 2 将支持本地模型运行时下载、更多 UI 功能。
+
+---
+
 ## 🏰 MemPalace + 📊 graphify 集成
 
 Hermes 可集成 [MemPalace](https://github.com/MemPalace/mempalace)（结构化记忆系统）和 [graphify](https://github.com/safishamsi/graphify)（代码知识图谱），实现跨会话持久记忆和代码库智能理解。**两者均完全本地运行，无需云服务。**
