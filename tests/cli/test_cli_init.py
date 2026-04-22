@@ -320,6 +320,34 @@ class TestHistoryDisplay:
         assert "Use /resume" in output
         assert "session title" in output
 
+    def test_resume_list_shows_full_long_titles(self, capsys):
+        """Long session titles render in full in the /resume table — not
+        truncated to 30 chars (fixes #14082)."""
+        cli = _make_cli()
+        cli.session_id = "current"
+        cli._session_db = MagicMock()
+        long_title = "Salvage BytePlus Volcengine PR With Fixes"
+        cli._session_db.list_sessions_rich.return_value = [
+            {
+                "id": "current",
+                "title": "Current",
+                "preview": "Current preview",
+                "last_active": 0,
+            },
+            {
+                "id": "20260401_201329_d85961",
+                "title": long_title,
+                "preview": "fix byteplus pr and resume",
+                "last_active": 0,
+            },
+        ]
+
+        cli._handle_resume_command("/resume")
+        output = capsys.readouterr().out
+
+        assert long_title in output
+        assert "20260401_201329_d85961" in output
+
     def test_sessions_command_no_args_lists_recent_sessions(self, capsys):
         """/sessions with no args prints the recent-sessions table (TUI parity).
 
