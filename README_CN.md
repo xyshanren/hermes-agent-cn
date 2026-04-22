@@ -184,6 +184,10 @@ hermes config set http_proxy http://127.0.0.1:7890
 
 Hermes Tray 是 Hermes Agent 的 Windows 原生桌面客户端，基于 Tauri 2 构建。提供系统托盘集成和内置聊天界面，无需浏览器即可与 Hermes 对话。
 
+**项目地址：** [https://github.com/xyshanren/hermes-tray](https://github.com/xyshanren/hermes-tray)
+
+---
+
 **架构：**
 
 ```
@@ -204,18 +208,35 @@ Windows 桌面 (Tauri 2 WebView)
 
 **安装：**
 
+从 [Releases](https://github.com/xyshanren/hermes-tray/releases) 下载最新安装包：
+- `hermes-tray-tauri_0.1.0_x64-setup.exe` — NSIS 安装包
+- `hermes-tray-tauri_0.1.0_x64_en-US.msi` — MSI 安装包
+
+或从源码构建（需要 Node.js 18+ 和 Rust）：
+
 ```bash
-# 从源码构建（需要 Node.js 18+）
-git clone https://github.com/xyshanren/hermes-agent-cn.git
-cd hermes-agent-cn/hermes-tray
+git clone https://github.com/xyshanren/hermes-tray.git
+cd hermes-tray
 npm install
 npm run tauri build
-# 输出：src-tauri/target/release/hermes-tray-tauri.exe (~83MB)
+# 输出：src-tauri/target/release/bundle/nsis/hermes-tray-tauri_0.1.0_x64-setup.exe
 ```
 
 **前置条件：**
 - WSL2 中已安装 Hermes Agent 并配置 API Server
 - `.env` 中设置 `API_SERVER_ENABLED=true`、`API_SERVER_HOST=0.0.0.0`、`API_SERVER_KEY=hermes-local-dev-key`
+
+**配置 WSL 发行版：**
+
+如果你的 WSL2 发行版不是默认的 `Ubuntu-24.04.4`，在 exe 同目录下创建 `config.json`：
+
+```json
+{
+  "wsl_distro": "你的发行版名称"
+}
+```
+
+例如 `Ubuntu-22.04` 或 `Debian`。程序会自动读取该文件，检测对应发行版的 IP 地址。
 
 > ⚠️ Hermes Tray 目前处于 Phase 1 阶段，基本聊天功能可用。Phase 2 将支持本地模型运行时下载、更多 UI 功能。
 
