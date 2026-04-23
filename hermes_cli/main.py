@@ -82,6 +82,35 @@ def _require_tty(command_name: str) -> None:
         sys.exit(1)
 
 
+def _import_model_manager_cmd(func_name: str):
+    """Lazy-load the model manager command handler to avoid slow startup.
+
+    The model_manager module imports heavier libraries (modelscope, faster-whisper)
+    that we don't want to load unless the user actually runs `hermes local-models`.
+    """
+    def wrapper(args):
+        from hermes_cli.model_manager import (
+            cmd_local_models_list,
+            cmd_local_models_install,
+            cmd_local_models_remove,
+            cmd_local_models_status,
+            cmd_local_models_test,
+        )
+        cmd_map = {
+            "cmd_local_models_list": cmd_local_models_list,
+            "cmd_local_models_install": cmd_local_models_install,
+            "cmd_local_models_remove": cmd_local_models_remove,
+            "cmd_local_models_status": cmd_local_models_status,
+            "cmd_local_models_test": cmd_local_models_test,
+        }
+        handler = cmd_map.get(func_name)
+        if handler:
+            return handler(args)
+        print(f"Unknown command: {func_name}")
+        return 1
+    return wrapper
+
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -6680,6 +6709,47 @@ For more help on a command:
         help="Disable TLS verification for Nous login (testing only)",
     )
     model_parser.set_defaults(func=cmd_model)
+
+    # =========================================================================
+    # local-models command
+    # =========================================================================
+    local_models_parser = subparsers.add_parser(
+        "local-models",
+        help="管理本地离线 AI 模型（STT/TTS/LLM）",
+        description="安装、查看、删除本地离线模型，无需网络即可运行语音识别、语音合成和降级 LLM。",
+    )
+    local_models_subparsers = local_models_parser.add_subparsers(dest="local_models_command", help="可用子命令")
+
+    # local-models list
+    lm_list = local_models_subparsers.add_parser("list", help="列出所有可用模型及安装状态")
+    lm_list.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_list")(args))
+
+    # local-models install
+    lm_install = local_models_subparsers.add_parser("install", help="下载并安装指定模型")
+    lm_install.add_argument("model", nargs="?", help="模型 ID（如 whisper-small, moss-tts-nano, qwen-coder-1.5b）")
+    lm_install.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="强制重新下载（覆盖已有文件）",
+    )
+    lm_install.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_install")(args))
+
+    # local-models remove
+    lm_remove = local_models_subparsers.add_parser("remove", help="删除已安装的模型")
+    lm_remove.add_argument("model", nargs="?", help="模型 ID")
+    lm_remove.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_remove")(args))
+
+    # local-models status
+    lm_status = local_models_subparsers.add_parser("status", help="显示各模型的详细状态和依赖检查")
+    lm_status.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_status")(args))
+
+    # local-models test
+    lm_test = local_models_subparsers.add_parser("test", help="测试模型是否能正常加载")
+    lm_test.add_argument("model", nargs="?", help="模型 ID")
+    lm_test.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_test")(args))
+
+    # local-models (default: show list)
+    local_models_parser.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_list")(args))
 
     # =========================================================================
     # gateway command
