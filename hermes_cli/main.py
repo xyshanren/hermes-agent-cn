@@ -2344,13 +2344,13 @@ def _model_flow_nous(config, current_model="", args=None):
     # The live /models endpoint returns hundreds of models; the curated list
     # shows only agentic models users recognize from OpenRouter.
     from hermes_cli.models import (
-        _PROVIDER_MODELS,
+        get_curated_nous_model_ids,
         get_pricing_for_provider,
         check_nous_free_tier,
         partition_nous_models_by_tier,
     )
 
-    model_ids = _PROVIDER_MODELS.get("nous", [])
+    model_ids = get_curated_nous_model_ids()
     if not model_ids:
         print("No curated models available for Nous Portal.")
         return
@@ -7252,6 +7252,9 @@ Examples:
     hermes auth remove <p> <t>    Remove pooled credential by index, id, or label
     hermes auth reset <provider>  Clear exhaustion status for a provider
     hermes model                  Select default model
+    hermes fallback [list]        Show fallback provider chain
+    hermes fallback add           Add a fallback provider (same picker as `hermes model`)
+    hermes fallback remove        Remove a fallback provider from the chain
     hermes config                 View configuration
     hermes config edit            Edit config in $EDITOR
     hermes config set model gpt-4 Set a config value

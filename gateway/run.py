@@ -881,23 +881,74 @@ class GatewayRunner:
             return
         if disabled:
             disabled_chats.add(chat_id)
+            # ``/voice off`` also clears any explicit enable — it's a hard override.
+            enabled_chats = getattr(adapter, "_auto_tts_enabled_chats", None)
+            if isinstance(enabled_chats, set):
+                enabled_chats.discard(chat_id)
         else:
             disabled_chats.discard(chat_id)
 
-    def _sync_voice_mode_state_to_adapter(self, adapter) -> None:
-        """Restore persisted /voice off state into a live platform adapter."""
-        disabled_chats = getattr(adapter, "_auto_tts_disabled_chats", None)
-        if not isinstance(disabled_chats, set):
+    def _set_adapter_auto_tts_enabled(self, adapter, chat_id: str, enabled: bool) -> None:
+        """Update an adapter's per-chat auto-TTS opt-in set if present.
+
+        Used for ``/voice on``/``/voice tts`` where the user explicitly wants
+        auto-TTS even when ``voice.auto_tts`` is False globally.
+        """
+        enabled_chats = getattr(adapter, "_auto_tts_enabled_chats", None)
+        if not isinstance(enabled_chats, set):
             return
+        if enabled:
+            enabled_chats.add(chat_id)
+            # An explicit opt-in clears any stale /voice off for this chat.
+            disabled_chats = getattr(adapter, "_auto_tts_disabled_chats", None)
+            if isinstance(disabled_chats, set):
+                disabled_chats.discard(chat_id)
+        else:
+            enabled_chats.discard(chat_id)
+
+    def _sync_voice_mode_state_to_adapter(self, adapter) -> None:
+        """Restore persisted /voice state into a live platform adapter.
+
+        Populates three fields from config + ``self._voice_mode``:
+          - ``_auto_tts_default``: global default from ``voice.auto_tts``
+          - ``_auto_tts_enabled_chats``: chats with mode ``voice_only``/``all``
+          - ``_auto_tts_disabled_chats``: chats with mode ``off``
+        """
         platform = getattr(adapter, "platform", None)
         if not isinstance(platform, Platform):
             return
-        disabled_chats.clear()
+
+        disabled_chats = getattr(adapter, "_auto_tts_disabled_chats", None)
+        enabled_chats = getattr(adapter, "_auto_tts_enabled_chats", None)
+        if not isinstance(disabled_chats, set) and not isinstance(enabled_chats, set):
+            return
+
+        # Push the global voice.auto_tts default (config.yaml) onto the adapter.
+        # Lazy import to avoid adding a module-level dep from gateway → hermes_cli.
+        try:
+            from hermes_cli.config import load_config as _load_full_config
+            _full_cfg = _load_full_config()
+            _auto_tts_default = bool(
+                (_full_cfg.get("voice") or {}).get("auto_tts", False)
+            )
+        except Exception:
+            _auto_tts_default = False
+        if hasattr(adapter, "_auto_tts_default"):
+            adapter._auto_tts_default = _auto_tts_default
+
         prefix = f"{platform.value}:"
-        disabled_chats.update(
-            key[len(prefix):] for key, mode in self._voice_mode.items()
-            if mode == "off" and key.startswith(prefix)
-        )
+        if isinstance(disabled_chats, set):
+            disabled_chats.clear()
+            disabled_chats.update(
+                key[len(prefix):] for key, mode in self._voice_mode.items()
+                if mode == "off" and key.startswith(prefix)
+            )
+        if isinstance(enabled_chats, set):
+            enabled_chats.clear()
+            enabled_chats.update(
+                key[len(prefix):] for key, mode in self._voice_mode.items()
+                if mode in ("voice_only", "all") and key.startswith(prefix)
+            )
 
     async def _safe_adapter_disconnect(self, adapter, platform) -> None:
         """Call adapter.disconnect() defensively, swallowing any error.
@@ -1578,6 +1629,27 @@ class GatewayRunner:
                 f"⚡ Interrupting current task{status_detail}. "
                 f"I'll respond to your message shortly."
             )
+
+        # First-touch onboarding: the very first time a user sends a message
+        # while the agent is busy, append a one-time hint explaining the
+        # queue/interrupt knob.  Flag is persisted to config.yaml so it never
+        # fires again on this install.
+        try:
+            from agent.onboarding import (
+                BUSY_INPUT_FLAG,
+                busy_input_hint_gateway,
+                is_seen,
+                mark_seen,
+            )
+            _user_cfg = _load_gateway_config()
+            if not is_seen(_user_cfg, BUSY_INPUT_FLAG):
+                message = (
+                    f"{message}\n\n"
+                    f"{busy_input_hint_gateway('queue' if is_queue_mode else 'interrupt')}"
+                )
+                mark_seen(_hermes_home / "config.yaml", BUSY_INPUT_FLAG)
+        except Exception as _onb_err:
+            logger.debug("Failed to apply busy-input onboarding hint: %s", _onb_err)
 
         thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else None
         try:
@@ -5977,7 +6049,7 @@ class GatewayRunner:
             self._voice_mode[voice_key] = "voice_only"
             self._save_voice_modes()
             if adapter:
-                self._set_adapter_auto_tts_disabled(adapter, chat_id, disabled=False)
+                self._set_adapter_auto_tts_enabled(adapter, chat_id, enabled=True)
             return (
                 "Voice mode enabled.\n"
                 "I'll reply with voice when you send voice messages.\n"
@@ -5993,7 +6065,7 @@ class GatewayRunner:
             self._voice_mode[voice_key] = "all"
             self._save_voice_modes()
             if adapter:
-                self._set_adapter_auto_tts_disabled(adapter, chat_id, disabled=False)
+                self._set_adapter_auto_tts_enabled(adapter, chat_id, enabled=True)
             return (
                 "Auto-TTS enabled.\n"
                 "All replies will include a voice message."
@@ -6032,7 +6104,7 @@ class GatewayRunner:
                 self._voice_mode[voice_key] = "voice_only"
                 self._save_voice_modes()
                 if adapter:
-                    self._set_adapter_auto_tts_disabled(adapter, chat_id, disabled=False)
+                    self._set_adapter_auto_tts_enabled(adapter, chat_id, enabled=True)
                 return "Voice mode enabled."
             else:
                 self._voice_mode[voice_key] = "off"
@@ -6083,7 +6155,7 @@ class GatewayRunner:
                 adapter._voice_sources[guild_id] = event.source.to_dict()
             self._voice_mode[self._voice_key(event.source.platform, event.source.chat_id)] = "all"
             self._save_voice_modes()
-            self._set_adapter_auto_tts_disabled(adapter, event.source.chat_id, disabled=False)
+            self._set_adapter_auto_tts_enabled(adapter, event.source.chat_id, enabled=True)
             return (
                 f"Joined voice channel **{voice_channel.name}**.\n"
                 f"I'll speak my replies and listen to you. Use /voice leave to disconnect."
@@ -9360,15 +9432,61 @@ class GatewayRunner:
         last_tool = [None]  # Mutable container for tracking in closure
         last_progress_msg = [None]  # Track last message for dedup
         repeat_count = [0]  # How many times the same message repeated
-        
+        # First-touch onboarding latch: fires at most once per run, even if
+        # several tools exceed the threshold.
+        long_tool_hint_fired = [False]
+        _LONG_TOOL_THRESHOLD_S = 30.0
+
         def progress_callback(event_type: str, tool_name: str = None, preview: str = None, args: dict = None, **kwargs):
             """Callback invoked by agent on tool lifecycle events."""
             if not progress_queue or not _run_still_current():
                 return
 
+            # First-touch onboarding: the first time a tool takes longer than
+            # _LONG_TOOL_THRESHOLD_S during a run that's streaming every tool
+            # (progress_mode == "all"), append a one-time hint suggesting
+            # /verbose.  We only fire when (a) the user hasn't seen the hint
+            # before and (b) /verbose is actually usable on this platform
+            # (gateway gate must be open).  The CLI has its own trigger.
+            if event_type == "tool.completed" and not long_tool_hint_fired[0]:
+                try:
+                    duration = kwargs.get("duration") or 0
+                    if duration >= _LONG_TOOL_THRESHOLD_S and progress_mode == "all":
+                        from agent.onboarding import (
+                            TOOL_PROGRESS_FLAG,
+                            is_seen,
+                            mark_seen,
+                            tool_progress_hint_gateway,
+                        )
+                        _cfg = _load_gateway_config()
+                        gate_on = bool(_cfg.get("display", {}).get("tool_progress_command", False))
+                        if gate_on and not is_seen(_cfg, TOOL_PROGRESS_FLAG):
+                            long_tool_hint_fired[0] = True
+                            progress_queue.put(tool_progress_hint_gateway())
+                            mark_seen(_hermes_home / "config.yaml", TOOL_PROGRESS_FLAG)
+                except Exception as _hint_err:
+                    logger.debug("tool-progress onboarding hint failed: %s", _hint_err)
+                return
+
             # Only act on tool.started events (ignore tool.completed, reasoning.available, etc.)
             if event_type not in ("tool.started",):
                 return
+
+            # Suppress tool-progress bubbles once the user has sent `stop`.
+            # When the LLM response carries N parallel tool calls, the agent
+            # fires N "tool.started" events back-to-back before checking for
+            # interrupts — without this guard, a late `stop` still renders
+            # all N as 🔍 bubbles, making the interrupt feel ignored.
+            # (agent lives in run_sync's scope; agent_holder[0] is the shared
+            # handle across nested scopes — see line ~9607.)
+            try:
+                _agent_for_interrupt = agent_holder[0] if agent_holder else None
+                if _agent_for_interrupt is not None and getattr(
+                    _agent_for_interrupt, "is_interrupted", False
+                ):
+                    return
+            except Exception:
+                pass
 
             # "new" mode: only report when tool changes
             if progress_mode == "new" and tool_name == last_tool[0]:
@@ -9475,6 +9593,22 @@ class GatewayRunner:
                         return
 
                     raw = progress_queue.get_nowait()
+
+                    # Drain silently when interrupted: events queued in the
+                    # window between tool parse and interrupt processing
+                    # should not render as bubbles.  The "⚡ Interrupting
+                    # current task" message is sent separately and is the
+                    # last progress-flavored bubble the user should see.
+                    try:
+                        _agent_for_interrupt = agent_holder[0] if agent_holder else None
+                        if _agent_for_interrupt is not None and getattr(
+                            _agent_for_interrupt, "is_interrupted", False
+                        ):
+                            # Drop this event and continue draining.
+                            await asyncio.sleep(0)
+                            continue
+                    except Exception:
+                        pass
 
                     # Handle dedup messages: update last line with repeat counter
                     if isinstance(raw, tuple) and len(raw) == 3 and raw[0] == "__dedup__":
