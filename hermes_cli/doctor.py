@@ -1052,6 +1052,59 @@ def run_doctor(args):
             check_warn(f"{_active_memory_provider} check failed", str(_e))
 
     # =========================================================================
+    # Local Models
+    # =========================================================================
+    print()
+    print(color("◆ 本地模型", Colors.CYAN, Colors.BOLD))
+
+    try:
+        from hermes_cli.model_manager import (
+            MODEL_REGISTRY,
+            is_installed,
+            check_requirements,
+            _get_models_dir,
+            _get_dir_size,
+        )
+
+        models_dir = _get_models_dir()
+        if models_dir.exists():
+            check_ok(f"模型目录存在: {models_dir}")
+        else:
+            check_warn(f"模型目录不存在", f"(将在首次安装时创建)")
+
+        installed_count = 0
+        total_size = 0.0
+
+        for m in MODEL_REGISTRY:
+            model_id = m["id"]
+            inst = is_installed(model_id)
+            size = _get_dir_size(models_dir / m["local_dir"]) if inst else 0
+
+            if inst:
+                installed_count += 1
+                total_size += size
+                check_ok(f"{m['name']} ({size}MB)")
+            else:
+                check_warn(f"{m['name']}", f"(需 {m['size_mb']}MB)")
+
+            # Check runtime requirements
+            ok, msg = check_requirements(model_id)
+            if ok:
+                check_info(f"运行时就绪: {msg}")
+            else:
+                check_info(f"⚠ {msg}")
+
+        if installed_count > 0:
+            check_ok(f"已安装 {installed_count}/{len(MODEL_REGISTRY)} 个本地模型，占用 {round(total_size, 1)}MB")
+        else:
+            check_info("运行 'hermes local-models list' 查看可用模型")
+
+    except ImportError:
+        check_warn("model_manager 模块未加载", "(hermes local-models 命令不可用)")
+    except Exception as e:
+        check_warn("本地模型检查失败", str(e))
+
+    # =========================================================================
     # Profiles
     # =========================================================================
     try:

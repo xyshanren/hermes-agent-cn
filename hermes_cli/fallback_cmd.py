@@ -1,20 +1,20 @@
-"""
+﻿"""
 hermes fallback — manage the fallback provider chain.
 
-Fallback providers are tried in order when the primary model fails with
+当主模型因 rate-limit、过载或连接错误失败时，按顺序尝试备用模型。
 rate-limit, overload, or connection errors. See:
-https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers
+https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers（中文文档建设中）
 
-Subcommands:
-  hermes fallback [list]   Show the current fallback chain (default when no subcommand)
-  hermes fallback add      Pick provider + model via the same picker as `hermes model`,
-                           then append the selection to the chain
-  hermes fallback remove   Pick an entry to delete from the chain
-  hermes fallback clear    Remove all fallback entries
+子命令：
+  hermes fallback [list]   显示当前备用链（无子命令时的默认行为）
+  hermes fallback add     通过与 `hermes model` 相同的选择器选取 provider + 模型，
+                           然后追加到备用链
+  hermes fallback remove  从备用链中删除选中的条目
+  hermes fallback clear   清除所有备用条目
 
-Storage: ``fallback_providers`` in ``~/.hermes/config.yaml`` (top-level, list of
-``{provider, model, base_url?, api_mode?}`` dicts).  The legacy single-dict
-``fallback_model`` format is migrated to the new list format on first add.
+存储位置：``~/.hermes/config.yaml`` 顶层字段 ``fallback_providers``（列表，
+每项为 ``{provider, model, base_url?, api_mode?}`` 字典）。旧的单字典格式
+``fallback_model`` 会在首次添加时自动迁移为新列表格式。
 """
 from __future__ import annotations
 
@@ -55,12 +55,22 @@ def _write_chain(config: Dict[str, Any], chain: List[Dict[str, Any]]) -> None:
 
 
 def _format_entry(entry: Dict[str, Any]) -> str:
-    """One-line human-readable rendering of a fallback entry."""
+    """将备用条目格式化为单行可读文本。"""
     provider = entry.get("provider", "?")
     model = entry.get("model", "?")
     base = entry.get("base_url")
     suffix = f"  [{base}]" if base else ""
-    return f"{model}  (via {provider}){suffix}"
+    _provider_names = {
+        "openrouter": "OpenRouter", "nous": "Nous Portal",
+        "openai": "OpenAI", "anthropic": "Anthropic",
+        "gemini": "Google Gemini", "deepseek": "DeepSeek",
+        "kimi-coding": "Kimi Coding", "kai": "阿里云通义",
+        "zhipu": "智谱 GLM", "minimax": "MiniMax",
+        "ollama": "Ollama", "lmstudio": "LM Studio",
+        "custom": "自定义端点",
+    }
+    display_provider = _provider_names.get(provider, provider)
+    return f"{model}  (via {display_provider}){suffix}"
 
 
 def _extract_fallback_from_model_cfg(model_cfg: Any) -> Optional[Dict[str, Any]]:
@@ -120,22 +130,23 @@ def cmd_fallback_list(args) -> None:  # noqa: ARG001
 
     print()
     if not chain:
-        print("  No fallback providers configured.")
+        print("  尚未配置任何备用模型。")
         print()
-        print("  Add one with:  hermes fallback add")
+        print("  添加方式：hermes fallback add")
         print()
         return
 
     primary = _describe_primary(config)
     if primary:
-        print(f"  Primary:   {primary}")
+        print(f"  主模型：   {primary}")
         print()
-    print(f"  Fallback chain ({len(chain)} {'entry' if len(chain) == 1 else 'entries'}):")
+    entry_word = "条" if len(chain) == 1 else "条"
+    print(f"  备用链（共 {len(chain)} {entry_word}）：")
     for i, entry in enumerate(chain, 1):
         print(f"    {i}. {_format_entry(entry)}")
     print()
     print("  Tried in order when the primary fails (rate-limit, 5xx, connection errors).")
-    print("  Docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers")
+    print("  Docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers（中文文档建设中）")
     print()
 
 
@@ -165,8 +176,8 @@ def cmd_fallback_add(args) -> None:
     active_provider_before = _snapshot_auth_active_provider()
 
     print()
-    print("  Adding a fallback provider.  The picker below is the same one used by")
-    print("  `hermes model` — select the provider + model you want as a fallback.")
+    print("  添加备用模型。下方选择器与 `hermes model` 相同，")
+    print("  请选取你希望作为备用的 provider 和模型。")
     print()
 
     try:
@@ -187,7 +198,7 @@ def cmd_fallback_add(args) -> None:
         _restore_model_cfg(model_before)
         _restore_auth_active_provider(active_provider_before)
         print()
-        print("  No fallback added.")
+        print("  未添加任何备用模型（已取消）。")
         return
 
     # Picker picked the same thing that's already the primary → nothing changed,
@@ -198,8 +209,8 @@ def cmd_fallback_add(args) -> None:
         _restore_model_cfg(model_before)
         _restore_auth_active_provider(active_provider_before)
         print()
-        print(f"  Selected model matches the current primary ({_format_entry(new_entry)}).")
-        print("  A provider cannot be a fallback for itself — no change.")
+        print(f"  选中的模型与当前主模型相同（{_format_entry(new_entry)}）。")
+        print("  模型不能作为自己的备用 — 未做任何更改。")
         return
 
     # Reload the config with the primary restored, then append the new entry
@@ -217,7 +228,7 @@ def cmd_fallback_add(args) -> None:
         if existing.get("provider") == new_entry["provider"] \
                 and existing.get("model") == new_entry["model"]:
             print()
-            print(f"  {_format_entry(new_entry)} is already in the fallback chain — skipped.")
+            print(f"  {_format_entry(new_entry)} 已在备用链中 — 已跳过。")
             return
 
     chain.append(new_entry)
@@ -225,10 +236,10 @@ def cmd_fallback_add(args) -> None:
     save_config(final_cfg)
 
     print()
-    print(f"  Added fallback: {_format_entry(new_entry)}")
-    print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
+    print(f"  已添加备用：{_format_entry(new_entry)}")
+    print(f"  当前备用链共 {len(chain)} 条。")
     print()
-    print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")
+    print("  运行 `hermes fallback list` 查看，或 `hermes fallback remove` 删除。")
 
 
 def _restore_model_cfg(model_before: Any) -> None:
@@ -252,12 +263,12 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No fallback providers configured — nothing to remove.")
+        print("  尚未配置任何备用模型 — 无可删除项。")
         print()
         return
 
     choices = [_format_entry(e) for e in chain]
-    choices.append("Cancel")
+    choices.append("取消")
 
     try:
         from hermes_cli.setup import _curses_prompt_choice
@@ -267,7 +278,7 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
 
     if idx is None or idx < 0 or idx >= len(chain):
         print()
-        print("  Cancelled — no change.")
+        print("  已取消 — 无更改。")
         return
 
     removed = chain.pop(idx)
@@ -275,11 +286,11 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
     save_config(config)
 
     print()
-    print(f"  Removed fallback: {_format_entry(removed)}")
+    print(f"  已删除备用：{_format_entry(removed)}")
     if chain:
-        print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
+        print(f"  当前备用链共 {len(chain)} 条。")
     else:
-        print("  Fallback chain is now empty.")
+        print("  备用链已清空。")
     print()
 
 
@@ -292,41 +303,42 @@ def cmd_fallback_clear(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No fallback providers configured — nothing to clear.")
+        print("  尚未配置任何备用模型 — 无可清空项。")
         print()
         return
 
     print()
-    print(f"  Current fallback chain ({len(chain)} {'entry' if len(chain) == 1 else 'entries'}):")
+    entry_word = "条" if len(chain) == 1 else "条"
+    print(f"  当前备用链（共 {len(chain)} {entry_word}）：")
     for i, entry in enumerate(chain, 1):
         print(f"    {i}. {_format_entry(entry)}")
     print()
     try:
-        resp = input("  Clear all entries? [y/N]: ").strip().lower()
+        resp = input("  确认清除全部条目？[y/N]：").strip().lower()
     except (KeyboardInterrupt, EOFError):
         print()
-        print("  Cancelled.")
+        print("  已取消。")
         return
     if resp not in ("y", "yes"):
-        print("  Cancelled — no change.")
+        print("  已取消 — 无更改。")
         return
 
     _write_chain(config, [])
     save_config(config)
     print()
-    print("  Fallback chain cleared.")
+    print("  备用链已清空。")
     print()
 
 
 def _numbered_pick(question: str, choices: List[str]) -> Optional[int]:
-    """Fallback numbered-list picker when curses is unavailable."""
+    """curses 不可用时的降级纯数字选择器。"""
     print(question)
     for i, c in enumerate(choices, 1):
         print(f"  {i}. {c}")
     print()
     while True:
         try:
-            val = input(f"Choice [1-{len(choices)}]: ").strip()
+            val = input(f"选择 [1-{len(choices)}]：").strip()
             if not val:
                 return None
             idx = int(val) - 1
@@ -345,7 +357,7 @@ def _numbered_pick(question: str, choices: List[str]) -> Optional[int]:
 # ---------------------------------------------------------------------------
 
 def cmd_fallback(args) -> None:
-    """Top-level dispatcher for ``hermes fallback [subcommand]``."""
+    """hermes fallback [子命令] 的顶层分发器。"""
     sub = getattr(args, "fallback_command", None)
     if sub in (None, "", "list", "ls"):
         cmd_fallback_list(args)
@@ -356,6 +368,6 @@ def cmd_fallback(args) -> None:
     elif sub == "clear":
         cmd_fallback_clear(args)
     else:
-        print(f"Unknown fallback subcommand: {sub}")
-        print("Use one of: list, add, remove, clear")
+        print(f"未知的 fallback 子命令：{sub}")
+        print("可用子命令：list, add, remove, clear")
         raise SystemExit(2)

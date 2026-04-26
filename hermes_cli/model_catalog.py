@@ -1,4 +1,4 @@
-"""Remote model catalog fetcher.
+﻿"""Remote model catalog fetcher.
 
 The Hermes docs site hosts a JSON manifest of curated models for providers
 we want to update without shipping a release (currently OpenRouter and
@@ -126,14 +126,14 @@ def _fetch_manifest(url: str, timeout: float) -> dict[str, Any] | None:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode())
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-        logger.info("model catalog fetch failed (%s): %s", url, exc)
+        logger.info("模型目录获取失败：%s", exc)
         return None
     except Exception as exc:  # pragma: no cover — defensive
-        logger.info("model catalog fetch errored (%s): %s", url, exc)
+        logger.info("模型目录获取错误：%s", exc)
         return None
 
     if not _validate_manifest(data):
-        logger.info("model catalog at %s failed schema validation", url)
+        logger.info("模型目录 %s 验证失败", url)
         return None
 
     return data
@@ -192,7 +192,7 @@ def _write_disk_cache(data: dict[str, Any]) -> None:
             fh.write("\n")
         os.replace(tmp, path)
     except OSError as exc:
-        logger.info("model catalog cache write failed: %s", exc)
+        logger.info("模型目录缓存写入失败：%s", exc)
 
 
 # ---------------------------------------------------------------------------

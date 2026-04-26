@@ -2368,6 +2368,104 @@ def setup_tools(config: dict, first_install: bool = False):
 
 
 # =============================================================================
+# Section 6: Local Models Configuration
+# =============================================================================
+
+
+def setup_local_models(config: dict):
+    """Configure local offline models (STT, TTS, LLM)."""
+    print_header("本地离线模型")
+    print_info("Hermes 支持本地离线运行，无需依赖云端 API。")
+    print_info("安装后可在断网时降级使用，或作为备用推理后端。")
+    print_info(f"   模型存储目录: ~/.hermes/models/")
+    print()
+
+    try:
+        from hermes_cli.model_manager import (
+            MODEL_REGISTRY,
+            is_installed,
+            check_requirements,
+            download_model,
+            _get_models_dir,
+            _get_dir_size,
+        )
+    except ImportError:
+        print_warning("model_manager 模块未加载")
+        print_info("请先运行: pip install -e .")
+        return
+
+    models_dir = _get_models_dir()
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build checklist items
+    items = []
+    pre_selected = []
+    for i, m in enumerate(MODEL_REGISTRY):
+        inst = is_installed(m["id"])
+        size = _get_dir_size(models_dir / m["local_dir"]) if inst else 0
+        status = f"({size}MB)" if inst else f"(需 {m['size_mb']}MB)"
+        items.append(f"{m['name']} {status}")
+        if inst:
+            pre_selected.append(i)
+
+    print_info("选择要安装的本地模型（空格切换，回车确认）：")
+    print()
+
+    selected_indices = prompt_checklist(
+        "选择模型",
+        items,
+        pre_selected,
+    )
+
+    if not selected_indices:
+        print_info("未选择任何模型。稍后可运行: hermes local-models list")
+        return
+
+    # Install selected models
+    installed_count = 0
+    for idx in selected_indices:
+        m = MODEL_REGISTRY[idx]
+        if is_installed(m["id"]):
+            print_success(f"{m['name']} 已安装")
+            continue
+
+        print()
+        print_info(f"正在安装 {m['name']} ({m['size_mb']}MB)...")
+        success = download_model(m["id"])
+        if success:
+            installed_count += 1
+            print_success(f"{m['name']} 安装完成")
+        else:
+            print_warning(f"{m['name']} 安装失败，请检查网络或手动下载")
+
+    # Check runtime dependencies
+    print()
+    print_header("运行时依赖检查")
+    deps_ok = True
+    for m in MODEL_REGISTRY:
+        if not is_installed(m["id"]):
+            continue
+        ok, msg = check_requirements(m["id"])
+        if ok:
+            print_success(f"{m['name']}: {msg}")
+        else:
+            print_warning(f"{m['name']}: {msg}")
+            deps_ok = False
+
+    if installed_count > 0:
+        print()
+        print_success(f"已安装 {installed_count} 个本地模型")
+        print_info("运行 'hermes local-models test <model>' 测试模型")
+
+    if not deps_ok:
+        print()
+        print_info("安装缺失的依赖：")
+        print_info("  pip install faster-whisper  # STT")
+        print_info("  pip install onnxruntime     # TTS")
+        print_info("  pip install llama-cpp-python  # LLM")
+
+
+# =============================================================================
 # Post-Migration Section Skip Logic
 # =============================================================================
 
@@ -2742,6 +2840,7 @@ SETUP_SECTIONS = [
     ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
     ("tools", "Tools", setup_tools),
     ("agent", "Agent Settings", setup_agent_settings),
+    ("local-models", "本地离线模型", setup_local_models),
 ]
 
 # The returning-user menu intentionally omits standalone TTS because model setup
@@ -2753,6 +2852,7 @@ RETURNING_USER_MENU_SECTION_KEYS = [
     "gateway",
     "tools",
     "agent",
+    "local-models",
 ]
 
 
@@ -2884,6 +2984,7 @@ def run_setup_wizard(args):
             "消息平台（网关）",
             "工具配置",
             "Agent 设置",
+            "本地离线模型",
             "退出",
         ]
         choice = prompt_choice("你想做什么？", menu_choices, 0)
@@ -2895,10 +2996,10 @@ def run_setup_wizard(args):
         elif choice == 1:
             # Full setup — fall through to run all sections
             pass
-        elif choice == 7:
+        elif choice == 8:
             print_info("已退出。需要时再运行 'hermes setup'。")
             return
-        elif 2 <= choice <= 6:
+        elif 2 <= choice <= 7:
             # Individual section — map by key, not by position.
             # SETUP_SECTIONS includes TTS but the returning-user menu skips it,
             # so positional indexing (choice - 2) would dispatch the wrong section.
@@ -2962,6 +3063,10 @@ def run_setup_wizard(args):
     # Section 5: Tools
     if not (migration_ran and _skip_configured_section(config, "tools", "Tools")):
         setup_tools(config, first_install=not is_existing)
+
+    # Section 6: Local Models
+    if not (migration_ran and _skip_configured_section(config, "local-models", "Local Models")):
+        setup_local_models(config)
 
     # Save and show summary
     save_config(config)
