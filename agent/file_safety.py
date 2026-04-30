@@ -140,32 +140,12 @@ def get_read_block_error(path: str) -> Optional[str]:
     """Return an error message when a read targets a denied Hermes path.
 
     Two categories are blocked:
-
       * Internal Hermes cache files under ``HERMES_HOME/skills/.hub`` —
         readable metadata that an attacker could use as a prompt-injection
         carrier.
-      * Credential / secret stores under HERMES_HOME and the global Hermes
-        root: ``auth.json``, ``auth.lock``, ``.anthropic_oauth.json``,
-        ``.env``, ``webhook_subscriptions.json``, ``auth/google_oauth.json``,
-        and anything under ``mcp-tokens/``. These hold plaintext provider keys,
-        OAuth tokens, and HMAC secrets that the agent never needs to read
-        directly — provider tools / gateway adapters consume them through
-        internal channels.
-
-    **This is NOT a security boundary.** The terminal tool runs as the
-    same OS user with shell access; the agent can still ``cat auth.json``
-    or ``cat ~/.hermes/.env`` and exfiltrate the file. The read-deny exists
-    as defense-in-depth that:
-
-      * Returns a clear error to models that respect tool denials, which
-        empirically prompts most modern models to stop rather than reach
-        for the shell.
-      * Surfaces a visible audit trail when something tries to read
-        credentials — easier to spot in logs than a generic ``cat``.
-
-    Treat any user-visible framing around this as "may help" rather than
-    "stops attackers." A determined model or malicious instruction can
-    always shell out.
+      * Credential stores at the top of ``HERMES_HOME`` (``auth.json``,
+        ``auth.lock``, ``.anthropic_oauth.json``) — plaintext provider
+        keys / OAuth tokens that the agent never needs to read directly.
 
     Callers that resolve relative paths against a non-process cwd
     (e.g. ``TERMINAL_CWD`` in ``tools/file_tools.py``) MUST pre-resolve
