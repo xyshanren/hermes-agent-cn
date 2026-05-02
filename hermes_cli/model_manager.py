@@ -243,6 +243,78 @@ def _has_modelscope() -> bool:
         return False
 
 
+def _download_via_snapshot(
+    model_scope_id: str,
+    dest: Path,
+    token: str,
+    print_fn,
+    allow_patterns: Optional[list[str]] = None,
+) -> bool:
+    """Download model files via ModelScope snapshot_download API.
+
+    Args:
+        model_scope_id: Full ModelScope model ID (e.g. "Qwen/Qwen2.5-0.5B-Instruct-GGUF").
+        dest: Destination directory for downloaded files.
+        token: Optional ModelScope API token.
+        print_fn: Callable for progress output.
+        allow_patterns: Optional glob patterns to filter files (e.g. ["*q4_k_m*"]).
+                        When None, downloads all files.
+
+    Returns:
+        True on success.
+    """
+    try:
+        from modelscope.hub.snapshot_download import snapshot_download
+
+        print_fn("\n⏳ 通过 ModelScope snapshot_download 下载...")
+
+        kwargs: dict = {
+            "model_id": model_scope_id,
+            "cache_dir": str(dest),
+        }
+        if token:
+            kwargs["token"] = token
+        if allow_patterns:
+            kwargs["allow_patterns"] = allow_patterns
+            print_fn(f"   筛选: {', '.join(allow_patterns)}")
+
+        # snapshot_download downloads to cache_dir/model_id/...,
+        # we want files directly in dest/
+        temp_cache = dest.parent / f"_tmp_{dest.name}"
+        kwargs["cache_dir"] = str(temp_cache)
+
+        result_path = snapshot_download(**kwargs)
+        print_fn(f"   下载完成 → {result_path}")
+
+        # Move files from cache structure to dest/
+        dest.mkdir(parents=True, exist_ok=True)
+        import shutil as _shutil
+        for item in Path(result_path).iterdir():
+            target = dest / item.name
+            if item.is_dir():
+                if target.exists():
+                    _shutil.rmtree(target)
+                _shutil.copytree(item, target)
+            else:
+                _shutil.copy2(item, target)
+
+        # Clean up temp cache
+        if temp_cache.exists():
+            _shutil.rmtree(temp_cache)
+
+        print_fn(f"✅ 模型文件已安装到: {dest}")
+        return True
+
+    except ImportError:
+        print_fn("\n⛔ modelscope SDK 未正确安装，请运行: pip install modelscope")
+        return False
+    except Exception as e:
+        print_fn(f"\n❌ 下载失败: {e}")
+        print_fn(f"   可手动从 ModelScope 下载到: {dest}")
+        print_fn(f"   地址: https://www.modelscope.cn/{model_scope_id}")
+        return False
+
+
 def download_model(model_id: str, progress_callback=None) -> bool:
     """
     Download a model to the local models directory.
@@ -321,10 +393,12 @@ def download_model(model_id: str, progress_callback=None) -> bool:
 
     token = os.environ.get("MODELSCOPE_TOKEN", "")
 
-    # Try git-lfs clone first (handles LFS files like moss-tts shared.data)
+    # -------------------------------------------------------------------------
+    # moss-tts-nano: try git-lfs clone first (handles LFS pointer files)
+    # -------------------------------------------------------------------------
     if model_id == "moss-tts-nano":
         _print("\n⏳ 使用 git lfs clone 下载（处理大文件）...")
-        result = _run_cmd(["git", "lfs", "install"], cwd=_get_models_dir())
+        _run_cmd(["git", "lfs", "install"], cwd=_get_models_dir())
         result = _run_cmd(
             [
                 "git", "clone",
@@ -335,33 +409,28 @@ def download_model(model_id: str, progress_callback=None) -> bool:
             cwd=_get_models_dir(),
         )
         if result.returncode == 0:
-            _print(f"✅ MOSS-TTS-Nano 下载完成")
+            _print(f"✅ {m['name']} 下载完成")
             return True
+        _print(f"⚠ git clone 失败 → 尝试 ModelScope snapshot_download ...")
+        return _download_via_snapshot(m["model_scope_id"], dest, token, _print)
+
+    # -------------------------------------------------------------------------
+    # Qwen GGUF: download only q4_k_m variant via snapshot_download
+    # -------------------------------------------------------------------------
+    if model_id.startswith("qwen"):
+        # Determine the GGUF filename pattern based on the ModelScope repo
+        repo_name = m["model_scope_id"]
+        if "Coder" in repo_name:
+            gguf_pattern = "*qwen2.5-coder*instruct*q4_k_m*"
         else:
-            _print(f"⚠ git clone 失败，尝试 ModelScope API...")
-            # Fall through to API method
+            gguf_pattern = "*qwen2.5-0.5b*instruct*q4_k_m*"
+        return _download_via_snapshot(repo_name, dest, token, _print,
+                                       allow_patterns=[gguf_pattern])
 
-    # Fallback: use ModelScope Python API
-    _print("\n⏳ 通过 ModelScope API 下载...")
-    script = f"""
-import os
-from modelscope.hub.api import HubApi
-api = HubApi()
-api.login('{token}')
-files = api.get_model_files('{m['model_scope_id']}', recursive=True)
-for f in files:
-    print(f.file_name)
-"""
-    result = _run_cmd([sys.executable, "-c", script])
-
-    if result.returncode != 0:
-        _print(f"❌ ModelScope API 调用失败:\n{result.stderr}")
-        return False
-
-    _print(f"⚠ 模型文件列表已获取，请手动下载到: {dest}")
-    _print(f"   ModelScope 地址: https://www.modelscope.cn/{m['model_scope_id']}")
-    _print(f"\n   或设置 MODELSCOPE_TOKEN 环境变量后重试")
-    return True
+    # -------------------------------------------------------------------------
+    # Other models: full snapshot_download
+    # -------------------------------------------------------------------------
+    return _download_via_snapshot(m["model_scope_id"], dest, token, _print)
 
 
 def remove_model(model_id: str) -> bool:
