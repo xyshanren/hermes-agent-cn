@@ -53,12 +53,14 @@ def _get_models_dir() -> Path:
 # Model Registry
 # ---------------------------------------------------------------------------
 
-# Each entry: (id, name, category, model_scope_id, local_dir_name, size_mb, description)
+# Each entry: (id, name, category, tier, model_scope_id, local_dir_name, size_mb, description)
+# tier: bundled=安装包内置 | recommended=首次推荐下载 | optional=可选下载
 MODEL_REGISTRY = [
     {
         "id": "whisper-small",
         "name": "Whisper-small (STT)",
         "category": "stt",
+        "tier": "bundled",
         "model_scope_id": "Systran/faster-whisper-small",
         "local_dir": "whisper-small",
         "size_mb": 464,
@@ -66,9 +68,22 @@ MODEL_REGISTRY = [
         "install_hint": "通过 faster-whisper 自动下载 CTranslate2 格式模型",
     },
     {
+        "id": "edge-tts",
+        "name": "Edge-TTS (TTS)",
+        "category": "tts",
+        "tier": "bundled",
+        "model_scope_id": "pip:edge-tts",
+        "local_dir": "edge-tts",
+        "size_mb": 10,
+        "description": "微软 Edge 免费 TTS 引擎 (~10MB)，无需模型文件，pip install 即用",
+        "install_hint": "pip install edge-tts（纯 Python 库，不占用模型目录空间）",
+        "is_pip_only": True,
+    },
+    {
         "id": "moss-tts-nano",
         "name": "MOSS-TTS-Nano (TTS)",
         "category": "tts",
+        "tier": "recommended",
         "model_scope_id": "openmoss/MOSS-TTS-Nano-100M-ONNX",
         "local_dir": "moss-tts-nano",
         "size_mb": 641,
@@ -79,6 +94,7 @@ MODEL_REGISTRY = [
         "id": "qwen-coder-1.5b",
         "name": "Qwen2.5-Coder-1.5B (LLM)",
         "category": "llm",
+        "tier": "recommended",
         "model_scope_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
         "local_dir": "qwen-coder-1.5b-q4_k_m",
         "size_mb": 1070,
@@ -89,6 +105,7 @@ MODEL_REGISTRY = [
         "id": "qwen-0.5b",
         "name": "Qwen2.5-0.5B (LLM)",
         "category": "llm",
+        "tier": "bundled",
         "model_scope_id": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
         "local_dir": "qwen-0.5b-q4_k_m",
         "size_mb": 469,
@@ -101,6 +118,21 @@ MODEL_REGISTRY = [
 MODELS_BY_CATEGORY = {"stt": [], "tts": [], "llm": []}
 for m in MODEL_REGISTRY:
     MODELS_BY_CATEGORY[m["category"]].append(m)
+
+
+def get_models_by_tier(tier: str) -> list[dict]:
+    """Return models filtered by tier."""
+    return [m for m in MODEL_REGISTRY if m.get("tier") == tier]
+
+
+def get_recommended_models() -> list[dict]:
+    """Return recommended models that are not yet installed."""
+    return [m for m in get_models_by_tier("recommended") if not is_installed(m["id"])]
+
+
+def get_bundled_models() -> list[dict]:
+    """Return bundled (built-in) models."""
+    return get_models_by_tier("bundled")
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +272,23 @@ def download_model(model_id: str, progress_callback=None) -> bool:
 
     # Ensure models dir exists
     _get_models_dir().mkdir(parents=True, exist_ok=True)
+
+    # -------------------------------------------------------------------------
+    # pip-only packages (e.g. edge-tts)
+    # -------------------------------------------------------------------------
+    if m.get("is_pip_only"):
+        pkg = m["model_scope_id"].replace("pip:", "")
+        _print(f"\n⏳ 正在安装 Python 包: {pkg} ...")
+        result = _run_cmd([sys.executable, "-m", "pip", "install", pkg])
+        if result.returncode == 0:
+            # Create a marker file so is_installed() returns True
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / ".installed").write_text(pkg)
+            _print(f"✅ {m['name']} 安装完成")
+            return True
+        else:
+            _print(f"❌ 安装失败:\n{result.stderr or result.stdout}")
+            return False
 
     # -------------------------------------------------------------------------
     # whisper-small: use faster-whisper auto-download
