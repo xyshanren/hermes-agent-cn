@@ -69,6 +69,10 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         transport="openai_chat",
         base_url_env_var="OLLAMA_BASE_URL",
     ),
+    "embedded": HermesOverlay(
+        transport="embedded",           # 内嵌 CPU 推理，不走 HTTP
+        auth_type="none",               # 无需认证
+    ),
 }
 
 
@@ -126,6 +130,11 @@ ALIASES: Dict[str, str] = {
     "llamacpp": "custom",
     "llama.cpp": "custom",
     "llama-cpp": "custom",
+
+    # embedded — 嵌入式 CPU 推理 (GGUF + llama-cpp-python)
+    "embedded": "embedded",
+    "cpu": "embedded",
+    "offline": "embedded",
 }
 
 
@@ -145,6 +154,7 @@ TRANSPORT_TO_API_MODE: Dict[str, str] = {
     "anthropic_messages": "anthropic_messages",
     "codex_responses": "codex_responses",
     "bedrock_converse": "bedrock_converse",
+    "embedded": "embedded",
 }
 
 
@@ -275,6 +285,10 @@ def determine_api_mode(provider: str, base_url: str = "") -> str:
             if "api.openai.com" in url_lower:
                 return "codex_responses"
         return TRANSPORT_TO_API_MODE.get(pdef.transport, "chat_completions")
+
+    # 嵌入式推理 — 本地 CPU 推理，不走 HTTP API
+    if provider == "embedded":
+        return "embedded"
 
     # Direct provider checks for providers not in HERMES_OVERLAYS
     if provider == "bedrock":
