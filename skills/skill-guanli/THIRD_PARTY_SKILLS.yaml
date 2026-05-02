@@ -1,0 +1,29 @@
+# 第三方 Skill 注册表
+# 路径: ~/.hermes/third_party_skills.yaml
+# 
+# 格式说明:
+#   name         — Skill 名称（唯一标识）
+#   source       — 来源地址（GitHub URL / 本地路径）
+#   source_type  — github | gitlab | local | url
+#   installed_at — 安装时间 (ISO 8601)
+#   version      — 版本号（可选）
+#   description  — 描述（从 SKILL.md 提取）
+#   risk_level   — low | medium | high | critical
+#   risk_notes   — 风险评估备注
+#   last_audited — 上次审计时间
+#   usage_count  — 使用次数
+#   enabled      — 是否启用
+
+skills:
+  # 示例（注释形式，实际使用时可取消注释）
+  # - name: "my-custom-skill"
+  #   source: "github.com/example/my-skill"
+  #   source_type: "github"
+  #   installed_at: "2026-05-03T10:00:00+08:00"
+  #   version: "v1.0.0"
+  #   description: "自定义 skill 描述"
+  #   risk_level: "low"
+  #   risk_notes: "纯文档 skill，无脚本执行"
+  #   last_audited: "2026-05-03"
+  #   usage_count: 0
+  #   enabled: true
