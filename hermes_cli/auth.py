@@ -42,7 +42,7 @@ import httpx
 import yaml
 
 from hermes_cli.config import get_hermes_home, get_config_path, read_raw_config
-from hermes_constants import OPENROUTER_BASE_URL
+# OPENROUTER_BASE_URL removed — CN branch uses Chinese providers only
 
 logger = logging.getLogger(__name__)
 
@@ -132,63 +132,29 @@ class ProviderConfig:
 
 
 PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
-    "nous": ProviderConfig(
-        id="nous",
-        name="Nous Portal",
-        auth_type="oauth_device_code",
-        portal_base_url=DEFAULT_NOUS_PORTAL_URL,
-        inference_base_url=DEFAULT_NOUS_INFERENCE_URL,
-        client_id=DEFAULT_NOUS_CLIENT_ID,
-        scope=DEFAULT_NOUS_SCOPE,
-    ),
-    "openai-codex": ProviderConfig(
-        id="openai-codex",
-        name="OpenAI Codex",
-        auth_type="oauth_external",
-        inference_base_url=DEFAULT_CODEX_BASE_URL,
-    ),
-    "qwen-oauth": ProviderConfig(
-        id="qwen-oauth",
-        name="Qwen OAuth",
-        auth_type="oauth_external",
-        inference_base_url=DEFAULT_QWEN_BASE_URL,
-    ),
-    "google-gemini-cli": ProviderConfig(
-        id="google-gemini-cli",
-        name="Google Gemini (OAuth)",
-        auth_type="oauth_external",
-        inference_base_url=DEFAULT_GEMINI_CLOUDCODE_BASE_URL,
-    ),
-    "copilot": ProviderConfig(
-        id="copilot",
-        name="GitHub Copilot",
+    "deepseek": ProviderConfig(
+        id="deepseek",
+        name="DeepSeek",
         auth_type="api_key",
-        inference_base_url=DEFAULT_GITHUB_MODELS_BASE_URL,
-        api_key_env_vars=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"),
-        base_url_env_var="COPILOT_API_BASE_URL",
+        inference_base_url="https://api.deepseek.com/v1",
+        api_key_env_vars=("DEEPSEEK_API_KEY",),
+        base_url_env_var="DEEPSEEK_BASE_URL",
     ),
-    "copilot-acp": ProviderConfig(
-        id="copilot-acp",
-        name="GitHub Copilot ACP",
-        auth_type="external_process",
-        inference_base_url=DEFAULT_COPILOT_ACP_BASE_URL,
-        base_url_env_var="COPILOT_ACP_BASE_URL",
-    ),
-    "gemini": ProviderConfig(
-        id="gemini",
-        name="Google AI Studio",
+    "minimax": ProviderConfig(
+        id="minimax",
+        name="MiniMax",
         auth_type="api_key",
-        inference_base_url="https://generativelanguage.googleapis.com/v1beta",
-        api_key_env_vars=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
-        base_url_env_var="GEMINI_BASE_URL",
+        inference_base_url="https://api.minimax.io/anthropic",
+        api_key_env_vars=("MINIMAX_API_KEY",),
+        base_url_env_var="MINIMAX_BASE_URL",
     ),
-    "zai": ProviderConfig(
-        id="zai",
-        name="Z.AI / GLM",
+    "minimax-cn": ProviderConfig(
+        id="minimax-cn",
+        name="MiniMax (China)",
         auth_type="api_key",
-        inference_base_url="https://api.z.ai/api/paas/v4",
-        api_key_env_vars=("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
-        base_url_env_var="GLM_BASE_URL",
+        inference_base_url="https://api.minimaxi.com/anthropic",
+        api_key_env_vars=("MINIMAX_CN_API_KEY",),
+        base_url_env_var="MINIMAX_CN_BASE_URL",
     ),
     "kimi-coding": ProviderConfig(
         id="kimi-coding",
@@ -208,161 +174,21 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url="https://api.moonshot.cn/v1",
         api_key_env_vars=("KIMI_CN_API_KEY",),
     ),
-    "stepfun": ProviderConfig(
-        id="stepfun",
-        name="StepFun Step Plan",
+    "zai": ProviderConfig(
+        id="zai",
+        name="Z.AI / GLM",
         auth_type="api_key",
-        inference_base_url=STEPFUN_STEP_PLAN_INTL_BASE_URL,
-        api_key_env_vars=("STEPFUN_API_KEY",),
-        base_url_env_var="STEPFUN_BASE_URL",
+        inference_base_url="https://api.z.ai/api/paas/v4",
+        api_key_env_vars=("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
+        base_url_env_var="GLM_BASE_URL",
     ),
-    "arcee": ProviderConfig(
-        id="arcee",
-        name="Arcee AI",
+    "ollama": ProviderConfig(
+        id="ollama",
+        name="Ollama (本地推理)",
         auth_type="api_key",
-        inference_base_url="https://api.arcee.ai/api/v1",
-        api_key_env_vars=("ARCEEAI_API_KEY",),
-        base_url_env_var="ARCEE_BASE_URL",
-    ),
-    "minimax": ProviderConfig(
-        id="minimax",
-        name="MiniMax",
-        auth_type="api_key",
-        inference_base_url="https://api.minimax.io/anthropic",
-        api_key_env_vars=("MINIMAX_API_KEY",),
-        base_url_env_var="MINIMAX_BASE_URL",
-    ),
-    "anthropic": ProviderConfig(
-        id="anthropic",
-        name="Anthropic",
-        auth_type="api_key",
-        inference_base_url="https://api.anthropic.com",
-        api_key_env_vars=("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
-        base_url_env_var="ANTHROPIC_BASE_URL",
-    ),
-    "alibaba": ProviderConfig(
-        id="alibaba",
-        name="Alibaba Cloud (DashScope)",
-        auth_type="api_key",
-        inference_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        api_key_env_vars=("DASHSCOPE_API_KEY",),
-        base_url_env_var="DASHSCOPE_BASE_URL",
-    ),
-    "alibaba-coding-plan": ProviderConfig(
-        id="alibaba-coding-plan",
-        name="Alibaba Cloud (Coding Plan)",
-        auth_type="api_key",
-        inference_base_url="https://coding-intl.dashscope.aliyuncs.com/v1",
-        api_key_env_vars=("ALIBABA_CODING_PLAN_API_KEY", "DASHSCOPE_API_KEY"),
-        base_url_env_var="ALIBABA_CODING_PLAN_BASE_URL",
-    ),
-    "minimax-cn": ProviderConfig(
-        id="minimax-cn",
-        name="MiniMax (China)",
-        auth_type="api_key",
-        inference_base_url="https://api.minimaxi.com/anthropic",
-        api_key_env_vars=("MINIMAX_CN_API_KEY",),
-        base_url_env_var="MINIMAX_CN_BASE_URL",
-    ),
-    "deepseek": ProviderConfig(
-        id="deepseek",
-        name="DeepSeek",
-        auth_type="api_key",
-        inference_base_url="https://api.deepseek.com/v1",
-        api_key_env_vars=("DEEPSEEK_API_KEY",),
-        base_url_env_var="DEEPSEEK_BASE_URL",
-    ),
-    "xai": ProviderConfig(
-        id="xai",
-        name="xAI",
-        auth_type="api_key",
-        inference_base_url="https://api.x.ai/v1",
-        api_key_env_vars=("XAI_API_KEY",),
-        base_url_env_var="XAI_BASE_URL",
-    ),
-    "nvidia": ProviderConfig(
-        id="nvidia",
-        name="NVIDIA NIM",
-        auth_type="api_key",
-        inference_base_url="https://integrate.api.nvidia.com/v1",
-        api_key_env_vars=("NVIDIA_API_KEY",),
-        base_url_env_var="NVIDIA_BASE_URL",
-    ),
-    "ai-gateway": ProviderConfig(
-        id="ai-gateway",
-        name="Vercel AI Gateway",
-        auth_type="api_key",
-        inference_base_url="https://ai-gateway.vercel.sh/v1",
-        api_key_env_vars=("AI_GATEWAY_API_KEY",),
-        base_url_env_var="AI_GATEWAY_BASE_URL",
-    ),
-    "opencode-zen": ProviderConfig(
-        id="opencode-zen",
-        name="OpenCode Zen",
-        auth_type="api_key",
-        inference_base_url="https://opencode.ai/zen/v1",
-        api_key_env_vars=("OPENCODE_ZEN_API_KEY",),
-        base_url_env_var="OPENCODE_ZEN_BASE_URL",
-    ),
-    "opencode-go": ProviderConfig(
-        id="opencode-go",
-        name="OpenCode Go",
-        auth_type="api_key",
-        # OpenCode Go mixes API surfaces by model:
-        # - GLM / Kimi use OpenAI-compatible chat completions under /v1
-        # - MiniMax models use Anthropic Messages under /v1/messages
-        # Keep the provider base at /v1 and select api_mode per-model.
-        inference_base_url="https://opencode.ai/zen/go/v1",
-        api_key_env_vars=("OPENCODE_GO_API_KEY",),
-        base_url_env_var="OPENCODE_GO_BASE_URL",
-    ),
-    "kilocode": ProviderConfig(
-        id="kilocode",
-        name="Kilo Code",
-        auth_type="api_key",
-        inference_base_url="https://api.kilo.ai/api/gateway",
-        api_key_env_vars=("KILOCODE_API_KEY",),
-        base_url_env_var="KILOCODE_BASE_URL",
-    ),
-    "huggingface": ProviderConfig(
-        id="huggingface",
-        name="Hugging Face",
-        auth_type="api_key",
-        inference_base_url="https://router.huggingface.co/v1",
-        api_key_env_vars=("HF_TOKEN",),
-        base_url_env_var="HF_BASE_URL",
-    ),
-    "xiaomi": ProviderConfig(
-        id="xiaomi",
-        name="Xiaomi MiMo",
-        auth_type="api_key",
-        inference_base_url="https://api.xiaomimimo.com/v1",
-        api_key_env_vars=("XIAOMI_API_KEY",),
-        base_url_env_var="XIAOMI_BASE_URL",
-    ),
-    "ollama-cloud": ProviderConfig(
-        id="ollama-cloud",
-        name="Ollama Cloud",
-        auth_type="api_key",
-        inference_base_url=DEFAULT_OLLAMA_CLOUD_BASE_URL,
-        api_key_env_vars=("OLLAMA_API_KEY",),
-        base_url_env_var="OLLAMA_BASE_URL",
-    ),
-    "bedrock": ProviderConfig(
-        id="bedrock",
-        name="AWS Bedrock",
-        auth_type="aws_sdk",
-        inference_base_url="https://bedrock-runtime.us-east-1.amazonaws.com",
+        inference_base_url="http://localhost:11434/v1",
         api_key_env_vars=(),
-        base_url_env_var="BEDROCK_BASE_URL",
-    ),
-    "azure-foundry": ProviderConfig(
-        id="azure-foundry",
-        name="Azure Foundry",
-        auth_type="api_key",
-        inference_base_url="",  # User-provided endpoint
-        api_key_env_vars=("AZURE_FOUNDRY_API_KEY",),
-        base_url_env_var="AZURE_FOUNDRY_BASE_URL",
+        base_url_env_var="OLLAMA_BASE_URL",
     ),
 }
 
@@ -375,14 +201,13 @@ def get_anthropic_key() -> str:
     """Return the first usable Anthropic credential, or ``""``.
 
     Checks both the ``.env`` file (via ``get_env_value``) and the process
-    environment (``os.getenv``).  The fallback order mirrors the
-    ``PROVIDER_REGISTRY["anthropic"].api_key_env_vars`` tuple:
+    environment (``os.getenv``).  The fallback order:
 
         ANTHROPIC_API_KEY -> ANTHROPIC_TOKEN -> CLAUDE_CODE_OAUTH_TOKEN
     """
     from hermes_cli.config import get_env_value
 
-    for var in PROVIDER_REGISTRY["anthropic"].api_key_env_vars:
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
         value = get_env_value(var) or os.getenv(var, "")
         if value:
             return value
@@ -3631,7 +3456,7 @@ def _reset_config_provider() -> Path:
     if isinstance(model, dict):
         model["provider"] = "auto"
         if "base_url" in model:
-            model["base_url"] = OPENROUTER_BASE_URL
+            model["base_url"] = "https://api.deepseek.com/v1"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False))
     return config_path
 
@@ -4069,7 +3894,13 @@ def _nous_device_code_login(
     min_key_ttl_seconds: int = 5 * 60,
 ) -> Dict[str, Any]:
     """Run the Nous device-code flow and return full OAuth state without persisting."""
-    pconfig = PROVIDER_REGISTRY["nous"]
+    # Nous removed — return empty OAuth state
+    return {
+        "provider": "nous",
+        "logged_in": False,
+        "error": "Nous provider is no longer supported in CN branch. Use deepseek/kimi/minimax/zai/ollama."
+    }
+    pconfig = PROVIDER_REGISTRY.get("deepseek")  # was PROVIDER_REGISTRY["nous"]
     portal_base_url = (
         portal_base_url
         or os.getenv("HERMES_PORTAL_BASE_URL")

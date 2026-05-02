@@ -44,61 +44,9 @@ class HermesOverlay:
 
 
 HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
-    "openrouter": HermesOverlay(
+    "deepseek": HermesOverlay(
         transport="openai_chat",
-        is_aggregator=True,
-        extra_env_vars=("OPENAI_API_KEY",),
-        base_url_env_var="OPENROUTER_BASE_URL",
-    ),
-    "nous": HermesOverlay(
-        transport="openai_chat",
-        auth_type="oauth_device_code",
-        base_url_override="https://inference-api.nousresearch.com/v1",
-    ),
-    "openai-codex": HermesOverlay(
-        transport="codex_responses",
-        auth_type="oauth_external",
-        base_url_override="https://chatgpt.com/backend-api/codex",
-    ),
-    "qwen-oauth": HermesOverlay(
-        transport="openai_chat",
-        auth_type="oauth_external",
-        base_url_override="https://portal.qwen.ai/v1",
-        base_url_env_var="HERMES_QWEN_BASE_URL",
-    ),
-    "google-gemini-cli": HermesOverlay(
-        transport="openai_chat",
-        auth_type="oauth_external",
-        base_url_override="cloudcode-pa://google",
-    ),
-    "copilot-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://copilot",
-        base_url_env_var="COPILOT_ACP_BASE_URL",
-    ),
-    "github-copilot": HermesOverlay(
-        transport="openai_chat",
-        extra_env_vars=("COPILOT_GITHUB_TOKEN", "GH_TOKEN"),
-    ),
-    "anthropic": HermesOverlay(
-        transport="anthropic_messages",
-        extra_env_vars=("ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
-    ),
-    "zai": HermesOverlay(
-        transport="openai_chat",
-        extra_env_vars=("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
-        base_url_env_var="GLM_BASE_URL",
-    ),
-    "kimi-for-coding": HermesOverlay(
-        transport="openai_chat",
-        base_url_env_var="KIMI_BASE_URL",
-    ),
-    "stepfun": HermesOverlay(
-        transport="openai_chat",
-        extra_env_vars=("STEPFUN_API_KEY",),
-        base_url_override="https://api.stepfun.ai/step_plan/v1",
-        base_url_env_var="STEPFUN_BASE_URL",
+        base_url_env_var="DEEPSEEK_BASE_URL",
     ),
     "minimax": HermesOverlay(
         transport="anthropic_messages",
@@ -108,70 +56,18 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         transport="anthropic_messages",
         base_url_env_var="MINIMAX_CN_BASE_URL",
     ),
-    "deepseek": HermesOverlay(
+    "kimi-for-coding": HermesOverlay(
         transport="openai_chat",
-        base_url_env_var="DEEPSEEK_BASE_URL",
+        base_url_env_var="KIMI_BASE_URL",
     ),
-    "alibaba": HermesOverlay(
+    "zai": HermesOverlay(
         transport="openai_chat",
-        base_url_env_var="DASHSCOPE_BASE_URL",
+        extra_env_vars=("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
+        base_url_env_var="GLM_BASE_URL",
     ),
-    "alibaba-coding-plan": HermesOverlay(
-        transport="openai_chat",
-        base_url_env_var="ALIBABA_CODING_PLAN_BASE_URL",
-    ),
-    "vercel": HermesOverlay(
-        transport="openai_chat",
-        is_aggregator=True,
-    ),
-    "opencode": HermesOverlay(
-        transport="openai_chat",
-        is_aggregator=True,
-        base_url_env_var="OPENCODE_ZEN_BASE_URL",
-    ),
-    "opencode-go": HermesOverlay(
-        transport="openai_chat",
-        is_aggregator=True,
-        base_url_env_var="OPENCODE_GO_BASE_URL",
-    ),
-    "kilo": HermesOverlay(
-        transport="openai_chat",
-        is_aggregator=True,
-        base_url_env_var="KILOCODE_BASE_URL",
-    ),
-    "huggingface": HermesOverlay(
-        transport="openai_chat",
-        is_aggregator=True,
-        base_url_env_var="HF_BASE_URL",
-    ),
-    "xai": HermesOverlay(
-        transport="codex_responses",
-        base_url_override="https://api.x.ai/v1",
-        base_url_env_var="XAI_BASE_URL",
-    ),
-    "nvidia": HermesOverlay(
-        transport="openai_chat",
-        base_url_override="https://integrate.api.nvidia.com/v1",
-        base_url_env_var="NVIDIA_BASE_URL",
-    ),
-    "xiaomi": HermesOverlay(
-        transport="openai_chat",
-        base_url_env_var="XIAOMI_BASE_URL",
-    ),
-    "arcee": HermesOverlay(
-        transport="openai_chat",
-        base_url_override="https://api.arcee.ai/api/v1",
-        base_url_env_var="ARCEE_BASE_URL",
-    ),
-    "ollama-cloud": HermesOverlay(
+    "ollama": HermesOverlay(
         transport="openai_chat",
         base_url_env_var="OLLAMA_BASE_URL",
-    ),
-    # Azure Foundry: supports both OpenAI-style and Anthropic-style endpoints.
-    # The transport is determined at runtime from config.yaml model.api_mode.
-    "azure-foundry": HermesOverlay(
-        transport="openai_chat",  # default; overridden by api_mode in config
-        base_url_env_var="AZURE_FOUNDRY_BASE_URL",
     ),
 }
 
@@ -200,25 +96,11 @@ class ProviderDef:
 # Uses models.dev IDs where possible.
 
 ALIASES: Dict[str, str] = {
-    # openrouter
-    "openai": "openrouter",     # bare "openai" → route through aggregator
-
     # zai
     "glm": "zai",
     "z-ai": "zai",
     "z.ai": "zai",
     "zhipu": "zai",
-
-    # xai
-    "x-ai": "xai",
-    "x.ai": "xai",
-    "grok": "xai",
-
-    # nvidia
-    "nim": "nvidia",
-    "nvidia-nim": "nvidia",
-    "build-nvidia": "nvidia",
-    "nemotron": "nvidia",
 
     # kimi-for-coding (models.dev ID)
     "kimi": "kimi-for-coding",
@@ -226,86 +108,24 @@ ALIASES: Dict[str, str] = {
     "kimi-coding-cn": "kimi-for-coding",
     "moonshot": "kimi-for-coding",
 
-    # stepfun
-    "step": "stepfun",
-    "stepfun-coding-plan": "stepfun",
-
     # minimax-cn
     "minimax-china": "minimax-cn",
     "minimax_cn": "minimax-cn",
 
-    # anthropic
-    "claude": "anthropic",
-    "claude-code": "anthropic",
-
-    # github-copilot (models.dev ID)
-    "copilot": "github-copilot",
-    "github": "github-copilot",
-    "github-copilot-acp": "copilot-acp",
-
-    # vercel (models.dev ID for AI Gateway)
-    "ai-gateway": "vercel",
-    "aigateway": "vercel",
-    "vercel-ai-gateway": "vercel",
-
-    # opencode (models.dev ID for OpenCode Zen)
-    "opencode-zen": "opencode",
-    "zen": "opencode",
-
-    # opencode-go
-    "go": "opencode-go",
-    "opencode-go-sub": "opencode-go",
-
-    # kilo (models.dev ID for KiloCode)
-    "kilocode": "kilo",
-    "kilo-code": "kilo",
-    "kilo-gateway": "kilo",
-
     # deepseek
     "deep-seek": "deepseek",
 
-    # alibaba
-    "dashscope": "alibaba",
-    "aliyun": "alibaba",
-    "qwen": "alibaba",
-    "alibaba-cloud": "alibaba",
-    "alibaba_coding": "alibaba-coding-plan",
-    "alibaba-coding": "alibaba-coding-plan",
-    "alibaba_coding_plan": "alibaba-coding-plan",
+    # ollama (local inference — auto-detects local Ollama server)
+    "ollama": "ollama",
 
-    # google-gemini-cli (OAuth + Code Assist)
-    "gemini-cli": "google-gemini-cli",
-    "gemini-oauth": "google-gemini-cli",
-
-
-    # huggingface
-    "hf": "huggingface",
-    "hugging-face": "huggingface",
-    "huggingface-hub": "huggingface",
-
-    # xiaomi
-    "mimo": "xiaomi",
-    "xiaomi-mimo": "xiaomi",
-
-    # bedrock
-    "aws": "bedrock",
-    "aws-bedrock": "bedrock",
-    "amazon-bedrock": "bedrock",
-    "amazon": "bedrock",
-
-    # arcee
-    "arcee-ai": "arcee",
-    "arceeai": "arcee",
-
-    # Local server aliases → virtual "local" concept (resolved via user config)
-    "lmstudio": "lmstudio",
-    "lm-studio": "lmstudio",
-    "lm_studio": "lmstudio",
-    "ollama": "custom",  # bare "ollama" = local; use "ollama-cloud" for cloud
-    "vllm": "local",
-    "llamacpp": "local",
-    "llama.cpp": "local",
-    "llama-cpp": "local",
+    # 其他本地/自定义服务器 → 走 custom 万能口袋
+    "lmstudio": "custom",
+    "lm-studio": "custom",
+    "lm_studio": "custom",
+    "vllm": "custom",
+    "llamacpp": "custom",
+    "llama.cpp": "custom",
+    "llama-cpp": "custom",
 }
 
 
@@ -314,14 +134,7 @@ ALIASES: Dict[str, str] = {
 # not in the catalog.
 
 _LABEL_OVERRIDES: Dict[str, str] = {
-    "nous": "Nous Portal",
-    "openai-codex": "OpenAI Codex",
-    "copilot-acp": "GitHub Copilot ACP",
-    "stepfun": "StepFun Step Plan",
-    "xiaomi": "Xiaomi MiMo",
-    "local": "Local endpoint",
-    "bedrock": "AWS Bedrock",
-    "ollama-cloud": "Ollama Cloud",
+    "local": "本地端点",
 }
 
 
