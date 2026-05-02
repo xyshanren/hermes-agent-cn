@@ -35,7 +35,7 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -489,11 +489,141 @@ def test_model(model_id: str) -> tuple[bool, str]:
             import importlib
             if importlib.util.find_spec("llama_cpp") is None:
                 return False, "llama-cpp-python 未安装"
-            return True, "GGUF 权重已就位，请通过 Hermes 路由自动调用"
+
+            llm = load_embedded_model(model_id)
+            if llm is None:
+                return False, "GGUF 加载失败，请检查模型文件完整性"
+
+            # Quick smoke test: single-token inference
+            result = llm.create_chat_completion(
+                messages=[{"role": "user", "content": "Hello"}],
+                max_tokens=1,
+            )
+            del llm
+            return True, "嵌入式推理加载成功，smoke test 通过"
         except Exception as e:
-            return False, f"检查失败: {e}"
+            return False, f"推理测试失败: {e}"
 
     return True, "就绪"
+
+
+# ---------------------------------------------------------------------------
+# Embedded inference engine (llama-cpp-python)
+# ---------------------------------------------------------------------------
+
+def _find_gguf_file(model_id: str) -> Optional[Path]:
+    """
+    Find the GGUF file in a model's local directory.
+
+    Prefers q4_k_m quantized variants; falls back to any .gguf file.
+    """
+    model_path = get_model_path(model_id)
+    if not model_path.exists():
+        return None
+    gguf_files = list(model_path.rglob("*.gguf"))
+    if not gguf_files:
+        return None
+    q4_files = [f for f in gguf_files if "q4_k_m" in f.name.lower()]
+    return q4_files[0] if q4_files else gguf_files[0]
+
+
+def load_embedded_model(model_id: Optional[str] = None) -> Optional[Any]:
+    """
+    Load an embedded LLM into memory via llama-cpp-python.
+
+    Args:
+        model_id: Model ID (e.g. "qwen-0.5b", "qwen-coder-1.5b").
+                  If None, auto-selects the best available embedded model.
+
+    Returns:
+        llama_cpp.Llama instance, or None if loading fails.
+    """
+    try:
+        import importlib
+        if importlib.util.find_spec("llama_cpp") is None:
+            return None
+    except Exception:
+        return None
+
+    if model_id is None:
+        model_id = get_available_embedded_model()
+        if model_id is None:
+            return None
+
+    gguf_path = _find_gguf_file(model_id)
+    if gguf_path is None:
+        return None
+
+    try:
+        from llama_cpp import Llama
+        llm = Llama(
+            model_path=str(gguf_path),
+            n_ctx=4096,
+            n_threads=-1,       # Use all CPU cores
+            verbose=False,
+        )
+        return llm
+    except Exception:
+        return None
+
+
+def get_available_embedded_model() -> Optional[str]:
+    """
+    Find the best available embedded LLM model.
+
+    Priority (best first): qwen-coder-1.5b > qwen-0.5b
+
+    Returns:
+        Model ID string, or None if no embedded LLM is available.
+    """
+    try:
+        import importlib
+        if importlib.util.find_spec("llama_cpp") is None:
+            return None
+    except Exception:
+        return None
+
+    candidates = ["qwen-coder-1.5b", "qwen-0.5b"]
+    for model_id in candidates:
+        if is_installed(model_id) and _find_gguf_file(model_id) is not None:
+            return model_id
+    return None
+
+
+def chat_completion(
+    model_id: str,
+    messages: list,
+    max_tokens: int = 1024,
+    temperature: float = 0.7,
+    **kwargs,
+) -> Optional[dict]:
+    """
+    Run a chat completion using an embedded LLM.
+
+    Args:
+        model_id: Model ID from MODEL_REGISTRY.
+        messages: List of message dicts with 'role' and 'content'.
+        max_tokens: Maximum tokens to generate.
+        temperature: Sampling temperature.
+        **kwargs: Additional llama-cpp-python kwargs (e.g. stop, top_p).
+
+    Returns:
+        Dict with 'role' and 'content' keys, or None on failure.
+    """
+    llm = load_embedded_model(model_id)
+    if llm is None:
+        return None
+
+    try:
+        result = llm.create_chat_completion(
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **kwargs,
+        )
+        return result["choices"][0]["message"]
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
