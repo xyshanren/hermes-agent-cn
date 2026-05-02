@@ -99,7 +99,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     # Configuration
     CommandDef("config", "显示当前配置", "配置",
                cli_only=True),
-    CommandDef("model", "切换当前会话使用的模型", "配置", args_hint="[模型] [--global]"),
+    CommandDef("model", "查看当前模型（启动时绑定，会话中不可切换）", "配置"),
     CommandDef("provider", "显示可用模型提供商及当前选择", "配置"),
 
     CommandDef("personality", "设置预定义人格", "配置",
