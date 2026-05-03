@@ -108,7 +108,7 @@ export function createSlashHandler(ctx: SlashHandlerContext): (cmd: string) => b
             }
 
             if (d.type === 'skill') {
-              sys(`⚡ loading skill: ${d.name}`)
+              sys(`⚡ 加载技能: ${d.name}`)
 
               return d.message?.trim() ? send(d.message) : sys(`/${parsed.name}: skill payload missing message`)
             }

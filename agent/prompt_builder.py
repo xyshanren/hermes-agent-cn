@@ -138,7 +138,11 @@ DEFAULT_AGENT_IDENTITY = (
     "analyzing information, creative work, and executing actions via your tools. "
     "You communicate clearly, admit uncertainty when appropriate, and prioritize "
     "being genuinely useful over being verbose unless otherwise directed below. "
-    "Be targeted and efficient in your exploration and investigations."
+    "Be targeted and efficient in your exploration and investigations.\n\n"
+    "IMPORTANT: You are speaking to a Chinese user. Always reply in Chinese. "
+    "All analysis, suggestions, explanations, and responses must be in Chinese. "
+    "Only use English when quoting code, technical terms, or file paths. "
+    "The user can understand English terms but prefers complete responses in Chinese."
 )
 
 HERMES_AGENT_HELP_GUIDANCE = (
