@@ -28,10 +28,23 @@
 
 **汉化内容：**
 - CLI 命令描述（36 条命令）
-- 模型提供商标签（24 个 Provider）
+- 模型提供商标签（6 个 Provider）
 - 安装向导界面
 - 启动横幅
 - 诊断工具输出
+- 配置向导界面（Phase 7 新增）
+- 配置管理模块文档（Phase 7 新增）
+
+**Provider 精简：**
+只保留 6 个 Provider（Phase 7 完成）：
+- ✅ deepseek（深度求索）
+- ✅ minimax（MiniMax）
+- ✅ kimi（月之暗面）
+- ✅ zai（智谱 AI）
+- ✅ ollama（本地模型）
+- ✅ Nous Portal（可选）
+
+已删除：OpenRouter、Anthropic、Nous（旧版）、Codex
 
 **安装方式：**
 
