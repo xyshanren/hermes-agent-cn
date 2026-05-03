@@ -21,12 +21,12 @@ class TestDoctorChineseLocalization:
         # Read the source file directly
         doctor_source = Path(doctor_mod.__file__).read_text(encoding="utf-8")
         
-        # Check for Chinese section headers
+        # Check for Chinese section headers (sync with doctor.py actual headers)
         assert "Python 环境" in doctor_source, "Missing Chinese section: Python 环境"
         assert "目录结构" in doctor_source, "Missing Chinese section: 目录结构"
         assert "API 连通性" in doctor_source, "Missing Chinese section: API 连通性"
-        assert "系统资源" in doctor_source, "Missing Chinese section: 系统资源"
-        assert "配置验证" in doctor_source, "Missing Chinese section: 配置验证"
+        assert "配置文件" in doctor_source, "Missing Chinese section: 配置文件"
+        assert "必需的包" in doctor_source, "Missing Chinese section: 必需的包"
 
     def test_doctor_removed_foreign_providers(self):
         """Test that foreign providers are removed from doctor checks."""

@@ -1,0 +1,95 @@
+name: CN Localization Tests
+
+on:
+  push:
+    branches: [cn]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  pull_request:
+    branches: [cn]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-cn-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  localization-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: cn
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install min deps
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install pytest
+
+      - name: Run simple CN tests (no deps needed)
+        run: |
+          source .venv/bin/activate
+          python tests/test_cn_simple.py
+
+  hanzi-encoding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: cn
+
+      - name: Verify UTF-8 encoding and Chinese text
+        run: |
+          files=(
+            "hermes_cli/doctor.py"
+            "hermes_cli/setup.py"
+            "hermes_cli/config.py"
+            "hermes_cli/commands.py"
+            "hermes_cli/models.py"
+            "hermes_cli/banner.py"
+          )
+          for f in "${files[@]}"; do
+            python -c "
+with open('$f', 'r', encoding='utf-8') as fp:
+    content = fp.read()
+    assert 'Python 环境' in content or '配置' in content
+    print(f'$f: OK ({len(content)} chars)')
+"
+          done
+          echo "All files have valid UTF-8 and contain Chinese text."
+
+  no-merge-conflicts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: cn
+
+      - name: Check for unresolved merge conflict markers
+        run: |
+          conflicts=$(grep -rn '<<<<<<<\|=======\|>>>>>>>' --include='*.py' --include='*.md' --include='*.yaml' --include='*.json' . || true)
+          if [ -n "$conflicts" ]; then
+            echo "❌ Unresolved merge conflicts found:"
+            echo "$conflicts"
+            exit 1
+          fi
+          echo "✅ No unresolved merge conflicts"
