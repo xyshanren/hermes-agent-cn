@@ -29,7 +29,6 @@ if _env_path.exists():
 load_dotenv(PROJECT_ROOT / ".env", override=False, encoding="utf-8")
 
 from hermes_cli.colors import Colors, color
-from hermes_constants import OPENROUTER_MODELS_URL
 
 
 _PROVIDER_ENV_HINTS = (
@@ -148,17 +147,17 @@ def _check_gateway_service_linger(issues: list[str]) -> None:
         return
 
     print()
-    print(color("◆ Gateway Service", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 网关服务", Colors.CYAN, Colors.BOLD))
 
     linger_enabled, linger_detail = get_systemd_linger_status()
     if linger_enabled is True:
-        check_ok("Systemd linger enabled", "(gateway service survives logout)")
+        check_ok("Systemd linger 已启用", "(网关服务可持续运行)")
     elif linger_enabled is False:
-        check_warn("Systemd linger disabled", "(gateway may stop after logout)")
+        check_warn("Systemd linger 未启用", "(网关可能在登出后停止)")
         check_info("Run: sudo loginctl enable-linger $USER")
         issues.append("Enable linger for the gateway user service: sudo loginctl enable-linger $USER")
     else:
-        check_warn("Could not verify systemd linger", f"({linger_detail})")
+        check_warn("无法验证 systemd linger", f"({linger_detail})")
 
 
 def run_doctor(args):
@@ -353,7 +352,7 @@ def run_doctor(args):
             config_issues = validate_config_structure()
             if config_issues:
                 print()
-                print(color("◆ Config Structure", Colors.CYAN, Colors.BOLD))
+                print(color("◆ 配置结构", Colors.CYAN, Colors.BOLD))
                 for ci in config_issues:
                     if ci.severity == "error":
                         check_fail(ci.message)
@@ -367,40 +366,10 @@ def run_doctor(args):
             pass
 
     # =========================================================================
-    # Check: Auth providers
-    # =========================================================================
-    print()
-    print(color("◆ Auth Providers", Colors.CYAN, Colors.BOLD))
-
-    try:
-        from hermes_cli.auth import get_nous_auth_status, get_codex_auth_status
-
-        nous_status = get_nous_auth_status()
-        if nous_status.get("logged_in"):
-            check_ok("Nous Portal auth", "(logged in)")
-        else:
-            check_warn("Nous Portal auth", "(not logged in)")
-
-        codex_status = get_codex_auth_status()
-        if codex_status.get("logged_in"):
-            check_ok("OpenAI Codex auth", "(logged in)")
-        else:
-            check_warn("OpenAI Codex auth", "(not logged in)")
-            if codex_status.get("error"):
-                check_info(codex_status["error"])
-    except Exception as e:
-        check_warn("Auth provider status", f"(could not check: {e})")
-
-    if shutil.which("codex"):
-        check_ok("codex CLI")
-    else:
-        check_warn("codex CLI not found", "(required for openai-codex login)")
-
-    # =========================================================================
     # Check: Directory structure
     # =========================================================================
     print()
-    print(color("◆ Directory Structure", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 目录结构", Colors.CYAN, Colors.BOLD))
     
     hermes_home = HERMES_HOME
     if hermes_home.exists():
@@ -520,7 +489,7 @@ def run_doctor(args):
     # =========================================================================
     if sys.platform != "win32":
         print()
-        print(color("◆ Command Installation", Colors.CYAN, Colors.BOLD))
+        print(color("◆ 命令安装", Colors.CYAN, Colors.BOLD))
 
         # Determine the venv entry point location
         _venv_bin = None
@@ -599,7 +568,7 @@ def run_doctor(args):
     # Check: External tools
     # =========================================================================
     print()
-    print(color("◆ External Tools", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 外部工具", Colors.CYAN, Colors.BOLD))
     
     # Git
     if shutil.which("git"):
@@ -743,60 +712,8 @@ def run_doctor(args):
     # Check: API connectivity
     # =========================================================================
     print()
-    print(color("◆ API Connectivity", Colors.CYAN, Colors.BOLD))
+    print(color("◆ API 连通性", Colors.CYAN, Colors.BOLD))
     
-    openrouter_key = os.getenv("OPENROUTER_API_KEY")
-    if openrouter_key:
-        print("  Checking OpenRouter API...", end="", flush=True)
-        try:
-            import httpx
-            response = httpx.get(
-                OPENROUTER_MODELS_URL,
-                headers={"Authorization": f"Bearer {openrouter_key}"},
-                timeout=10
-            )
-            if response.status_code == 200:
-                print(f"\r  {color('✓', Colors.GREEN)} OpenRouter API                          ")
-            elif response.status_code == 401:
-                print(f"\r  {color('✗', Colors.RED)} OpenRouter API {color('(invalid API key)', Colors.DIM)}                ")
-                issues.append("Check OPENROUTER_API_KEY in .env")
-            else:
-                print(f"\r  {color('✗', Colors.RED)} OpenRouter API {color(f'(HTTP {response.status_code})', Colors.DIM)}                ")
-        except Exception as e:
-            print(f"\r  {color('✗', Colors.RED)} OpenRouter API {color(f'({e})', Colors.DIM)}                ")
-            issues.append("Check network connectivity")
-    else:
-        check_warn("OpenRouter API", "(not configured)")
-    
-    from hermes_cli.auth import get_anthropic_key
-    anthropic_key = get_anthropic_key()
-    if anthropic_key:
-        print("  Checking Anthropic API...", end="", flush=True)
-        try:
-            import httpx
-            from agent.anthropic_adapter import _is_oauth_token, _COMMON_BETAS, _OAUTH_ONLY_BETAS
-
-            headers = {"anthropic-version": "2023-06-01"}
-            if _is_oauth_token(anthropic_key):
-                headers["Authorization"] = f"Bearer {anthropic_key}"
-                headers["anthropic-beta"] = ",".join(_COMMON_BETAS + _OAUTH_ONLY_BETAS)
-            else:
-                headers["x-api-key"] = anthropic_key
-            response = httpx.get(
-                "https://api.anthropic.com/v1/models",
-                headers=headers,
-                timeout=10
-            )
-            if response.status_code == 200:
-                print(f"\r  {color('✓', Colors.GREEN)} Anthropic API                           ")
-            elif response.status_code == 401:
-                print(f"\r  {color('✗', Colors.RED)} Anthropic API {color('(invalid API key)', Colors.DIM)}                 ")
-            else:
-                msg = "(couldn't verify)"
-                print(f"\r  {color('⚠', Colors.YELLOW)} Anthropic API {color(msg, Colors.DIM)}                 ")
-        except Exception as e:
-            print(f"\r  {color('⚠', Colors.YELLOW)} Anthropic API {color(f'({e})', Colors.DIM)}                 ")
-
     # -- API-key providers --
     # Tuple: (name, env_vars, default_url, base_env, supports_models_endpoint)
     # If supports_models_endpoint is False, we skip the health check and just show "configured"
@@ -889,7 +806,7 @@ def run_doctor(args):
     # Check: Submodules
     # =========================================================================
     print()
-    print(color("◆ Submodules", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 子模块", Colors.CYAN, Colors.BOLD))
     
     # tinker-atropos (RL training backend)
     tinker_dir = PROJECT_ROOT / "tinker-atropos"
@@ -911,7 +828,7 @@ def run_doctor(args):
     # Check: Tool Availability
     # =========================================================================
     print()
-    print(color("◆ Tool Availability", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 工具可用性", Colors.CYAN, Colors.BOLD))
     
     try:
         # Add project root to path for imports
@@ -944,7 +861,7 @@ def run_doctor(args):
     # Check: Skills Hub
     # =========================================================================
     print()
-    print(color("◆ Skills Hub", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 技能中心", Colors.CYAN, Colors.BOLD))
 
     hub_dir = HERMES_HOME / "skills" / ".hub"
     if hub_dir.exists():
@@ -976,7 +893,7 @@ def run_doctor(args):
     # Memory Provider (only check the active provider, if any)
     # =========================================================================
     print()
-    print(color("◆ Memory Provider", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 记忆提供商", Colors.CYAN, Colors.BOLD))
 
     _active_memory_provider = ""
     try:
@@ -1114,7 +1031,7 @@ def run_doctor(args):
         named_profiles = [p for p in list_profiles() if not p.is_default]
         if named_profiles:
             print()
-            print(color("◆ Profiles", Colors.CYAN, Colors.BOLD))
+            print(color("◆ 配置文件", Colors.CYAN, Colors.BOLD))
             check_ok(f"{len(named_profiles)} profile(s) found")
             wrapper_dir = _get_wrapper_dir()
             for p in named_profiles:
