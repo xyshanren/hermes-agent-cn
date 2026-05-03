@@ -337,7 +337,7 @@ class SkillTierManager:
             self.save()
 
     def unpin_skill(self, skill_name: str):
-        """"取消锁定。"""
+        """取消锁定。"""
         meta = self.get_skill(skill_name)
         if meta:
             meta.pinned = False

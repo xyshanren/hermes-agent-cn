@@ -2853,7 +2853,14 @@ _PLATFORMS = [
         ],
     },
 ]
-def _all_platforms() -> list[dict]:
+# 中文版：只保留国内消息渠道（配置入口隐藏国外渠道）
+_CN_PLATFORMS = frozenset({
+    "dingtalk", "feishu", "wecom", "wecom_callback",
+    "weixin", "qqbot", "yuanbao",
+})
+
+
+def _all_platforms(cn_only: bool = True) -> list[dict]:
     """Return the full list of platforms for setup menus.
 
     Combines the built-in ``_PLATFORMS`` with plugin platforms registered via
@@ -2862,6 +2869,11 @@ def _all_platforms() -> list[dict]:
     ``hermes setup gateway`` without needing the gateway to be running.
     Built-ins keep their dict shape; plugin entries are adapted to the same
     shape with ``_registry_entry`` holding the source.
+
+    When *cn_only* is ``True`` (default in cn branch), only Chinese messaging
+    platforms (dingtalk, feishu, wecom, weixin, qqbot, yuanbao) are returned.
+    Foreign platform code remains in the codebase but is hidden from the
+    setup UI. Set ``cn_only=False`` to restore all platforms.
     """
     # Populate the registry so plugin platforms are visible. Idempotent.
     # Bundled platform plugins (``kind: platform``) auto-load unconditionally,
@@ -2874,7 +2886,11 @@ def _all_platforms() -> list[dict]:
     except Exception as e:
         logger.debug("plugin discovery failed during platform enumeration: %s", e)
 
-    platforms = [dict(p) for p in _PLATFORMS]
+    # 中文版：过滤国外渠道
+    if cn_only:
+        platforms = [dict(p) for p in _PLATFORMS if p["key"] in _CN_PLATFORMS]
+    else:
+        platforms = [dict(p) for p in _PLATFORMS]
     by_key = {p["key"]: p for p in platforms}
 
     try:
@@ -2885,6 +2901,8 @@ def _all_platforms() -> list[dict]:
     for entry in platform_registry.all_entries():
         if entry.name in by_key:
             continue  # built-in already covers it
+        if cn_only and entry.name not in _CN_PLATFORMS:
+            continue  # cn 版过滤国外渠道
         platforms.append({
             "key": entry.name,
             "label": entry.label,

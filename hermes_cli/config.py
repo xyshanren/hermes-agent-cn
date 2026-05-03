@@ -139,7 +139,7 @@ def is_managed() -> bool:
 
 
 def get_managed_update_command() -> Optional[str]:
-    """返回受管安装的首选升级命令。""""
+    """返回受管安装的首选升级命令。"""
     managed_system = get_managed_system()
     if managed_system == "Homebrew":
         return "brew upgrade hermes-agent"
@@ -149,7 +149,7 @@ def get_managed_update_command() -> Optional[str]:
 
 
 def recommended_update_command() -> str:
-    """返回当前安装的最佳更新命令。""""
+    """返回当前安装的最佳更新命令。"""
     return get_managed_update_command() or "hermes update"
 
 
