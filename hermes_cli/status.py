@@ -122,24 +122,15 @@ def show_status(args):
     print()
     print(color("◆ API Keys", Colors.CYAN, Colors.BOLD))
 
+    # 中文版：只保留国产/本地 Provider
     keys = {
-        "OpenRouter": "OPENROUTER_API_KEY",
-        "OpenAI": "OPENAI_API_KEY",
-        "NVIDIA": "NVIDIA_API_KEY",
+        "DeepSeek": "DEEPSEEK_API_KEY",
         "Z.AI/GLM": "GLM_API_KEY",
         "Kimi": "KIMI_API_KEY",
-        "StepFun Step Plan": "STEPFUN_API_KEY",
         "MiniMax": "MINIMAX_API_KEY",
         "MiniMax-CN": "MINIMAX_CN_API_KEY",
-        "Firecrawl": "FIRECRAWL_API_KEY",
-        "Tavily": "TAVILY_API_KEY",
-        "Browser Use": "BROWSER_USE_API_KEY",  # Optional — local browser works without this
-        "Browserbase": "BROWSERBASE_API_KEY",  # Optional — direct credentials only
-        "FAL": "FAL_KEY",
-        "Tinker": "TINKER_API_KEY",
-        "WandB": "WANDB_API_KEY",
-        "ElevenLabs": "ELEVENLABS_API_KEY",
-        "GitHub": "GITHUB_TOKEN",
+        "阿里云": "DASHSCOPE_API_KEY",
+        "小米 MiMo": "XIAOMI_API_KEY",
     }
 
     for name, env_var in keys.items():
@@ -148,10 +139,7 @@ def show_status(args):
         display = redact_key(value) if not show_all else value
         print(f"  {name:<12}  {check_mark(has_key)} {display}")
 
-    from hermes_cli.auth import get_anthropic_key
-    anthropic_value = get_anthropic_key()
-    anthropic_display = redact_key(anthropic_value) if not show_all else anthropic_value
-    print(f"  {'Anthropic':<12}  {check_mark(bool(anthropic_value))} {anthropic_display}")
+    # 中文版：已移除 Anthropic 检查
 
     # =========================================================================
     # Auth Providers (OAuth)
@@ -162,12 +150,10 @@ def show_status(args):
     try:
         from hermes_cli.auth import (
             get_nous_auth_status,
-            get_codex_auth_status,
             get_qwen_auth_status,
             get_minimax_oauth_auth_status,
         )
         nous_status = get_nous_auth_status()
-        codex_status = get_codex_auth_status()
         qwen_status = get_qwen_auth_status()
         minimax_status = get_minimax_oauth_auth_status()
     except Exception:
@@ -178,43 +164,10 @@ def show_status(args):
 
     nous_logged_in = bool(nous_status.get("logged_in"))
     nous_error = nous_status.get("error")
-    nous_label = "logged in" if nous_logged_in else "not logged in (run: hermes auth add nous --type oauth)"
-    print(
-        f"  {'Nous Portal':<12}  {check_mark(nous_logged_in)} "
-        f"{nous_label}"
-    )
-    portal_url = nous_status.get("portal_base_url") or "(unknown)"
-    access_exp = _format_iso_timestamp(nous_status.get("access_expires_at"))
-    key_exp = _format_iso_timestamp(nous_status.get("agent_key_expires_at"))
-    refresh_label = "yes" if nous_status.get("has_refresh_token") else "no"
-    if nous_logged_in or portal_url != "(unknown)" or nous_error:
-        print(f"    Portal URL: {portal_url}")
-    if nous_logged_in or nous_status.get("access_expires_at"):
-        print(f"    Access exp: {access_exp}")
-    if nous_logged_in or nous_status.get("agent_key_expires_at"):
-        print(f"    Key exp:    {key_exp}")
-    if nous_logged_in or nous_status.get("has_refresh_token"):
-        print(f"    Refresh:    {refresh_label}")
-    if nous_error and not nous_logged_in:
-        print(f"    Error:      {nous_error}")
-
-    codex_logged_in = bool(codex_status.get("logged_in"))
-    print(
-        f"  {'OpenAI Codex':<12}  {check_mark(codex_logged_in)} "
-        f"{'logged in' if codex_logged_in else 'not logged in (run: hermes model)'}"
-    )
-    codex_auth_file = codex_status.get("auth_store")
-    if codex_auth_file:
-        print(f"    Auth file:  {codex_auth_file}")
-    codex_last_refresh = _format_iso_timestamp(codex_status.get("last_refresh"))
-    if codex_status.get("last_refresh"):
-        print(f"    Refreshed:  {codex_last_refresh}")
-    if codex_status.get("error") and not codex_logged_in:
-        print(f"    Error:      {codex_status.get('error')}")
-
+    # 中文版：保留国产 OAuth 提供商
     qwen_logged_in = bool(qwen_status.get("logged_in"))
     print(
-        f"  {'Qwen OAuth':<12}  {check_mark(qwen_logged_in)} "
+        f"  {'Qwen OAuth (通义千问)':<16}  {check_mark(qwen_logged_in)} "
         f"{'logged in' if qwen_logged_in else 'not logged in (run: qwen auth qwen-oauth)'}"
     )
     qwen_auth_file = qwen_status.get("auth_file")
@@ -240,43 +193,6 @@ def show_status(args):
         print(f"    Access exp: {minimax_exp}")
     if minimax_status.get("error") and not minimax_logged_in:
         print(f"    Error:      {minimax_status.get('error')}")
-
-    # =========================================================================
-    # Nous Subscription Features
-    # =========================================================================
-    if managed_nous_tools_enabled():
-        features = get_nous_subscription_features(config)
-        print()
-        print(color("◆ Nous Tool Gateway", Colors.CYAN, Colors.BOLD))
-        if not features.nous_auth_present:
-            print("  Nous Portal   ✗ not logged in")
-        else:
-            print("  Nous Portal   ✓ managed tools available")
-        for feature in features.items():
-            if feature.managed_by_nous:
-                state = "active via Nous subscription"
-            elif feature.active:
-                current = feature.current_provider or "configured provider"
-                state = f"active via {current}"
-            elif feature.included_by_default and features.nous_auth_present:
-                state = "included by subscription, not currently selected"
-            elif feature.key == "modal" and features.nous_auth_present:
-                state = "available via subscription (optional)"
-            else:
-                state = "not configured"
-            print(f"  {feature.label:<15} {check_mark(feature.available or feature.active or feature.managed_by_nous)} {state}")
-    elif nous_logged_in:
-        # Logged into Nous but on the free tier — show upgrade nudge
-        print()
-        print(color("◆ Nous Tool Gateway", Colors.CYAN, Colors.BOLD))
-        print("  Your free-tier Nous account does not include Tool Gateway access.")
-        print("  Upgrade your subscription to unlock managed web, image, TTS, and browser tools.")
-        try:
-            portal_url = nous_status.get("portal_base_url", "").rstrip("/")
-            if portal_url:
-                print(f"  Upgrade: {portal_url}")
-        except Exception:
-            pass
 
     # =========================================================================
     # API-Key Providers
@@ -368,25 +284,33 @@ def show_status(args):
     print()
     print(color("◆ Messaging Platforms", Colors.CYAN, Colors.BOLD))
 
-    platforms = {
-        "Telegram": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_HOME_CHANNEL"),
-        "Discord": ("DISCORD_BOT_TOKEN", "DISCORD_HOME_CHANNEL"),
-        "WhatsApp": ("WHATSAPP_ENABLED", None),
-        "Signal": ("SIGNAL_HTTP_URL", "SIGNAL_HOME_CHANNEL"),
-        "Slack": ("SLACK_BOT_TOKEN", None),
-        "Email": ("EMAIL_ADDRESS", "EMAIL_HOME_ADDRESS"),
-        "SMS": ("TWILIO_ACCOUNT_SID", "SMS_HOME_CHANNEL"),
-        "DingTalk": ("DINGTALK_CLIENT_ID", None),
-        "Feishu": ("FEISHU_APP_ID", "FEISHU_HOME_CHANNEL"),
-        "WeCom": ("WECOM_BOT_ID", "WECOM_HOME_CHANNEL"),
-        "WeCom Callback": ("WECOM_CALLBACK_CORP_ID", None),
-        "Weixin": ("WEIXIN_ACCOUNT_ID", "WEIXIN_HOME_CHANNEL"),
-        "BlueBubbles": ("BLUEBUBBLES_SERVER_URL", "BLUEBUBBLES_HOME_CHANNEL"),
-        "QQBot": ("QQ_APP_ID", "QQ_HOME_CHANNEL"),
-        "Yuanbao": ("YUANBAO_APP_ID", "YUANBAO_HOME_CHANNEL"),
+    # 中文版：只显示国内消息渠道
+    _CN_ONLY = frozenset({
+        "dingtalk", "feishu", "wecom", "wecom_callback",
+        "weixin", "qqbot", "yuanbao",
+    })
+    _PLATFORM_MAP = {
+        "dingtalk": ("DINGTALK_CLIENT_ID", None),
+        "feishu": ("FEISHU_APP_ID", "FEISHU_HOME_CHANNEL"),
+        "wecom": ("WECOM_BOT_ID", "WECOM_HOME_CHANNEL"),
+        "wecom_callback": ("WECOM_CALLBACK_CORP_ID", None),
+        "weixin": ("WEIXIN_ACCOUNT_ID", "WEIXIN_HOME_CHANNEL"),
+        "qqbot": ("QQ_APP_ID", "QQ_HOME_CHANNEL"),
+        "yuanbao": ("YUANBAO_APP_ID", "YUANBAO_HOME_CHANNEL"),
     }
+    platforms = {k: v for k, v in _PLATFORM_MAP.items() if k in _CN_ONLY}
 
-    for name, (token_var, home_var) in platforms.items():
+    _CN_LABELS = {
+        "dingtalk": "DingTalk",
+        "feishu": "Feishu",
+        "wecom": "WeCom",
+        "wecom_callback": "WeCom Callback",
+        "weixin": "Weixin",
+        "qqbot": "QQBot",
+        "yuanbao": "App",
+    }
+    for slug, (token_var, home_var) in platforms.items():
+        name = _CN_LABELS.get(slug, slug)
         token = os.getenv(token_var, "")
         has_token = bool(token)
         
