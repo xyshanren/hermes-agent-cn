@@ -5648,10 +5648,10 @@ class HermesCLI:
                 providers = []
 
             if not providers:
-                _cprint("  No authenticated providers found.")
+                _cprint("  未找到已认证的 Provider。")
                 _cprint("")
-                _cprint("  /model <name>                        switch model")
-                _cprint("  /model --provider <slug>             switch provider")
+                _cprint("  /model <名称>                         切换模型")
+                _cprint("  /model --provider <标识>              切换 Provider")
                 return
 
             self._open_model_picker(
