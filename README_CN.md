@@ -44,6 +44,9 @@
 - ✅ ollama（本地模型）
 - ✅ Nous Portal（可选）
 
+**上游版本：** 基于 NousResearch v0.12.0+（2026-05-03 合并，972 commits）
+
+
 已删除：OpenRouter、Anthropic、Nous（旧版）、Codex
 
 **安装方式：**

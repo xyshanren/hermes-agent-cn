@@ -4,6 +4,45 @@
 
 ---
 
+## v0.12.0-cn.1 (2026-05-03)
+
+### 🔄 上游合并：NousResearch v0.12.0+
+
+合并上游 972 个新 commit，涵盖多个重大改进。
+
+#### ✨ 关键上游变更
+
+| 类别 | 内容 |
+|------|------|
+| **新功能** | 飞书评论智能回复（三阶权限管控）、Kanban 面板、Hub 一键技能安装 |
+| **新工具** | 图像路由、LM Studio 推理、Tool Guardrails |
+| **平台修复** | Discord 僵尸 WebSocket 修复、Telegram 轮询心跳保活、WhatsApp 泄漏修复 |
+| **配置改进** | config.yaml 优先于 .env（agent/display/timezone）、凭证池 .env 回退 |
+| **新文件** | `agent/curator.py`、`agent/tool_guardrails.py`、`agent/image_routing.py` 等 |
+| **版本** | `RELEASE_v0.12.0.md` 新增 |
+
+#### 🇨🇳 中文版维护（本次无变更）
+
+- ✅ Provider 清单不受影响（5+1 国产 Provider 保持不变）
+- ✅ 全部汉化文件在上游合并中保留（冲突已解决）
+- ✅ 汉化验证 4/4 通过
+
+#### 冲突解决策略
+
+| 文件 | 策略 | 说明 |
+|------|------|------|
+| `hermes_cli/providers.py` | 保留 cn 版本 | Provider 精简不受影响 |
+| `hermes_cli/doctor.py` | 保留 cn 版本 | 汉化保留 |
+| `hermes_cli/setup.py` | 保留 cn 版本 | 汉化保留 |
+| `hermes_cli/commands.py` | 保留 cn 版本 | 汉化保留 |
+| `hermes_cli/models.py` | 保留 cn 版本 | 汉化保留 |
+| `hermes_cli/banner.py` | 保留 cn 版本 | 汉化保留 |
+| `hermes_cli/auth.py` | 保留 cn 版本 | Provider 精简保留 |
+| `.gitignore` | 采用上游版本 | 未修改 |
+| `agent/onboarding.py` | 采用上游版本 | 未修改 |
+
+---
+
 ## v0.11.0-cn.1 (2026-05-03)
 
 ### 🎯 Phase 7 全面汉化完成
@@ -157,8 +196,15 @@
 | `hermes_cli/setup.py` | 安装向导 | ✅ 已完成 |
 | `hermes_cli/banner.py` | 启动横幅 | ✅ 已完成 |
 | `hermes_cli/doctor.py` | 诊断工具 | ✅ 已完成 |
+| `hermes_cli/config.py` | 配置管理模块文档 | ✅ 已完成 |
 | `README_CN.md` | 中文说明 | ✅ 已完成 |
 | `CHANGELOG_CN.md` | 中文变更记录 | ✅ 已完成 |
+
+### 当前版本
+
+- **上游合并**：NousResearch v0.12.0+（2026-05-03）
+- **中文版本**：v0.12.0-cn.1（2026-05-03）
+- **汉化完成度**：8/12 核心文件
 
 ### 待汉化项目
 
