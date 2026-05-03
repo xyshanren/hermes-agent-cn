@@ -1,15 +1,15 @@
 """
-Configuration management for Hermes Agent.
+Hermes Agent 配置管理。
 
-Config files are stored in ~/.hermes/ for easy access:
-- ~/.hermes/config.yaml  - All settings (model, toolsets, terminal, etc.)
-- ~/.hermes/.env         - API keys and secrets
+配置文件存储在 ~/.hermes/ 目录中，方便访问：
+- ~/.hermes/config.yaml  - 所有设置（模型、工具集、终端等）
+- ~/.hermes/.env         - API 密钥和秘密信息
 
-This module provides:
-- hermes config          - Show current configuration
-- hermes config edit     - Open config in editor
-- hermes config set      - Set a specific value
-- hermes config wizard   - Re-run setup wizard
+本模块提供：
+- hermes config          - 显示当前配置
+- hermes config edit     - 在编辑器中打开配置
+- hermes config set      - 设置特定值
+- hermes config wizard   - 重新运行配置向导
 """
 
 import copy
@@ -94,7 +94,7 @@ def get_managed_system() -> Optional[str]:
 
 
 def is_managed() -> bool:
-    """Check if Hermes is running in package-manager-managed mode.
+    """检查 Hermes 是否运行在包管理器受管模式下。"
 
     Two signals: the HERMES_MANAGED env var (set by the systemd service),
     or a .managed marker file in HERMES_HOME (set by the NixOS activation
@@ -104,7 +104,7 @@ def is_managed() -> bool:
 
 
 def get_managed_update_command() -> Optional[str]:
-    """Return the preferred upgrade command for a managed install."""
+    """返回受管安装的首选升级命令。""""
     managed_system = get_managed_system()
     if managed_system == "Homebrew":
         return "brew upgrade hermes-agent"
@@ -114,21 +114,21 @@ def get_managed_update_command() -> Optional[str]:
 
 
 def recommended_update_command() -> str:
-    """Return the best update command for the current installation."""
+    """返回当前安装的最佳更新命令。""""
     return get_managed_update_command() or "hermes update"
 
 
-def format_managed_message(action: str = "modify this Hermes installation") -> str:
-    """Build a user-facing error for managed installs."""
+def format_managed_message(action: str = "修改 Hermes 安装") -> str:
+    """构建面向用户的错误消息（针对受管安装）。"""
     managed_system = get_managed_system() or "a package manager"
     raw = os.getenv("HERMES_MANAGED", "").strip().lower()
 
     if managed_system == "NixOS":
         env_hint = "true" if raw in _MANAGED_TRUE_VALUES else raw or "true"
         return (
-            f"Cannot {action}: this Hermes installation is managed by NixOS "
-            f"(HERMES_MANAGED={env_hint}).\n"
-            "Edit services.hermes-agent.settings in your configuration.nix and run:\n"
+            f"无法 {action}：此 Hermes 安装由 NixOS 管理 "
+            f"(HERMES_MANAGED={env_hint})。\n"
+            "请编辑 configuration.nix 中的 services.hermes-agent.settings，然后运行：\n"
             "  sudo nixos-rebuild switch"
         )
 
@@ -147,7 +147,7 @@ def format_managed_message(action: str = "modify this Hermes installation") -> s
     )
 
 def managed_error(action: str = "modify configuration"):
-    """Print user-friendly error for managed mode."""
+    """打印用户友好的错误消息（针对受管模式）。"""
     print(format_managed_message(action), file=sys.stderr)
 
 
@@ -156,15 +156,14 @@ def managed_error(action: str = "modify configuration"):
 # =============================================================================
 
 def get_container_exec_info() -> Optional[dict]:
-    """Read container mode metadata from HERMES_HOME/.container-mode.
+    """读取容器模式元数据（从 HERMES_HOME/.container-mode）。
 
-    Returns a dict with keys: backend, container_name, exec_user, hermes_bin
-    or None if container mode is not active, we're already inside the
-    container, or HERMES_DEV=1 is set.
+    返回一个包含以下键的字典：backend, container_name, exec_user, hermes_bin
+    如果容器模式未激活、我们已在容器内、或设置了 HERMES_DEV=1，
+    则返回 None。
 
-    The .container-mode file is written by the NixOS activation script when
-    container.enable = true. It tells the host CLI to exec into the container
-    instead of running locally.
+    .container-mode 文件由 NixOS 激活脚本在 container.enable = true 时写入。
+    它告诉宿主 CLI 进入容器运行，而不是在本地运行。
     """
     if os.environ.get("HERMES_DEV") == "1":
         return None
