@@ -1,6 +1,6 @@
 ---
 name: model-download
-description: 本地 AI 模型下载与管理。支持一键全自动安装、下载内置/推荐/可选三层模型（Whisper/TTS/Qwen），无需网络即可使用语音识别、语音合成和离线对话。当用户提到下载模型、安装模型、模型推荐、内置模型、本地模型、装模型、一键安装时触发。
+description: 本地 AI 模型下载与管理。支持一键全自动安装、下载基础/增强/可选三层模型（Whisper/TTS/Qwen），无需网络即可使用语音识别、语音合成和离线对话。当用户提到下载模型、安装模型、模型推荐、本地模型、装模型、一键安装时触发。
 version: 1.1.0
 author: Hermes CN Team
 metadata:
@@ -39,12 +39,12 @@ Hermes CN 内置本地 AI 模型管理系统，支持离线环境下的语音识
 Hermes CN 按三层分类管理本地模型：
 
 ```
-🔵 内置 (bundled)  → 安装包自带，开箱即用，约 943MB
-🟢 推荐 (recommended) → 一键安装补充，约 641MB
+🔵 基础 (bundled)  → 核心能力，一键安装即用，约 943MB
+🟢 增强 (recommended) → 推荐补充，约 641MB
 ⚪ 可选 (optional)  → 高级功能，用户按需探索
 ```
 
-### 内置模型（安装包预装）
+### 基础模型（一键安装即用）
 
 | 模型 | 类型 | 大小 | 用途 | 命令 |
 |------|------|------|------|------|
@@ -54,7 +54,7 @@ Hermes CN 按三层分类管理本地模型：
 
 > 💡 **一键安装全部**：`hermes local-models setup --yes`
 
-### 推荐模型（引导下载）
+### 增强模型（推荐补充）
 
 | 模型 | 类型 | 大小 | 用途 | 命令 |
 |------|------|------|------|------|
@@ -91,10 +91,11 @@ hermes local-models status
 
 ### Step 2: 构建推荐列表
 
-根据 status 输出，优先推荐 tier=recommended 且未安装的模型：
+根据 status 输出，确认尚未安装的增强模型：
 
 1. **MOSS-TTS-Nano** (641MB) — 纯离线 TTS，无网络也能语音合成
-2. **Qwen2.5-Coder-1.5B** (~1GB) — 本地代码助手，断网时自动降级
+
+> 注：Hermes CN 默认推荐的 LLM 为 Qwen2.5-0.5B（469MB，基础模型），如需更大模型可手动安装 Qwen2.5-Coder-1.5B（~1GB）。
 
 ### Step 3: 向用户展示
 
@@ -104,9 +105,8 @@ hermes local-models status
 已安装: Whisper-small ✓, Qwen2.5-0.5B ✓, Edge-TTS ✓
 推荐下载:
   1. MOSS-TTS-Nano (641MB) — 离线高质量语音合成
-  2. Qwen2.5-Coder-1.5B (~1GB) — 本地代码助手
 
-要下载哪些？回复"全部"或编号如 "1 2"
+要下载吗？回复"是"直接运行一键安装
 ```
 
 ### Step 4: 执行下载
@@ -115,15 +115,15 @@ hermes local-models status
 # 单个下载
 hermes local-models install moss-tts-nano
 
-# 静默下载多个
-hermes local-models install moss-tts-nano && hermes local-models install qwen-coder-1.5b
+# 全部安装
+hermes local-models install all
 ```
 
 ### Step 5: 验证安装
 
 ```bash
 hermes local-models test moss-tts-nano
-hermes local-models test qwen-coder-1.5b
+hermes local-models test qwen-0.5b
 ```
 
 ## 底层 CLI 命令
@@ -163,19 +163,17 @@ hermes local-models test qwen-coder-1.5b
 ~/.hermes/models/
 ├── whisper-small/           # Whisper 模型文件
 ├── moss-tts-nano/           # MOSS-TTS ONNX 权重
-├── qwen-0.5b-q4_k_m/       # Qwen 0.5B GGUF
-├── qwen-coder-1.5b-q4_k_m/ # Qwen Coder 1.5B GGUF
+├── qwen-0.5b-q4_k_m/       # Qwen 0.5B GGUF (基础对话)
 └── edge-tts/               # pip 包标记文件
 ```
 
 ## 注意事项
 
-1. **首次下载需 ModelScope SDK**：`pip install modelscope`（国内镜像加速）
+1. **首次下载需 ModelScope SDK**：一键安装会自动安装，也可手动 `pip install modelscope`（国内镜像加速）
 2. **MOSS-TTS 需 git lfs**：`git lfs install` 后可处理大文件
 3. **下载中断可续传**：ModelScope snapshot_download 支持断点续传
-4. **大文件下载慢**：Qwen Coder ~1GB，建议在良好网络环境下操作
-5. **磁盘空间**：全部安装约需 2.6GB 可用空间
-6. **国内用户优先 ModelScope**：默认从 modelscope.cn 下载，无需 HuggingFace
+4. **磁盘空间**：全部安装约需 1.6GB 可用空间
+5. **国内用户优先 ModelScope**：默认从 modelscope.cn 下载，无需 HuggingFace
 
 ## 交互示例
 
@@ -190,7 +188,7 @@ agent:
   当前状态:
   ✓ 已安装: 无
 
-  推荐安装以下内置模型（开箱即用）:
+  推荐安装以下基础模型（一键安装即用）:
   🔵 Whisper-small (464MB) — 语音转文字
   🔵 Qwen2.5-0.5B (469MB) — 离线对话
   🔵 Edge-TTS (10MB) — 语音合成
@@ -209,9 +207,8 @@ agent:
   
   推荐下载增强模型:
   🟢 1. MOSS-TTS-Nano (641MB) — 纯离线高质量语音合成
-  🟢 2. Qwen2.5-Coder-1.5B (~1GB) — 本地代码助手
   
-  要下载哪些？
+  要下载吗？
 ```
 
 ### 示例 3: 一句话全自动安装
