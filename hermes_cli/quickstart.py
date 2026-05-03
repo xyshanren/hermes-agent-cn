@@ -36,6 +36,13 @@ _PROVIDER_CHECKS = [
         "base_url": "https://api.deepseek.com",
     },
     {
+        "id": "siliconflow",
+        "name": "硅基流动 SiliconFlow",
+        "env_var": "SILICONFLOW_API_KEY",
+        "default_model": "Qwen/Qwen2.5-7B-Instruct",
+        "base_url": "https://api.siliconflow.cn/v1",
+    },
+    {
         "id": "zai",
         "name": "智谱 GLM",
         "env_var": "ZHIPUAI_API_KEY",
