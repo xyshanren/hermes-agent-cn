@@ -31,6 +31,13 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), [Open
 
 ---
 
+> 🇨🇳 **Chinese Edition (hermes-agent-cn)** — A deep localization fork of Hermes Agent, optimized for Chinese users.  
+> Features: Chinese localization, local model inference (CPU/GGUF), smart model routing (local→Ollama→cloud), provider pruning (24→11 CN-based), one-click setup (`hermes quickstart`), offline model install (`hermes local-models setup --yes`).  
+> **Design philosophy: token economy** — every change reduces unnecessary token consumption.  
+> 👉 **[github.com/xyshanren/hermes-agent-cn](https://github.com/xyshanren/hermes-agent-cn)** (branch: `cn`)
+
+---
+
 ## Quick Install
 
 ```bash
@@ -38,6 +45,14 @@ curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scri
 ```
 
 Works on Linux, macOS, WSL2, and Android via Termux. The installer handles the platform-specific setup for you.
+
+> **Chinese Edition users:** Install from the `cn` branch instead:
+> ```bash
+> git clone https://github.com/xyshanren/hermes-agent-cn.git
+> cd hermes-agent-cn
+> git checkout cn
+> # Then follow the standard install steps
+> ```
 
 > **Android / Termux:** The tested manual path is documented in the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux). On Termux, Hermes installs a curated `.[termux]` extra because the full `.[all]` extra currently pulls Android-incompatible voice dependencies.
 >
