@@ -5648,10 +5648,14 @@ class HermesCLI:
                 providers = []
 
             if not providers:
-                _cprint("  未找到已认证的 Provider。")
+                _cprint(f"  当前模型: {model_display}")
+                _cprint(f"  当前 Provider: {provider_display}")
                 _cprint("")
-                _cprint("  /model <名称>                         切换模型")
-                _cprint("  /model --provider <标识>              切换 Provider")
+                _cprint("  (未检测到其他已认证的 Provider，会话中不可切换模型。)")
+                _cprint("")
+                _cprint("  如需更换，请在终端运行:")
+                _cprint("    hermes model")
+                _cprint("    hermes quickstart")
                 return
 
             self._open_model_picker(
