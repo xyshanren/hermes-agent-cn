@@ -130,7 +130,7 @@ def _has_embedded_models() -> bool:
 
 
 def _configure_provider(provider: dict) -> bool:
-    """将检测到的 Provider 写入 config.yaml。"""
+    """将检测到的 Provider 写入 config.yaml 和 ~/.hermes/.env。"""
     try:
         from hermes_cli.auth import _update_config_for_provider
 
@@ -141,7 +141,7 @@ def _configure_provider(provider: dict) -> bool:
         )
 
         # Also set model.default explicitly
-        from hermes_cli.config import load_config, save_config
+        from hermes_cli.config import load_config, save_config, save_env_value
 
         cfg = load_config()
         model = cfg.get("model", {})
@@ -149,6 +149,12 @@ def _configure_provider(provider: dict) -> bool:
             model["default"] = provider["default_model"]
             cfg["model"] = model
             save_config(cfg)
+
+        # Save API key to ~/.hermes/.env so Hermes runtime can find it
+        import os
+        key_val = os.environ.get(provider["env_var"], "")
+        if key_val:
+            save_env_value(provider["env_var"], key_val)
 
         return True
     except Exception as e:
