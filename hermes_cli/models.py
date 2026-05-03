@@ -529,30 +529,22 @@ class ProviderEntry(NamedTuple):
 
 
 CANONICAL_PROVIDERS: list[ProviderEntry] = [
-    ProviderEntry("nous",           "Nous Portal",              "Nous Portal（Nous Research 订阅服务）"),
-    ProviderEntry("openrouter",     "OpenRouter",               "OpenRouter（100+ 模型，按量付费）"),
-    ProviderEntry("anthropic",      "Anthropic",                "Anthropic（Claude 系列模型 — API Key 或 Claude Code）"),
-    ProviderEntry("openai-codex",   "OpenAI Codex",             "OpenAI Codex"),
-    ProviderEntry("xiaomi",         "小米 MiMo",              "小米 MiMo（MiMo-V2 系列 — pro、omni、flash）"),
-    ProviderEntry("qwen-oauth",     "通义千问 OAuth（Portal）",  "通义千问 OAuth（复用本地 Qwen CLI 登录）"),
-    ProviderEntry("copilot",        "GitHub Copilot",           "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
-    ProviderEntry("copilot-acp",    "GitHub Copilot ACP",       "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
-    ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face 推理服务（20+ 开源模型）"),
-    ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio（Gemini 系列 — OpenAI 兼容接口）"),
+    # ── 国产模型提供商 ──
     ProviderEntry("deepseek",       "DeepSeek",                 "DeepSeek（DeepSeek-V3、R1、coder 系列 — 直连 API）"),
-    ProviderEntry("xai",            "xAI",                      "xAI (Grok models — direct API)"),
-    ProviderEntry("zai",            "智谱 AI / GLM",           "Z.AI / GLM（智谱 AI 直连 API）"),
     ProviderEntry("kimi-coding",    "Kimi / Moonshot",         "Kimi Coding 套餐（api.kimi.com）及 Moonshot API"),
     ProviderEntry("kimi-coding-cn", "Kimi / Moonshot（国内）",  "Kimi / Moonshot 国内版（Moonshot CN 直连 API）"),
     ProviderEntry("minimax",        "MiniMax",                  "MiniMax（国际版直连 API）"),
     ProviderEntry("minimax-cn",     "MiniMax（国内）",          "MiniMax 国内版（境内直连 API）"),
+    ProviderEntry("zai",            "智谱 AI / GLM",           "Z.AI / GLM（智谱 AI 直连 API）"),
     ProviderEntry("alibaba",        "阿里云（DashScope）",      "阿里云 / DashScope 编程助手（通义千问 + 多厂商模型）"),
-    ProviderEntry("arcee",          "Arcee AI",                 "Arcee AI (Trinity models — direct API)"),
-    ProviderEntry("kilocode",       "Kilo Code",                "Kilo Code (Kilo Gateway API)"),
-    ProviderEntry("opencode-zen",   "OpenCode Zen",             "OpenCode Zen (35+ curated models, pay-as-you-go)"),
-    ProviderEntry("opencode-go",    "OpenCode Go",              "OpenCode Go (open models, $10/month subscription)"),
-    ProviderEntry("ai-gateway",     "Vercel AI Gateway",        "Vercel AI Gateway (200+ models, pay-per-use)"),
-    ProviderEntry("bedrock",        "AWS Bedrock",              "AWS Bedrock（Claude、Nova、Llama、DeepSeek — IAM 或 API Key）"),
+    ProviderEntry("xiaomi",         "小米 MiMo",              "小米 MiMo（MiMo-V2 系列 — pro、omni、flash）"),
+    ProviderEntry("qwen-oauth",     "通义千问 OAuth（Portal）",  "通义千问 OAuth（复用本地 Qwen CLI 登录）"),
+
+    # ── 本地模型 ──
+    ProviderEntry("ollama",         "Ollama（本地）",           "Ollama 本地模型（llama.cpp 等 — 需本地运行）"),
+
+    # ── 可选（非国产，有海外需求时可用） ──
+    ProviderEntry("nous",           "Nous Portal",              "Nous Portal（Nous Research 订阅服务）"),
 ]
 
 # Derived dicts — used throughout the codebase
