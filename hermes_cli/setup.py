@@ -1,14 +1,14 @@
 """
-Interactive setup wizard for Hermes Agent.
+Hermes Agent 交互式配置向导。
 
-Modular wizard with independently-runnable sections:
-  1. Model & Provider — choose your AI provider and model
-  2. Terminal Backend — where your agent runs commands
-  3. Agent Settings — iterations, compression, session reset
-  4. Messaging Platforms — connect Telegram, Discord, etc.
-  5. Tools — configure TTS, web search, image generation, etc.
+模块化向导，可独立运行各部分：
+  1. 模型与提供商 — 选择你的 AI 提供商和模型
+  2. 终端后端 — Agent 运行命令的环境
+  3. Agent 设置 — 迭代次数、压缩、会话重置
+  4. 消息平台 — 连接 Telegram、Discord 等
+  5. 工具配置 — 配置 TTS、网络搜索、图片生成等
 
-Config files are stored in ~/.hermes/ for easy access.
+配置文件存储在 ~/.hermes/ 目录中，方便访问。
 """
 
 import importlib.util
@@ -255,9 +255,9 @@ def prompt_choice(question: str, choices: list, default: int = 0) -> int:
             idx = int(value) - 1
             if 0 <= idx < len(choices):
                 return idx
-            print_error(f"Please enter a number between 1 and {len(choices)}")
+            print_error(f"请输入 1 到 {len(choices)} 之间的数字")
         except ValueError:
-            print_error("Please enter a number")
+            print_error("请输入数字")
         except (KeyboardInterrupt, EOFError):
             print()
             sys.exit(1)
@@ -284,7 +284,7 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
             return True
         if value in ("n", "no"):
             return False
-        print_error("Please enter 'y' or 'n'")
+        print_error("请输入 'y' 或 'n'")
 
 
 def prompt_checklist(title: str, items: list, pre_selected: list = None) -> list:
@@ -648,11 +648,11 @@ def setup_model_provider(config: dict, *, quick: bool = False):
         select_provider_and_model()
     except (SystemExit, KeyboardInterrupt):
         print()
-        print_info("Provider setup skipped.")
+        print_info("提供商设置已跳过")
     except Exception as exc:
         logger.debug("select_provider_and_model error during setup: %s", exc)
         print_warning(f"Provider setup encountered an error: {exc}")
-        print_info("You can try again later with: hermes model")
+        print_info("稍后可使用以下命令重试：hermes model")
 
     # Re-sync the wizard's config dict from what cmd_model saved to disk.
     # This is critical: cmd_model writes to disk via its own load/save cycle,
@@ -801,7 +801,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
                 save_env_value("OPENROUTER_API_KEY", _or_key)
                 print_success("OpenRouter key saved — vision will use Gemini")
             else:
-                print_info("Skipped — vision won't be available")
+                print_info("已跳过 — 视觉功能将不可用")
         elif _vision_idx == 1:  # OpenAI-compatible endpoint
             _base_url = prompt("  Base URL (blank for OpenAI)").strip() or "https://api.openai.com/v1"
             _api_key_label = "  API key"
@@ -830,7 +830,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
                     + (f" ({_selected_vision_model})" if _selected_vision_model else "")
                 )
             else:
-                print_info("Skipped — vision won't be available")
+                print_info("已跳过 — 视觉功能将不可用")
         else:
             print_info("Skipped — add later with 'hermes setup' or configure AUXILIARY_VISION_* settings")
 
@@ -3020,9 +3020,9 @@ def run_setup_wizard(args):
         if migration_ran:
             config = load_config()
 
-        setup_mode = prompt_choice("How would you like to set up Hermes?", [
-            "Quick setup — provider, model & messaging (recommended)",
-            "Full setup — configure everything",
+        setup_mode = prompt_choice("你想如何配置 Hermes？", [
+            "快速配置 — 提供商、模型和消息（推荐）",
+            "完整配置 — 配置所有选项",
         ], 0)
 
         if setup_mode == 0:
