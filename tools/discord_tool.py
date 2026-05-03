@@ -132,7 +132,7 @@ def _channel_type_name(type_id: int) -> str:
 # ---------------------------------------------------------------------------
 
 # Module-level cache so the app/me endpoint is hit at most once per process.
-_capability_cache: Optional[Dict[str, Any]] = None
+_capability_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def _detect_capabilities(token: str, *, force: bool = False) -> Dict[str, Any]:
@@ -148,8 +148,8 @@ def _detect_capabilities(token: str, *, force: bool = False) -> Dict[str, Any]:
     Cached in a module-global. Pass ``force=True`` to re-fetch.
     """
     global _capability_cache
-    if _capability_cache is not None and not force:
-        return _capability_cache
+    if token in _capability_cache and not force:
+        return _capability_cache[token]
 
     caps: Dict[str, Any] = {
         "has_members_intent": True,
@@ -172,14 +172,14 @@ def _detect_capabilities(token: str, *, force: bool = False) -> Dict[str, Any]:
             "Discord capability detection failed (%s); exposing all actions.", exc,
         )
 
-    _capability_cache = caps
+    _capability_cache[token] = caps
     return caps
 
 
 def _reset_capability_cache() -> None:
     """Test hook: clear the detection cache."""
     global _capability_cache
-    _capability_cache = None
+    _capability_cache = {}
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +328,10 @@ def _member_info(token: str, guild_id: str, user_id: str, **_kwargs: Any) -> str
 
 def _search_members(token: str, guild_id: str, query: str, limit: int = 20, **_kwargs: Any) -> str:
     """Search for guild members by name."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 20
     params = {"query": query, "limit": str(min(limit, 100))}
     members = _discord_request("GET", f"/guilds/{guild_id}/members/search", token, params=params)
     result = []
@@ -350,6 +354,10 @@ def _fetch_messages(
     **_kwargs: Any,
 ) -> str:
     """Fetch recent messages from a channel."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 50
     params: Dict[str, str] = {"limit": str(min(limit, 100))}
     if before:
         params["before"] = before

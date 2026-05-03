@@ -1,11 +1,4 @@
-﻿情景化首次引导提示。
-
-不在首次运行时弹出问卷，而是在用户第一次遇到行为分支时显示一次性提示。
-例如：Agent 运行时发送消息、首次运行耗时工具等。每次提示仅显示一次
-（通过 ``config.yaml`` 中的 ``onboarding.seen.<flag>`` 跟踪），之后不再出現。
-
-保持此模块轻量且无外部依赖，以便 CLI 和 Gateway 均可导入。
-
+"""
 Contextual first-touch onboarding hints.
 
 Instead of blocking first-run questionnaires, show a one-time hint the *first*
@@ -32,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 BUSY_INPUT_FLAG = "busy_input_prompt"
 TOOL_PROGRESS_FLAG = "tool_progress_prompt"
+OPENCLAW_RESIDUE_FLAG = "openclaw_residue_cleanup"
 
 
 # -------------------------------------------------------------------------
@@ -50,10 +44,18 @@ def busy_input_hint_gateway(mode: str) -> str:
             "Send `/busy interrupt` to make new messages stop the current task "
             "immediately, or `/busy status` to check. This notice won't appear again."
         )
+    if mode == "steer":
+        return (
+            "💡 First-time tip — I steered your message into the current run; "
+            "it will arrive after the next tool call instead of interrupting. "
+            "Send `/busy interrupt` or `/busy queue` to change this, or "
+            "`/busy status` to check. This notice won't appear again."
+        )
     return (
         "💡 First-time tip — I just interrupted my current task to answer you. "
         "Send `/busy queue` to queue follow-ups for after the current task instead, "
-        "or `/busy status` to check. This notice won't appear again."
+        "`/busy steer` to inject them mid-run without interrupting, or "
+        "`/busy status` to check. This notice won't appear again."
     )
 
 
@@ -61,49 +63,67 @@ def busy_input_hint_cli(mode: str) -> str:
     """CLI version of the busy-input hint (plain text, no markdown)."""
     if mode == "queue":
         return (
-            "(提示)你的消息已被加入队列，等待当前任务结束后处理。
-            "使用 /busy interrupt 让回车键立即停止当前运行。
-            "此提示仅显示一次。
+            "(tip) Your message was queued for the next turn. "
+            "Use /busy interrupt to make Enter stop the current run instead, "
+            "or /busy steer to inject mid-run. This tip only shows once."
+        )
+    if mode == "steer":
+        return (
+            "(tip) Your message was steered into the current run; it arrives "
+            "after the next tool call. Use /busy interrupt or /busy queue to "
+            "change this. This tip only shows once."
         )
     return (
-        "(提示)你的消息已中断当前运行。
-        "使用 /busy queue 可将消息加入队列等待当前任务完成。
-        "此提示仅显示一次。
+        "(tip) Your message interrupted the current run. "
+        "Use /busy queue to queue messages for the next turn instead, "
+        "or /busy steer to inject mid-run. This tip only shows once."
     )
 
 
 def tool_progress_hint_gateway() -> str:
     return (
-        "💡 首次提示 — 该工具运行时间较长，我正在流式输出每一步的进度信息。
-        "如果觉得进度消息过多，发送 `/verbose` 可切换显示模式（全部 → 仅新 → 关闭）。
-        "此提示仅显示一次。
+        "💡 First-time tip — that tool took a while and I'm streaming every step. "
+        "If the progress messages feel noisy, send `/verbose` to cycle modes "
+        "(all → new → off). This notice won't appear again."
     )
 
 
 def tool_progress_hint_cli() -> str:
     return (
-        "(提示)该工具运行时间较长。使用 /verbose 可切换工具进度
-        "显示模式（全部 → 仅新 → 关闭 → 详细）。此提示仅显示一次。
+        "(tip) That tool ran for a while. Use /verbose to cycle tool-progress "
+        "display modes (all -> new -> off -> verbose). This tip only shows once."
     )
 
 
-def busy_input_hint_tui() -> str:
-    """首次在 TUI 忙砰时发送消息时显示的提示。
+def openclaw_residue_hint_cli() -> str:
+    """Banner shown the first time Hermes starts and finds ``~/.openclaw/``.
 
-    TUI 会自动将运行中发送的消息加入队列，使用双回车（空输入时）
-    "作为中断手势。没有 ``/busy`` 命令 — 此提示告知快捷键而非命令。
+    Points users at ``hermes claw migrate`` (non-destructive port of config,
+    memory, and skills) first. ``hermes claw cleanup`` is mentioned as the
+    follow-up step for users who have already migrated and want to archive
+    the old directory — with a warning that archiving breaks OpenClaw.
     """
     return (
-        "已加入队列，等待当前轮次结束后处理 — "
-        "在空行上按两次回车可立即中断当前轮次。此提示仅显示一次。
+        "A legacy OpenClaw directory was detected at ~/.openclaw/.\n"
+        "To port your config, memory, and skills over to Hermes, run "
+        "`hermes claw migrate`.\n"
+        "If you've already migrated and want to archive the old directory, "
+        "run `hermes claw cleanup` (renames it to ~/.openclaw.pre-migration — "
+        "OpenClaw will stop working after this).\n"
+        "This tip only shows once."
     )
 
 
-def tool_progress_hint_tui() -> str:
-    return (
-        "该工具运行时间较长 — 使用 /verbose 切换工具进度
-        "显示模式（全部 → 仅新 → 关闭 → 详细）。此提示仅显示一次。
-    )
+def detect_openclaw_residue(home: Optional[Path] = None) -> bool:
+    """Return True if an OpenClaw workspace directory is present in ``$HOME``.
+
+    Pure filesystem check — no side effects. ``home`` override exists for tests.
+    """
+    base = home or Path.home()
+    try:
+        return (base / ".openclaw").is_dir()
+    except OSError:
+        return False
 
 
 # -------------------------------------------------------------------------
@@ -161,12 +181,13 @@ def mark_seen(config_path: Path, flag: str) -> bool:
 __all__ = [
     "BUSY_INPUT_FLAG",
     "TOOL_PROGRESS_FLAG",
+    "OPENCLAW_RESIDUE_FLAG",
     "busy_input_hint_gateway",
     "busy_input_hint_cli",
-    "busy_input_hint_tui",
     "tool_progress_hint_gateway",
     "tool_progress_hint_cli",
-    "tool_progress_hint_tui",
+    "openclaw_residue_hint_cli",
+    "detect_openclaw_residue",
     "is_seen",
     "mark_seen",
 ]
