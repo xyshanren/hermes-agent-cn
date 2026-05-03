@@ -232,3 +232,45 @@ class TestLocalizationSmoke:
             for i, line in enumerate(lines, 1):
                 if '""""' in line:
                     raise SyntaxError(f"{f}:{i} — quadruple quote found")
+
+
+# =============================================================================
+# Local Models Integration Tests
+# =============================================================================
+
+class TestLocalModelsSetup:
+    """Tests for the local-models setup/install-all feature."""
+
+    def test_model_registry_has_all_entries(self):
+        """Verify MODEL_REGISTRY contains expected models."""
+        from hermes_cli.model_manager import MODEL_REGISTRY
+        model_ids = [m["id"] for m in MODEL_REGISTRY]
+        assert "whisper-small" in model_ids
+        assert "edge-tts" in model_ids
+        assert "moss-tts-nano" in model_ids
+        assert "qwen-0.5b" in model_ids
+        assert "qwen-coder-1.5b" in model_ids
+
+    def test_setup_function_imports(self):
+        """Verify cmd_local_models_setup imports cleanly."""
+        from hermes_cli.model_manager import cmd_local_models_setup
+        assert callable(cmd_local_models_setup)
+
+    def test_embedded_provider_list_models(self):
+        """Verify EmbeddedProvider.list_models() works with list-type MODEL_REGISTRY."""
+        from hermes_cli.embedded import EmbeddedProvider
+        provider = EmbeddedProvider()
+        models = provider.list_models()
+        # Should be a list, not crash
+        assert isinstance(models, list)
+        # Only LLM models should appear
+        for m in models:
+            assert m["id"].startswith("embedded:")
+
+    def test_embedded_provider_resolve_no_model(self):
+        """Verify _resolve_model() returns None when no model installed (no crash)."""
+        from hermes_cli.embedded import EmbeddedProvider
+        provider = EmbeddedProvider()
+        result = provider._resolve_model()
+        # Should not crash — may be None or a string depending on environment
+        assert result is None or isinstance(result, str)

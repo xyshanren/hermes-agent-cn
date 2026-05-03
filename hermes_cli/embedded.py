@@ -69,19 +69,17 @@ class EmbeddedProvider:
         try:
             from hermes_cli.model_manager import get_available_embedded_model
             if self._model_id:
-                # 检查指定模型是否存在
+                # 检查指定模型是否可用
                 available = get_available_embedded_model()
-                if available and available.get("model_id") == self._model_id:
+                if available == self._model_id:
                     return self._model_id
-                # 尝试直接检查
+                # 尝试直接检查 GGUF 文件是否存在
                 from hermes_cli.model_manager import _find_gguf_file
                 gguf = _find_gguf_file(self._model_id)
                 return self._model_id if gguf else None
             else:
                 result = get_available_embedded_model()
-                if result:
-                    return result.get("model_id")
-                return None
+                return result if result else None
         except ImportError:
             logger.debug("model_manager 不可导入，嵌入式推理不可用")
             return None
@@ -149,20 +147,20 @@ class EmbeddedProvider:
             return None
 
     def list_models(self) -> List[Dict[str, Any]]:
-        """列出所有可用的嵌入式模型。"""
+        """列出所有可用的嵌入式模型（LLM 类型，使用 GGUF 格式）。"""
         models = []
         try:
             from hermes_cli.model_manager import MODEL_REGISTRY
-            for model_id, info in MODEL_REGISTRY.items():
-                if info.get("type") == "gguf":
+            for entry in MODEL_REGISTRY:
+                if entry.get("category") == "llm":
                     from hermes_cli.model_manager import _find_gguf_file
-                    gguf_path = _find_gguf_file(model_id)
+                    gguf_path = _find_gguf_file(entry["id"])
                     models.append({
-                        "id": f"{EMBEDDED_PREFIX}{model_id}",
-                        "name": info.get("name", model_id),
+                        "id": f"{EMBEDDED_PREFIX}{entry['id']}",
+                        "name": entry.get("name", entry["id"]),
                         "installed": gguf_path is not None,
-                        "tier": info.get("tier", "optional"),
-                        "size_gb": info.get("size_gb", 0),
+                        "tier": entry.get("tier", "optional"),
+                        "size_gb": round(entry.get("size_mb", 0) / 1024, 2),
                     })
         except ImportError:
             pass

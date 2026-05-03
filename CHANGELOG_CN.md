@@ -27,6 +27,19 @@
 - ✅ 全部汉化文件在上游合并中保留（冲突已解决）
 - ✅ 汉化验证 4/4 通过
 
+#### 🚀 新增：本地模型一键安装
+
+- **`hermes local-models install all`** —— 支持 `all` 关键字批量安装全部模型
+- **`hermes local-models setup`** —— 一键安装命令（自动装依赖 + 全部内置/推荐模型）
+  - 支持 `--yes` / `-y` 跳过确认，适合脚本化调用
+  - 自动安装运行时依赖：modelscope, llama-cpp-python, faster-whisper, onnxruntime, edge-tts
+  - 自动下载：Whisper-small(464MB) + Edge-TTS(10MB) + Qwen2.5-0.5B(469MB) + MOSS-TTS-Nano(641MB)
+- **修复 `hermes_cli/embedded.py`** —— API 不匹配 bug
+  - `_resolve_model()` 修复 `get_available_embedded_model()` 返回 str 却被当 dict 调用的 bug
+  - `list_models()` 修复 `MODEL_REGISTRY`(list) 被当 dict 调 `.items()` 的 bug
+- **测试补充** —— 添加 4 个新测试用例（模型注册表、setup 函数、embedded provider）
+- **Skill 升级** —— `model-download` SKILL.md 升级到 v1.1.0，新增"一键安装"触发词和流程
+
 #### 冲突解决策略
 
 | 文件 | 策略 | 说明 |

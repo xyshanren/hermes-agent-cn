@@ -1,14 +1,16 @@
 ---
 name: model-download
-description: 本地 AI 模型下载与管理。支持下载内置/推荐/可选三层模型（Whisper/TTS/Qwen），无需网络即可使用语音识别、语音合成和离线对话。当用户提到下载模型、安装模型、模型推荐、内置模型、本地模型时触发。
-version: 1.0.0
+description: 本地 AI 模型下载与管理。支持一键全自动安装、下载内置/推荐/可选三层模型（Whisper/TTS/Qwen），无需网络即可使用语音识别、语音合成和离线对话。当用户提到下载模型、安装模型、模型推荐、内置模型、本地模型、装模型、一键安装时触发。
+version: 1.1.0
 author: Hermes CN Team
 metadata:
   hermes:
-    tags: [本地模型, 模型下载, 离线部署, STT, TTS, LLM, 语音识别, 语音合成, 代码助手]
+    tags: [本地模型, 模型下载, 离线部署, STT, TTS, LLM, 语音识别, 语音合成, 代码助手, 一键安装]
     commands:
       - hermes local-models list
       - hermes local-models install <model>
+      - hermes local-models install all
+      - hermes local-models setup
       - hermes local-models status
       - hermes local-models test <model>
       - hermes local-models remove <model>
@@ -29,6 +31,7 @@ Hermes CN 内置本地 AI 模型管理系统，支持离线环境下的语音识
 | 模型推荐 | "有什么推荐的模型"、"推荐下载哪些模型" |
 | 内置模型 | "内置模型有哪些"、"自带了哪些模型" |
 | 本地模型 | "本地模型怎么用"、"离线模型状态" |
+| **一键安装** | **"装本地模型"、"一键安装"、"全部安装"、"全装上"** |
 | 安装/卸载 | "安装 whisper"、"卸载 qwen" |
 
 ## 模型分层体系
@@ -37,7 +40,7 @@ Hermes CN 按三层分类管理本地模型：
 
 ```
 🔵 内置 (bundled)  → 安装包自带，开箱即用，约 943MB
-🟢 推荐 (recommended) → 首次引导下载，增强能力，约 1.7GB
+🟢 推荐 (recommended) → 一键安装补充，约 641MB
 ⚪ 可选 (optional)  → 高级功能，用户按需探索
 ```
 
@@ -49,16 +52,36 @@ Hermes CN 按三层分类管理本地模型：
 | **Qwen2.5-0.5B** | LLM | 469MB | 轻量离线对话 | `hermes local-models install qwen-0.5b` |
 | **Edge-TTS** | TTS | 10MB | 微软免费 TTS | `pip install edge-tts`（无需下载模型） |
 
+> 💡 **一键安装全部**：`hermes local-models setup --yes`
+
 ### 推荐模型（引导下载）
 
 | 模型 | 类型 | 大小 | 用途 | 命令 |
 |------|------|------|------|------|
 | **MOSS-TTS-Nano** | TTS | 641MB | 纯离线高质量语音合成 | `hermes local-models install moss-tts-nano` |
-| **Qwen2.5-Coder-1.5B** | LLM | ~1GB | 本地代码助手（q4_k_m） | `hermes local-models install qwen-coder-1.5b` |
+
+> 💡 以上全部通过 `hermes local-models setup --yes` 一键安装
 
 ## 执行流程
 
-### Step 1: 检查当前状态
+### Flow 0: 一键全自动安装（用户触发 "装本地模型"）
+
+当用户说 "装本地模型" 或 "一键安装" 等触发词时，直接执行全自动安装，无需逐一手动确认：
+
+```bash
+# 一句话全自动：安装依赖 + 全部内置/推荐模型
+hermes local-models setup --yes
+```
+
+自动完成以下工作：
+1. 安装所有运行时依赖（modelscope, llama-cpp-python, faster-whisper, onnxruntime, edge-tts）
+2. 下载 Whisper-small (STT, 464MB)
+3. 安装 Edge-TTS (TTS, 10MB)
+4. 下载 Qwen2.5-0.5B (LLM, 469MB)
+5. 下载 MOSS-TTS-Nano (TTS, 641MB)
+6. 验证安装结果
+
+### Flow 1: 检查当前状态
 
 ```bash
 hermes local-models status
@@ -109,6 +132,9 @@ hermes local-models test qwen-coder-1.5b
 |------|------|
 | `hermes local-models list` | 列出所有可用模型及安装状态 |
 | `hermes local-models install <id>` | 下载并安装指定模型 |
+| `hermes local-models install all` | 一键安装全部内置+推荐模型 |
+| `hermes local-models setup` | 一键安装（依赖 + 全部模型，交互式确认） |
+| `hermes local-models setup --yes` | 一键安装（跳过确认，全自动） |
 | `hermes local-models remove <id>` | 卸载指定模型（需确认） |
 | `hermes local-models status` | 详细状态报告（含占用空间） |
 | `hermes local-models test <id>` | 验证模型是否能正常加载 |
@@ -186,4 +212,31 @@ agent:
   🟢 2. Qwen2.5-Coder-1.5B (~1GB) — 本地代码助手
   
   要下载哪些？
+```
+
+### 示例 3: 一句话全自动安装
+
+```
+用户: 装本地模型
+
+agent:
+  🔧 检测到一键安装请求，正在全自动安装...
+  
+  Step 1/3: 安装运行时依赖...
+  ✓ modelscope
+  ✓ llama-cpp-python  
+  ✓ faster-whisper
+  ✓ onnxruntime
+  ✓ edge-tts
+
+  Step 2/3: 下载模型（约 1.58GB）...
+  ✅ Whisper-small (464MB) ✓
+  ✅ Edge-TTS (10MB) ✓
+  ✅ Qwen2.5-0.5B (469MB) ✓
+  ✅ MOSS-TTS-Nano (641MB) ✓
+
+  Step 3/3: 验证安装...
+  ✅ 全部安装完成！
+  
+  建议运行: hermes doctor 查看系统状态
 ```

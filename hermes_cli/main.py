@@ -93,6 +93,7 @@ def _import_model_manager_cmd(func_name: str):
         from hermes_cli.model_manager import (
             cmd_local_models_list,
             cmd_local_models_install,
+            cmd_local_models_setup,
             cmd_local_models_remove,
             cmd_local_models_status,
             cmd_local_models_test,
@@ -100,6 +101,7 @@ def _import_model_manager_cmd(func_name: str):
         cmd_map = {
             "cmd_local_models_list": cmd_local_models_list,
             "cmd_local_models_install": cmd_local_models_install,
+            "cmd_local_models_setup": cmd_local_models_setup,
             "cmd_local_models_remove": cmd_local_models_remove,
             "cmd_local_models_status": cmd_local_models_status,
             "cmd_local_models_test": cmd_local_models_test,
@@ -8226,13 +8228,27 @@ def main():
 
     # local-models install
     lm_install = local_models_subparsers.add_parser("install", help="下载并安装指定模型")
-    lm_install.add_argument("model", nargs="?", help="模型 ID（如 whisper-small, moss-tts-nano, qwen-coder-1.5b）")
+    lm_install.add_argument("model", nargs="?", help="模型 ID 或 'all'（安装全部）")
     lm_install.add_argument(
         "--force", "-f",
         action="store_true",
         help="强制重新下载（覆盖已有文件）",
     )
+    lm_install.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="配合 install all 跳过确认（直接安装）",
+    )
     lm_install.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_install")(args))
+
+    # local-models setup (one-click full install)
+    lm_setup = local_models_subparsers.add_parser("setup", help="一键安装 — 自动装依赖 + 全部内置/推荐模型")
+    lm_setup.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="跳过确认，直接安装",
+    )
+    lm_setup.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_setup")(args))
 
     # local-models remove
     lm_remove = local_models_subparsers.add_parser("remove", help="删除已安装的模型")

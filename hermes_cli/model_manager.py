@@ -691,14 +691,19 @@ def cmd_local_models_list(args) -> int:
 
 
 def cmd_local_models_install(args) -> int:
-    """Install a model."""
+    """Install a model or all bundled+recommended if 'all' is specified."""
     from hermes_cli.colors import Colors, color
 
     model_id = args.model
     if not model_id:
         print("❌ 请指定模型名称，例如: hermes local-models install whisper-small")
         print("   运行 hermes local-models list 查看可用模型")
+        print("   运行 hermes local-models install all  一键安装全部内置/推荐模型")
         return 1
+
+    # Special case: install all bundled + recommended models
+    if model_id == "all":
+        return cmd_local_models_setup(args)
 
     # Validate model ID
     valid_ids = [m["id"] for m in MODEL_REGISTRY]
@@ -711,6 +716,138 @@ def cmd_local_models_install(args) -> int:
 
     success = download_model(model_id)
     return 0 if success else 1
+
+
+def cmd_local_models_setup(args) -> int:
+    """一键安装：自动安装运行时依赖 + 所有内置/推荐模型。
+
+    安装顺序：
+        1. Python 运行时依赖（modelscope, llama-cpp-python 等）
+        2. 内置模型（whisper-small, edge-tts, qwen-0.5b）
+        3. 推荐模型（moss-tts-nano）
+        4. 验证安装
+    """
+    from hermes_cli.colors import Colors, color
+
+    models_to_install = [
+        "whisper-small",
+        "edge-tts",
+        "qwen-0.5b",
+        "moss-tts-nano",
+    ]
+
+    # ── 打印安装计划 ──
+    total_size = sum(m["size_mb"] for m in MODEL_REGISTRY if m["id"] in models_to_install)
+    print(f"\n{'=' * 60}")
+    print(f"  🔧 Hermes 本地模型一键安装")
+    print(f"{'=' * 60}\n")
+    print(f"  将安装以下 {len(models_to_install)} 个模型 (共约 {total_size}MB):")
+    for m_id in models_to_install:
+        entry = next(m for m in MODEL_REGISTRY if m["id"] == m_id)
+        if is_installed(m_id):
+            status = color("✓ 已安装", Colors.GREEN)
+        else:
+            status = color("✗ 未安装", Colors.RED)
+        print(f"    {status:12s} {entry['name']:30s} ({entry['size_mb']}MB)")
+
+    print(f"\n  {'=' * 60}")
+    print(f"  运行时依赖: modelscope + llama-cpp-python + faster-whisper + onnxruntime")
+    print(f"  {'=' * 60}\n")
+
+    # ── 确认 ──
+    if not getattr(args, "yes", False):
+        confirm = input("  确认安装以上所有模型? (Y/n): ").strip().lower()
+        if confirm not in ("", "y", "yes"):
+            print("已取消")
+            return 0
+    print()
+
+    # ── Step 1: 安装运行时依赖 ──
+    success = _install_runtime_deps()
+    if not success:
+        print(f"\n  {color('❌', Colors.RED)} 依赖安装失败，请检查网络连接后重试")
+        return 1
+
+    # ── Step 2: 逐个安装模型 ──
+    failed = []
+    for m_id in models_to_install:
+        entry = next(m for m in MODEL_REGISTRY if m["id"] == m_id)
+        if is_installed(m_id):
+            print(f"\n  {color('⏭', Colors.YELLOW)} {entry['name']} 已安装，跳过")
+            continue
+
+        print(f"\n  {color('⏳', Colors.YELLOW)} 正在安装: {entry['name']}...")
+        ok = download_model(m_id)
+        if ok:
+            print(f"  {color('✅', Colors.GREEN)} {entry['name']} 安装成功")
+        else:
+            print(f"  {color('❌', Colors.RED)} {entry['name']} 安装失败")
+            failed.append(entry["name"])
+
+    # ── Step 3: 验证安装 ──
+    print(f"\n{'=' * 60}")
+    print(f"  📋 安装结果汇总")
+    print(f"{'=' * 60}\n")
+
+    installed_list = []
+    for m_id in models_to_install:
+        entry = next(m for m in MODEL_REGISTRY if m["id"] == m_id)
+        if is_installed(m_id):
+            installed_list.append(entry["name"])
+            print(f"  {color('✓', Colors.GREEN)} {entry['name']}")
+
+    for m_name in failed:
+        print(f"  {color('✗', Colors.RED)} {m_name}")
+
+    print(f"\n  成功: {len(installed_list)}/{len(models_to_install)}")
+    if failed:
+        print(f"  失败: {len(failed)}/{len(models_to_install)}")
+        print(f"  请检查网络后重试: hermes local-models install <模型ID>")
+    else:
+        print(f"  ✅ 全部安装完成！")
+        print(f"  建议运行: hermes doctor 查看系统状态")
+
+    print(f"\n{'=' * 60}\n")
+    return 0 if not failed else 1
+
+
+def _install_runtime_deps() -> bool:
+    """安装本地模型所需的全部 Python 运行时依赖。
+
+    Returns:
+        True 如果所有依赖安装成功或已存在，否则 False。
+    """
+    deps = [
+        ("modelscope", "modelscope"),
+        ("llama_cpp", "llama-cpp-python"),
+        ("faster_whisper", "faster-whisper"),
+        ("onnxruntime", "onnxruntime"),
+        ("edge_tts", "edge-tts"),
+    ]
+
+    import importlib
+    import subprocess
+    import sys
+
+    all_ok = True
+    for import_name, pip_name in deps:
+        if importlib.util.find_spec(import_name):
+            print(f"  ✓ {pip_name} 已安装，跳过")
+            continue
+
+        print(f"  ⏳ 正在安装 {pip_name} ...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", pip_name],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print(f"  ✅ {pip_name} 安装成功")
+        else:
+            err = result.stderr.strip() or result.stdout.strip()
+            print(f"  ❌ {pip_name} 安装失败: {err[:200]}")
+            all_ok = False
+
+    return all_ok
 
 
 def cmd_local_models_remove(args) -> int:
