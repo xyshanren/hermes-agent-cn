@@ -55,6 +55,20 @@
 - **测试补充** —— 添加 4 个 quickstart 测试用例
 - **文档同步** —— README_CN.md 新增"快速开始"章节，更新本地模型命令
 
+#### 🌐 系统提示词中文指令 + 界面汉化补充
+
+- **系统提示词** —— `DEFAULT_AGENT_IDENTITY` 添加「Always reply in Chinese」指令
+  → 所有 LLM 生成的回复（分析/建议/总结）将自动使用中文
+- **TUI/Web 加载消息** —— 「⚡ loading skill:」→「⚡ 加载技能:」
+- **`/model` 命令** —— 无可用 Provider 时显示当前模型信息，而非空报错
+  - 汉化错误消息：「No authenticated providers found」→「未检测到其他已认证的 Provider」
+  - 新增当前模型/Provider 显示，退出提示改为中文 + 终端切换指引
+
+#### 🧩 Quickstart 增强
+
+- **添加硅基流动 SiliconFlow 支持** —— `SILICONFLOW_API_KEY` 自动检测，默认模型 `Qwen/Qwen2.5-7B-Instruct`
+- **修复 API Key 持久化** —— `_configure_provider()` 将 Key 写入 `~/.hermes/.env`，确保 Hermes 运行时子进程也能找到
+
 #### 冲突解决策略
 
 | 文件 | 策略 | 说明 |
