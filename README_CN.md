@@ -9,45 +9,118 @@
 # Hermes Agent ☤ 中文版
 
 <p align="center">
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/英文文档-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
-  <a href="https://hermes.xaapi.ai/"><img src="https://img.shields.io/badge/中文文档-hermes.xaapi.ai-FF6B6B?style=for-the-badge" alt="Chinese Documentation"></a>
-  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/许可证-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://nousresearch.com"><img src="https://img.shields.io/badge/Nous%20Research出品-blueviolet?style=for-the-badge" alt="Built by Nous Research"></a>
+  <a href="https://img.shields.io/badge/版本-v0.12.0--cn.1-blue?style=for-the-badge"><img src="https://img.shields.io/badge/版本-v0.12.0--cn.1-blue?style=for-the-badge" alt="版本"></a>
+  <a href="https://img.shields.io/badge/上游-NousResearch%20v0.12.0%2B-FFD700?style=for-the-badge"><img src="https://img.shields.io/badge/上游-NousResearch%20v0.12.0%2B-FFD700?style=for-the-badge" alt="上游"></a>
+  <a href="https://img.shields.io/badge/状态-稳定-green?style=for-the-badge"><img src="https://img.shields.io/badge/状态-稳定-green?style=for-the-badge" alt="状态"></a>
+  <a href="./CHANGELOG_CN.md"><img src="https://img.shields.io/badge/更新日志-查看-orange?style=for-the-badge" alt="更新日志"></a>
 </p>
 
-**由 [Nous Research](https://nousresearch.com) 开发的自进化 AI Agent。** 唯一内置学习循环的 Agent —— 从经验中创建技能、使用中持续改进、自动持久化知识、搜索历史对话、跨会话构建用户模型。可在 $5 VPS、GPU 集群或几乎零成本的无服务器基础设施上运行。不依赖你的笔记本 —— 在云 VM 工作时通过 Telegram 与它对话。
+<p align="center">
+  <a href="README.md">EN</a> | <a href="README_CN.md">中文</a>
+</p>
 
-支持任意模型 —— [Nous Portal](https://portal.nousresearch.com)、[OpenRouter](https://openrouter.ai) (200+ 模型)、[NVIDIA NIM](https://build.nvidia.com) (Nemotron)、[小米 MiMo](https://platform.xiaomimimo.com)、[智谱 GLM](https://z.ai)、[Kimi/月之暗面](https://platform.moonshot.ai)、[MiniMax](https://www.minimax.io)、[Hugging Face](https://huggingface.co)、OpenAI 或自定义端点。用 `hermes model` 切换 —— 无需改代码，无锁定。
+**由 [Nous Research](https://nousresearch.com) 开发的自进化 AI Agent**，经深度汉化与本地化改造，专为中国用户优化。
 
 ---
 
 ## 🇨🇳 关于中文版
 
-这是 Hermes Agent 的中文汉化版本，由 [xyshanren](https://github.com/xyshanren) 维护。
+这是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的中文汉化与深度本地化版本，基于上游 **NousResearch v0.12.0+**，由 [xyshanren](https://github.com/xyshanren) 维护。
 
-**汉化内容：**
-- CLI 命令描述（36 条命令）
-- 模型提供商标签（6 个 Provider）
-- 安装向导界面
-- 启动横幅
-- 诊断工具输出
-- 配置向导界面（Phase 7 新增）
-- 配置管理模块文档（Phase 7 新增）
+### 核心改造（9/10 Phase 完成）
 
-**Provider 精简：**
-只保留 6 个 Provider（Phase 7 完成）：
-- ✅ deepseek（深度求索）
-- ✅ minimax（MiniMax）
-- ✅ kimi（月之暗面）
-- ✅ zai（智谱 AI）
-- ✅ ollama（本地模型）
-- ✅ Nous Portal（可选）
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| **Phase 1** — Provider 精简 | 只保留国产 + 本地模型提供商（从 24 个裁至 11 个） | ✅ |
+| **Phase 2** — 模型配置 Skill | `peizhi-moxing` 一键配置国产 API (zhineng_luyou) | ✅ |
+| **Phase 3** — 智能路由 | 本地优先 → 云端备选的三层路由架构 | ✅ |
+| **Phase 4** — 连通性测试 Skill | `ceshi-lianjie` 无冗余并发 API 连通性检测 | ✅ |
+| **Phase 5** — 技能调度 | `jineng_diaodu` 关键词+上下文匹配+频率加权的自动调度 | ✅ |
+| **Phase 6** — 第三方 Skill 管理 | `skill-guanli` 安装/审计/移除 + 风险评估 | ✅ |
+| **Phase 7** — 全面汉化 | CLI/诊断/配置/向导/TUI/Web 全界面中文 | ✅ |
+| **Phase 8** — Skill 三层管理 | `skill_tier_manager` 内置/常用/归档自动升降级 | ✅ |
+| **Phase 9** — 弱化模型切换 | 启动时绑定模型，减少切换频率 | ✅ |
+| **Phase 10** — 结构化摘要 | 长上下文结构化压缩（等待用户规模增长） | ⏸️ |
 
-**上游版本：** 基于 NousResearch v0.12.0+（2026-05-03 合并，972 commits）
+### 本地模型集成
 
+中文版内置**嵌入式 CPU 推理引擎**，支持直接下载和运行 GGUF 格式的本地模型：
 
-已删除：OpenRouter、Anthropic、Nous（旧版）、Codex
+```bash
+# 查看可用模型
+hermes model list-local
+
+# 下载并运行（自动选择）
+hermes model download deepseek-coder-1.3b-instruct
+
+# 或在 hermes model 菜单中选择 "Ollama（本地）"
+```
+
+**特性：**
+- 🧠 **零 API 依赖** — 完全离线运行，无需网络
+- 🚀 **CPU 推理** — 基于 llama-cpp-python，无需 GPU
+- 📥 **一键下载** — 内建 model-download skill，从 Hugging Face 镜像拉取
+- 📊 **三层模型分层** — bundled（内置）/ recommended（推荐）/ optional（可选）
+
+### 智能多模型路由
+
+```python
+# 路由策略：本地优先，云端备选
+任务类型 → 嵌入式推理（CPU/GGUF）
+         → Ollama（本地服务）
+         → 国产云端 API（deepseek / kimi / minimax / zai）
+```
+
+系统根据任务复杂度自动选择最优模型：
+- **简单任务**（翻译、格式化）→ 嵌入式本地模型（零延迟）
+- **中等任务**（代码补全、文档总结）→ Ollama 本地服务
+- **复杂任务**（架构设计、深度分析）→ 国产云端 API
+
+### 精简的 Provider 生态
+
+只保留 **11 个 Provider**（原版 24 个），聚焦国产 + 本地：
+
+| 类别 | 提供商 |
+|------|--------|
+| 🏢 **国产 API** | DeepSeek、Kimi/Moonshot、MiniMax、智谱 GLM、阿里云 DashScope、小米 MiMo、通义千问 |
+| 💻 **本地模型** | Ollama（llama.cpp 等）、嵌入式 CPU 推理 |
+| 🌐 **可选** | Nous Portal（海外用户备选） |
+
+**已移除的国外 Provider（15 个）：** OpenRouter、Anthropic、OpenAI Codex、GitHub Copilot、Hugging Face、Google Gemini、xAI、AWS Bedrock、Vercel AI Gateway 等
+
+### 国产消息渠道
+
+只保留国内消息平台（配置入口隐藏国外渠道）：
+
+| 国内渠道 | 国外渠道（已隐藏但代码保留） |
+|---------|---------------------------|
+| DingTalk（钉钉）、Feishu（飞书）、WeCom（企业微信）、Weixin（微信）、QQBot、Yuanbao（App） | Telegram、Discord、Slack、WhatsApp、Signal、Email、SMS、Matrix、Mattermost、BlueBubbles、IRC、Teams |
+
+### 汉化覆盖
+
+| 领域 | 内容 | 进度 |
+|------|------|------|
+| 🖥️ **CLI** | 36 条命令描述、启动横幅、帮助信息 | 100% |
+| 🛠️ **诊断工具** | `hermes doctor` 全部中文输出（Python 环境/目录结构/API 连通性/配置文件/必需的包） | 100% |
+| ⚙️ **配置管理** | `hermes config` 模块文档、函数文档、关键注释 | 100% |
+| 🧙 **安装向导** | `hermes setup` 菜单、提示、确认信息（50+ 处） | 100% |
+| 📟 **TUI 终端** | 快捷键说明、帮助面板、操作动词、每日签语 | 100% |
+| 📊 **Web Dashboard** | 342 个 i18n 键全中文（导航/会话/分析/配置/日志等） | 100% |
+| 📖 **文档网站** | `website/` 目录 | ⏸️ 等待用户量增长 |
+
+### 版本信息
+
+```bash
+# 当前版本
+v0.12.0-cn.1（2026-05-03）
+
+# 上游同步
+NousResearch v0.12.0+（已合并 972 个上游 commit）
+
+# 代码库
+Fork:  https://github.com/xyshanren/hermes-agent-cn
+分支:  cn（中文版主线，合并自上游 main）
+```
 
 **安装方式：**
 
@@ -71,15 +144,19 @@ hermes
 
 ## 核心特性
 
-| 特性 | 说明 |
-|------|------|
-| **真正的终端界面** | 完整 TUI，支持多行编辑、斜杠命令自动补全、对话历史、中断重定向、流式工具输出。 |
-| **多平台接入** | Telegram、Discord、Slack、WhatsApp、Signal、CLI —— 单一网关进程统一管理。语音转录、跨平台对话连续性。 |
-| **闭环学习** | Agent 策划的记忆库 + 定期提醒。复杂任务后自动创建技能。技能在使用中自我改进。FTS5 会话搜索 + LLM 总结实现跨会话召回。[Honcho](https://github.com/plastic-labs/honcho) 辩证用户建模。兼容 [agentskills.io](https://agentskills.io) 开放标准。 |
-| **定时自动化** | 内置 cron 调度器，支持任意平台交付。日报、夜间备份、周审计 —— 全部用自然语言描述，无人值守运行。 |
-| **委托与并行化** | 生成隔离子 Agent 执行并行工作流。编写 Python 脚本通过 RPC 调用工具，将多步管道压缩为零上下文成本的单轮操作。 |
-| **随处运行** | 六种终端后端 —— 本地、Docker、SSH、Daytona、Singularity、Modal。Daytona 和 Modal 提供无服务器持久化 —— Agent 环境空闲时休眠、按需唤醒，会话间成本近乎为零。$5 VPS 或 GPU 集群任选。 |
-| **研究就绪** | 批量轨迹生成、Atropos RL 环境、轨迹压缩用于训练下一代工具调用模型。 |
+| 特性 | 说明 | CN 版特色 |
+|------|------|-----------|
+| **本地模型推理** | 嵌入式 CPU 推理引擎，零 API 依赖 | ✅ **新增** |
+| **智能模型路由** | 本地优先 → Ollama → 云端的三层路由 | ✅ **新增** |
+| **真正的终端界面** | 完整 TUI，支持多行编辑、斜杠命令自动补全、对话历史。 | ✅ 全中文 |
+| **多平台接入** | DingTalk、Feishu、WeCom、Weixin、QQBot、Yuanbao | ✅ **仅国内平台** |
+| **闭环学习** | Agent 策划的记忆库 + 定期提醒。复杂任务后自动创建技能。FTS5 会话搜索。 | ✅ |
+| **定时自动化** | 内置 cron 调度器，支持任意平台交付。 | ✅ |
+| **委托与并行化** | 隔离子 Agent 并行执行工作流。 | ✅ |
+| **国产 API 优先** | 仅 DeepSeek/Kimi/MiniMax/智谱/阿里/小米 | ✅ **精简** |
+| **技能系统** | 三层管理（内置/常用/归档），自动升降级 | ✅ **新增** |
+| **xb Native Tool** | 高频浏览器操作内置 Hermes Native Tool，零 MCP 依赖 | ✅ **新增** |
+| **连接性测试** | 一键测试国产 API 连通性（ceshi-lianjie） | ✅ **新增** |
 
 ---
 
@@ -108,21 +185,21 @@ hermes              # 开始对话！
 
 ```bash
 hermes              # 交互式 CLI —— 开始对话
-hermes model        # 选择 LLM 提供商和模型
+hermes model        # 选择 LLM 提供商和模型（仅国产+本地）
 hermes tools        # 配置启用的工具
 hermes config set   # 设置单个配置项
-hermes gateway      # 启动消息网关 (Telegram, Discord 等)
+hermes gateway      # 启动消息网关（钉钉/飞书/企业微信等）
 hermes setup        # 运行完整设置向导（一次配置全部）
-hermes claw migrate # 从 OpenClaw 迁移（如果来自 OpenClaw）
-hermes update       # 更新到最新版本
-hermes doctor       # 诊断问题
+hermes doctor       # 诊断问题（中文输出）
+hermes model download      # 下载本地 GGUF 模型
+hermes model list-local    # 查看已下载的本地模型
 ```
 
 📖 **[完整文档 →](https://hermes-agent.nousresearch.com/docs/)**
 
 ## CLI vs 消息平台对照
 
-Hermes 有两个入口：用 `hermes` 启动终端 UI，或运行网关从 Telegram、Discord、Slack、WhatsApp、Signal、Email 对话。进入对话后，许多斜杠命令在两个界面通用。
+Hermes 有两个入口：用 `hermes` 启动终端 UI，或运行网关从 DingTalk、Feishu、WeCom、Weixin 等国内平台对话。进入对话后，许多斜杠命令在两个界面通用。
 
 | 操作 | CLI | 消息平台 |
 |------|-----|----------|
@@ -173,13 +250,24 @@ hermes claw migrate --overwrite  # 覆盖现有冲突
 
 ### 推荐模型提供商
 
-| 提供商 | 特点 | 获取方式 |
+| 提供商 | 特点 | 配置方式 |
 |--------|------|----------|
-| **智谱 GLM** | 国产大模型，中文能力强 | [z.ai](https://z.ai) |
-| **Kimi/月之暗面** | 长上下文，文档理解强 | [platform.moonshot.ai](https://platform.moonshot.ai) |
-| **MiniMax** | 多模态，语音交互 | [minimax.io](https://www.minimax.io) |
-| **阿里通义** | 企业级，API 稳定 | 通过 OpenRouter 接入 |
-| **百度文心** | 中文理解，知识图谱 | 通过 OpenRouter 接入 |
+| **DeepSeek** | 国产最强开源，V3/R1/coder 系列 | `hermes model` → 选择 DeepSeek |
+| **智谱 GLM** | 国产大模型，中文能力强 | `hermes model` → 选择 智谱 AI |
+| **Kimi/月之暗面** | 长上下文 128K，文档理解 | `hermes model` → 选择 Kimi |
+| **MiniMax** | 多模态，语音交互 | `hermes model` → 选择 MiniMax |
+| **阿里通义 DashScope** | 企业级，多模型选择 | `hermes model` → 选择 阿里云 |
+| **小米 MiMo** | MiMo-V2 系列 | `hermes model` → 选择 小米 MiMo |
+
+### 本地模型推荐
+
+无需 API Key，完全离线运行：
+
+| 模型 | 大小 | 适用场景 | 配置方式 |
+|------|------|---------|----------|
+| DeepSeek-Coder-1.3B | ~1GB | 代码补全/格式化 | `hermes model` → Ollama（本地） |
+| Qwen2.5-1.5B | ~1.5GB | 翻译/摘要/简单对话 | `hermes model` → Ollama（本地） |
+| 自定义 GGUF | 任意 | 任意 | 放入 `~/.hermes/models/`
 
 ### 网络配置
 
