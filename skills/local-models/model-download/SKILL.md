@@ -1,6 +1,6 @@
 ---
 name: model-download
-description: 本地 AI 模型下载与管理。支持一键全自动安装、下载基础/增强/可选三层模型（Whisper/TTS/Qwen），无需网络即可使用语音识别、语音合成和离线对话。当用户提到下载模型、安装模型、模型推荐、本地模型、装模型、一键安装、代码助手时触发。
+description: 本地 AI 模型下载与管理。支持一键全自动安装、下载基础/增强/可选三层模型（Whisper/TTS/Qwen），无需网络即可使用语音识别、语音合成和离线对话。当用户提到下载模型、安装模型、模型推荐、本地模型、装模型、一键安装、代码助手、快速配置、配置模型时触发。
 version: 1.1.0
 author: Hermes CN Team
 metadata:
@@ -32,6 +32,7 @@ Hermes CN 内置本地 AI 模型管理系统，支持离线环境下的语音识
 | 内置模型 | "内置模型有哪些"、"自带了哪些模型" |
 | 本地模型 | "本地模型怎么用"、"离线模型状态" |
 | **一键安装** | **"装本地模型"、"一键安装"、"全部安装"、"全装上"** |
+| **快速配置** | **"配置模型"、"快速配置"、"quickstart"** |
 | 安装/卸载 | "安装 whisper"、"卸载 qwen" |
 
 ## 模型分层体系
@@ -81,6 +82,18 @@ hermes local-models setup --yes
 4. 下载 Qwen2.5-0.5B (LLM, 469MB)
 5. 下载 MOSS-TTS-Nano (TTS, 641MB)
 6. 验证安装结果
+
+### Flow 0b: 快速配置（用户触发 "配置模型" 或 "配置"）
+
+当用户说 "配置模型" 或 "快速配置" 时，引导用户运行 `hermes quickstart`。
+
+自动完成以下检测：
+1. 扫描环境变量中的国产 API Key（DeepSeek/智谱/Kimi/MiniMax/阿里云）
+2. 检测本地是否有 Ollama 运行
+3. 检测本地是否已安装离线模型
+4. 按优先级自动配置第一个可用的（API Key > Ollama > 本地模型）
+
+如果三项都没有，自动引导安装本地离线模型。
 
 ### Flow 1: 检查当前状态
 
@@ -153,6 +166,7 @@ hermes local-models test qwen-0.5b
 | `hermes local-models remove <id>` | 卸载指定模型（需确认） |
 | `hermes local-models status` | 详细状态报告（含占用空间） |
 | `hermes local-models test <id>` | 验证模型是否能正常加载 |
+| `hermes quickstart` | 一键快速配置 — 自动检测 API Key / Ollama / 本地模型 |
 
 ## 下载机制
 

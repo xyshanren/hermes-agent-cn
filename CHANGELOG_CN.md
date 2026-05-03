@@ -40,6 +40,21 @@
 - **测试补充** —— 添加 4 个新测试用例（模型注册表、setup 函数、embedded provider）
 - **Skill 升级** —— `model-download` SKILL.md 升级到 v1.1.0，新增"一键安装"触发词和流程
 
+#### ⚡ 新增：Quickstart 快速配置 + 零配置首次启动
+
+- **`hermes quickstart`** —— 新命令，一键自动配置
+  - 扫描环境变量中的国产 API Key（DeepSeek/智谱/Kimi/MiniMax/阿里云）
+  - 检测本地 Ollama 服务
+  - 检测/安装本地离线模型
+  - 免交互，检测到什么用什么，零选择体验
+- **首次启动优化** —— 零 Provider 时弹出中文引导菜单
+  - 选项 1：安装本地离线模型（自动，无需账号）
+  - 选项 2：配置 API Key（传统 setup 向导）
+  - 选项 3：退出（显示可用命令提示）
+- **新模块** —— `hermes_cli/quickstart.py`（~300 行）
+- **测试补充** —— 添加 4 个 quickstart 测试用例
+- **文档同步** —— README_CN.md 新增"快速开始"章节，更新本地模型命令
+
 #### 冲突解决策略
 
 | 文件 | 策略 | 说明 |

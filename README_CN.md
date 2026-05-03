@@ -23,6 +23,46 @@
 
 ---
 
+## 🚀 快速开始
+
+从零到对话，三步以内：
+
+### 方式一：全自动（推荐）
+
+```bash
+# 一键配置：自动检测 API Key / Ollama / 本地模型
+# 零选择体验，检测到什么用什么
+hermes quickstart
+```
+
+### 方式二：安装本地模型（离线可用）
+
+```bash
+# 终端一句命令，全自动安装（约 1.58GB）
+hermes local-models setup --yes
+```
+
+### 方式三：首次启动引导
+
+直接运行 `hermes`，如未检测到任何 AI 资源，会自动弹出引导菜单：
+1. **安装本地离线模型** → 自动下载配置，无需任何账号
+2. **配置 API Key** → 进入设置向导
+3. **退出**
+
+三种方式任一完成后，直接运行 `hermes` 即可进入对话。
+
+### 手动配置速查
+
+| 场景 | 命令 |
+|------|------|
+| 首次全自动配置 | `hermes quickstart` |
+| 安装本地模型 | `hermes local-models setup --yes` |
+| 查看本地模型状态 | `hermes local-models status` |
+| 手动设置 API Key | `hermes setup` |
+| 切换模型/Provider | `hermes model` |
+
+---
+
 ## 🇨🇳 关于中文版
 
 这是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的中文汉化与深度本地化版本，基于上游 **NousResearch v0.12.0+**，由 [xyshanren](https://github.com/xyshanren) 维护。
@@ -47,13 +87,19 @@
 中文版内置**嵌入式 CPU 推理引擎**，支持直接下载和运行 GGUF 格式的本地模型：
 
 ```bash
-# 查看可用模型
-hermes model list-local
+# 查看可用模型及安装状态
+hermes local-models list
 
-# 下载并运行（自动选择）
-hermes model download deepseek-coder-1.3b-instruct
+# 一键安装全部基础+增强模型（约 1.58GB）
+hermes local-models setup --yes
 
-# 或在 hermes model 菜单中选择 "Ollama（本地）"
+# 安装指定模型
+hermes local-models install whisper-small    # 语音识别
+hermes local-models install qwen-0.5b        # 轻量离线对话
+hermes local-models install moss-tts-nano    # 离线语音合成
+
+# 验证模型加载
+hermes local-models test qwen-0.5b
 ```
 
 **特性：**

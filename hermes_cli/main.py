@@ -1263,35 +1263,106 @@ def cmd_chat(args):
 
     # First-run guard: check if any provider is configured before launching
     if not _has_any_provider_configured():
+        from hermes_cli.colors import Colors, color
+
+        # Quick check: see if local embedded models are already installed
+        _has_local = False
+        try:
+            from hermes_cli.model_manager import is_installed
+            _has_local = is_installed("qwen-0.5b") or is_installed("qwen-coder-1.5b")
+        except Exception:
+            pass
+
         print()
         print(
-            "It looks like Hermes isn't configured yet -- no API keys or providers found."
+            "欢迎使用 Hermes-Agent-CN！尚未检测到可用的 AI 资源。"
         )
         print()
-        print("  Run:  hermes setup")
-        print()
 
-        from hermes_cli.setup import (
-            is_interactive_stdin,
-            print_noninteractive_setup_guidance,
-        )
+        if _has_local:
+            print("  检测到本地已安装离线模型。配置后即可使用。")
+            print()
+            reply = input("  配置本地模型为默认引擎？[Y/n] ").strip().lower()
+            if reply in ("", "y", "yes"):
+                try:
+                    from hermes_cli.quickstart import _configure_embedded
+                    if _configure_embedded():
+                        print("  ✅ 已配置本地离线推理引擎。")
+                        print()
+                    else:
+                        print("  ⚠ 配置失败，请运行: hermes quickstart")
+                        print()
+                except Exception:
+                    print("  ⚠ 配置失败，请运行: hermes quickstart")
+                    print()
+            else:
+                print()
+                print("  您随时可以运行: hermes quickstart  一键配置")
+                sys.exit(1)
+        else:
+            print("  📋 可选配置方式:")
+            print()
+            print(f"    {color('1', Colors.BRIGHT)}. 安装本地离线模型（无需网络配置，约 1.58GB）")
+            print(f"    {color('2', Colors.BRIGHT)}. 配置 API Key（需云服务账号）")
+            print(f"    {color('3', Colors.BRIGHT)}. 退出")
+            print()
+            try:
+                choice = input("  请选择 [1/2/3]: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                choice = "3"
 
-        if not is_interactive_stdin():
-            print_noninteractive_setup_guidance(
-                "No interactive TTY detected for the first-run setup prompt."
-            )
-            sys.exit(1)
-
-        try:
-            reply = input("Run setup now? [Y/n] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            reply = "n"
-        if reply in ("", "y", "yes"):
-            cmd_setup(args)
-            return
-        print()
-        print("You can run 'hermes setup' at any time to configure.")
-        sys.exit(1)
+            if choice == "1":
+                print()
+                print("  ⏳ 正在安装本地离线模型...")
+                print()
+                try:
+                    from hermes_cli.model_manager import cmd_local_models_setup
+                    setup_args = type("Args", (), {"yes": True, "model": None})()
+                    result = cmd_local_models_setup(setup_args)
+                    if result == 0:
+                        from hermes_cli.quickstart import _configure_embedded
+                        _configure_embedded()
+                        print()
+                        print("  ✅ 本地模型已安装并配置完毕！正在启动...")
+                        print()
+                    else:
+                        print()
+                        print("  ⚠ 部分安装失败，请运行: hermes local-models setup")
+                        sys.exit(1)
+                except Exception as e:
+                    print(f"  ❌ 安装出错: {e}")
+                    print(f"     请运行: hermes local-models setup")
+                    sys.exit(1)
+            elif choice == "2":
+                print()
+                print("  启动设置向导...")
+                print()
+                from hermes_cli.setup import (
+                    is_interactive_stdin,
+                    print_noninteractive_setup_guidance,
+                )
+                if not is_interactive_stdin():
+                    print_noninteractive_setup_guidance(
+                        "No interactive TTY detected for the first-run setup prompt."
+                    )
+                    sys.exit(1)
+                try:
+                    reply2 = input("Run setup now? [Y/n] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    reply2 = "n"
+                if reply2 in ("", "y", "yes"):
+                    cmd_setup(args)
+                    return
+                print()
+                print("You can run 'hermes setup' at any time to configure.")
+                sys.exit(1)
+            else:
+                print()
+                print("  您随时可以运行以下命令:")
+                print(f"    {color('hermes quickstart', Colors.BRIGHT)}         — 一键自动配置")
+                print(f"    {color('hermes local-models setup --yes', Colors.BRIGHT)}  — 安装本地离线模型")
+                print(f"    {color('hermes setup', Colors.BRIGHT)}               — 手动配置 API Key")
+                sys.exit(1)
 
     # Start update check in background (runs while other init happens)
     try:
@@ -8266,6 +8337,20 @@ def main():
 
     # local-models (default: show list)
     local_models_parser.set_defaults(func=lambda args: _import_model_manager_cmd("cmd_local_models_list")(args))
+
+    # =========================================================================
+    # quickstart command (Hermes-Agent-CN exclusive)
+    # =========================================================================
+    def _cmd_quickstart(args):
+        from hermes_cli.quickstart import cmd_quickstart
+        return cmd_quickstart(args)
+
+    quickstart_parser = subparsers.add_parser(
+        "quickstart",
+        help="一键快速配置 — 自动检测 API Key / Ollama / 本地模型",
+        description="自动检测可用的 AI 资源并完成配置，零选择体验。检测顺序：国产 API Key → Ollama → 安装本地离线模型。",
+    )
+    quickstart_parser.set_defaults(func=_cmd_quickstart)
 
     # =========================================================================
     # gateway command

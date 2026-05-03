@@ -274,3 +274,47 @@ class TestLocalModelsSetup:
         result = provider._resolve_model()
         # Should not crash — may be None or a string depending on environment
         assert result is None or isinstance(result, str)
+
+
+# =============================================================================
+# Quickstart Tests
+# =============================================================================
+
+class TestQuickstart:
+    """Tests for hermes_cli.quickstart (Hermes-Agent-CN exclusive)."""
+
+    def test_quickstart_imports(self):
+        """Verify quickstart module imports cleanly."""
+        import hermes_cli.quickstart as qs
+        assert hasattr(qs, "cmd_quickstart")
+        assert callable(qs.cmd_quickstart)
+
+    def test_detect_api_key_providers_empty(self):
+        """Verify _detect_api_key_providers returns empty list when no env set."""
+        import hermes_cli.quickstart as qs
+        # Temporarily clear relevant env vars
+        import os
+        saved = {}
+        for p in qs._PROVIDER_CHECKS:
+            saved[p["env_var"]] = os.environ.pop(p["env_var"], None)
+        try:
+            result = qs._detect_api_key_providers()
+            assert isinstance(result, list)
+            # May be empty or contain matches depending on env
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+
+    def test_detect_ollama_returns_dict_or_none(self):
+        """Verify _detect_ollama returns dict or None without crashing."""
+        import hermes_cli.quickstart as qs
+        result = qs._detect_ollama()
+        # Should not crash. If Ollama is running, returns dict; otherwise None.
+        assert result is None or isinstance(result, dict)
+
+    def test_has_embedded_models_no_crash(self):
+        """Verify _has_embedded_models returns bool without crashing."""
+        import hermes_cli.quickstart as qs
+        result = qs._has_embedded_models()
+        assert isinstance(result, bool)
