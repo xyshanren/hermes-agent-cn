@@ -218,6 +218,66 @@ hermes quickstart
 
 ---
 
+### 🤖 Curator：Agent 自进化引擎
+
+CN 版完整保留了 Hermes v0.12.0 的 Curator 系统——一个让 Agent **自我审查、自我进化** 的后台机制。
+
+#### 它解决什么问题
+
+Agent 在长期使用中会积累大量自动创建的技能（skills）。有些技能重复、有些过时、有些质量不高。手动管理这些技能费时费力，不管的话又会让技能库越来越臃肿。
+
+Curator 就是解决这个问题的：**一个运行在后台的"技能管家"，定期审查所有 Agent 创建的技能，自动做清理和优化**。
+
+#### 四大核心机制
+
+| 机制 | 说明 | 用户感知 |
+|------|------|---------|
+| **使用频率追踪** | 实时记录每个 skill 的调用次数和使用场景 | 无感 |
+| **智能合并** | 高度相似的 skill 自动合并为更强版本 | 偶尔发现技能更"聪明"了 |
+| **自动归档** | 过时/低价值的技能自动归档（可恢复） | 技能列表变清爽 |
+| **Pin 固定保护** | 手动固定的技能不受任何自动操作影响 | 手动操作，受保护 |
+
+#### 与 Skill 三层管理的协同
+
+```
+Curator（进化引擎）             Skill 三层管理（上下文管控）
+     │                                  │
+     ├─ 审查技能质量 ──────────────────→ ├─ 高频 skill → Frequent
+     ├─ 合并相似技能                     ├─ 归档 skill → Archived（0 token）
+     └─ 归档低价值技能                   └─ 核心 skill → Builtin
+```
+
+三层管理负责**静态层级管控**（哪些 skill 进上下文、哪些不进），Curator 负责**动态质量进化**（哪些 skill 该合并、哪些该归档）。两者互补，覆盖了技能的"质"和"量"两个维度。
+
+#### 关键设计原则
+
+| 原则 | 实现 |
+|------|------|
+| **不自动删除** | Curator 只会归档，不会删除。归档可恢复 |
+| **只管 Agent 创建** | 内置 skill 和从技能中心安装的 skill 不受影响 |
+| **后台无感运行** | 默认每周运行一次，空闲时触发，不打断对话 |
+| **预览先行** | `--dry-run` 模式可先看效果再执行 |
+
+#### 命令速查
+
+| 命令 | 用途 |
+|------|------|
+| `hermes curator status` | 查看运行状态和技能统计 |
+| `hermes curator run` | 立即触发一次审查（后台运行） |
+| `hermes curator run --sync` | 前台运行，等待完成 |
+| `hermes curator run --dry-run` | 预览模式，看看会做什么 |
+| `hermes curator pause` | 暂停 Curator |
+| `hermes curator resume` | 恢复 Curator |
+| `hermes curator pin <技能名>` | 固定技能，不受自动管理 |
+| `hermes curator unpin <技能名>` | 解除固定 |
+| `hermes curator backup` | 手动创建技能库快照 |
+| `hermes curator rollback --list` | 列出可用快照 |
+| `hermes curator rollback` | 恢复到最新快照 |
+
+> 参考实现：[agent/curator.py](https://github.com/xyshanren/hermes-agent-cn/blob/cn/agent/curator.py)
+
+---
+
 ### 🏗️ 核心改造一览（9/10 Phase 完成）
 
 | Phase | 内容 | 设计目的 | 状态 |

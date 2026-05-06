@@ -342,74 +342,70 @@ def _cmd_rollback(args) -> int:
 # ---------------------------------------------------------------------------
 
 def register_cli(parent: argparse.ArgumentParser) -> None:
-    """Attach `curator` subcommands to *parent*.
-
-    main.py calls this with the ArgumentParser returned by
-    ``subparsers.add_parser("curator", ...)``.
-    """
+    """向 *parent* 注册 `curator` 子命令。"""
     parent.set_defaults(func=lambda a: (parent.print_help(), 0)[1])
     subs = parent.add_subparsers(dest="curator_command")
 
-    p_status = subs.add_parser("status", help="Show curator status and skill stats")
+    p_status = subs.add_parser("status", help="显示 Curator 运行状态和技能统计")
     p_status.set_defaults(func=_cmd_status)
 
-    p_run = subs.add_parser("run", help="Trigger a curator review now")
+    p_run = subs.add_parser("run", help="立即触发一次 Curator 审查")
     p_run.add_argument(
         "--sync", "--synchronous", dest="synchronous", action="store_true",
-        help="Wait for the LLM review pass to finish (default: background thread)",
+        help="等待 LLM 审查结束后再退出（默认：后台线程运行）",
     )
     p_run.add_argument(
         "--dry-run", dest="dry_run", action="store_true",
-        help="Report only — no state changes, no archives, no consolidation "
-             "(use this to preview what curator would do)",
+        help="仅预览模式——不执行任何状态变更、归档或合并操作"
+             "（用来预演 Curator 会做什么）",
     )
     p_run.set_defaults(func=_cmd_run)
 
-    p_pause = subs.add_parser("pause", help="Pause the curator until resumed")
+    p_pause = subs.add_parser("pause", help="暂停 Curator 自动运行")
     p_pause.set_defaults(func=_cmd_pause)
 
-    p_resume = subs.add_parser("resume", help="Resume a paused curator")
+    p_resume = subs.add_parser("resume", help="恢复已暂停的 Curator")
     p_resume.set_defaults(func=_cmd_resume)
 
-    p_pin = subs.add_parser("pin", help="Pin a skill so the curator never auto-transitions it")
-    p_pin.add_argument("skill", help="Skill name")
+    p_pin = subs.add_parser("pin", help="固定技能，Curator 不会自动管理它")
+    p_pin.add_argument("skill", help="技能名称")
     p_pin.set_defaults(func=_cmd_pin)
 
-    p_unpin = subs.add_parser("unpin", help="Unpin a skill")
-    p_unpin.add_argument("skill", help="Skill name")
+    p_unpin = subs.add_parser("unpin", help="解除技能固定")
+    p_unpin.add_argument("skill", help="技能名称")
     p_unpin.set_defaults(func=_cmd_unpin)
 
-    p_restore = subs.add_parser("restore", help="Restore an archived skill")
-    p_restore.add_argument("skill", help="Skill name")
+    p_restore = subs.add_parser("restore", help="恢复一个已归档的技能")
+    p_restore.add_argument("skill", help="技能名称")
     p_restore.set_defaults(func=_cmd_restore)
 
     p_backup = subs.add_parser(
         "backup",
-        help="Take a manual tar.gz snapshot of ~/.hermes/skills/ "
-             "(curator also does this automatically before every real run)",
+        help="手动创建 ~/.hermes/skills/ 的 tar.gz 快照"
+             "（Curator 每次实际运行前也会自动备份）",
     )
     p_backup.add_argument(
         "--reason", default=None,
-        help="Free-text label stored in manifest.json (default: 'manual')",
+        help="存储在 manifest.json 中的标签（默认：'manual'）",
     )
     p_backup.set_defaults(func=_cmd_backup)
 
     p_rollback = subs.add_parser(
         "rollback",
-        help="Restore ~/.hermes/skills/ from a curator snapshot "
-             "(defaults to the newest)",
+        help="从 Curator 快照恢复 ~/.hermes/skills/"
+             "（默认恢复到最新快照）",
     )
     p_rollback.add_argument(
         "--list", action="store_true",
-        help="List available snapshots and exit without restoring",
+        help="列出可用快照后退出，不执行恢复",
     )
     p_rollback.add_argument(
         "--id", dest="backup_id", default=None,
-        help="Snapshot id to restore (see `--list`); default: newest",
+        help="要恢复的快照 ID（见 `--list`）；默认：最新的",
     )
     p_rollback.add_argument(
         "-y", "--yes", action="store_true",
-        help="Skip confirmation prompt",
+        help="跳过确认提示",
     )
     p_rollback.set_defaults(func=_cmd_rollback)
 

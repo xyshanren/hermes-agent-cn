@@ -5563,15 +5563,15 @@ def _print_curator_first_run_notice() -> None:
         hours = 24 * 7
     days = max(1, hours // 24)
     print()
-    print("ℹ Skill curator")
+    print("ℹ 技能管理 Curator")
     print(
-        f"  Background skill maintenance is enabled. First pass is deferred "
-        f"~{days}d after installation; only agent-created skills are in "
-        f"scope and nothing is ever auto-deleted (archive is recoverable)."
+        f"  后台技能维护已启用。首次审查将在安装 ~{days}d 后自动执行。"
+        f"仅处理 Agent 自动创建的技能，"
+        f"不会自动删除任何内容（归档可恢复）。"
     )
-    print("  Preview now:  hermes curator run --dry-run")
-    print("  Pause it:     hermes curator pause")
-    print("  Docs:         https://hermes-agent.nousresearch.com/docs/user-guide/features/curator")
+    print("  预览:    hermes curator run --dry-run")
+    print("  暂停:    hermes curator pause")
+    print("  文档:    https://hermes-agent.nousresearch.com/docs/user-guide/features/curator")
 
 
 def _kill_stale_dashboard_processes(
@@ -9465,13 +9465,12 @@ Examples:
     # =========================================================================
     curator_parser = subparsers.add_parser(
         "curator",
-        help="Background skill maintenance (curator) — status, run, pause, pin",
+        help="技能后台维护（Curator）— 状态查看、运行、暂停、固定",
         description=(
-            "The curator is an auxiliary-model background task that "
-            "periodically reviews agent-created skills, prunes stale ones, "
-            "consolidates overlaps, and archives obsolete skills. "
-            "Bundled and hub-installed skills are never touched. "
-            "Archives are recoverable; auto-deletion never happens."
+            "Curator 是一个辅助模型后台任务，定期审查由 Agent 自动创建的 "
+            "技能（skills），清理过时的、合并重复的、归档可废弃的技能。"
+            "内置和从技能中心安装的技能不会受影响。"
+            "归档可恢复，不会自动删除。"
         ),
     )
     try:
