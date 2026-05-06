@@ -1,26 +1,21 @@
 """
-渐进式 Skill 三层管理 — builtin / frequent / archived 自动升降级。
+Skill Tier Manager — usage-based skill lifecycle management.
 
-Hermes-Agent-CN 核心组件，根据使用频率自动分级，节省 context token。
+Automatically classifies skills into three tiers to optimize context token usage:
 
-三层定义:
-    builtin (内置)  — 5-8 个核心 skill，始终注入 system prompt
-    frequent (常用) — ≤10 个，自动匹配后注入，≥3次/周升入，7天未用降出
-    archived (归档) — 不限量，0 context token，按需手动唤醒
+    BUILTIN  — core skills, always injected into system prompt
+    FREQUENT — high-usage skills (§10), auto-injected by relevance
+    ARCHIVED — low-usage skills, zero token cost, loaded on demand
 
-升降级规则:
-    晋升: archived → frequent    条件: 7 天内使用 ≥ 3 次
-    降级: frequent → archived    条件: 连续 7 天未使用
-    保级: frequent → frequent    条件: 使用频率正常
+Promotion rules:
+    archived → frequent:  ≥3 uses in the last 7 days
+    frequent → archived:  7 consecutive days unused
+    cold archive:         30 days unused (advisory)
 
-元数据存储: ~/.hermes/skills_meta.json
+Metadata stored in ~/.hermes/skill_tiers.json.
 
-使用方式:
-    from agent.skill_tier_manager import SkillTierManager
-    mgr = SkillTierManager()
-    mgr.record_usage("xbrowser")         # 记录使用
-    tier = mgr.get_tier("weather")        # 查询层级
-    mgr.evaluate_promotions()             # 执行升降级
+Tier limits, builtin skill names, and the metadata path are all configurable
+so downstream forks (e.g. hermes-agent-cn) can set their own defaults.
 """
 
 from __future__ import annotations
@@ -36,93 +31,77 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# -- 常量 --------------------------------------------------------------------
+# -- Default constants --------------------------------------------------------
 
-META_FILE = Path.home() / ".hermes" / "skills_meta.json"
+DEFAULT_META_PATH = Path.home() / ".hermes" / "skill_tiers.json"
 
-# 升降级阈值
-PROMOTION_THRESHOLD = 3      # 7 天内使用 ≥ 3 次 → 晋升 frequent
-DEMOTION_THRESHOLD_DAYS = 7  # 连续 N 天未使用 → 降级 archived
-COLD_ARCHIVE_DAYS = 30       # N 天未使用 → 冷归档
-MAX_FREQUENT = 10            # frequent 层级最大 skill 数
-MAX_BUILTIN = 8              # builtin 层级最大 skill 数
-
-# 内置 Skill 列表（始终生效）
-DEFAULT_BUILTIN_SKILLS = [
-    "peizhi-moxing",         # 模型配置
-    "ceshi-lianjie",         # 连通性测试
-    "model-download",        # 模型下载
-]
-
-# 源码中始终内置的 Skill（上游提供）
-UPSTREAM_BUILTIN_SKILLS = [
-    "xbrowser",              # 浏览器自动化
-    "weather",               # 天气查询
-    "pdf",                   # PDF 处理
-    "docx",                  # Word 处理
-    "xlsx",                  # Excel 处理
-]
+# Promotion/Demotion thresholds
+PROMOTION_THRESHOLD = 3          # uses in the rolling 7-day window to promote
+DEMOTION_DAYS = 7                # consecutive idle days before demotion
+COLD_ARCHIVE_DAYS = 30           # consecutive idle days before cold-archive hint
+MAX_FREQUENT = 10                # max skills in the FREQUENT tier
+MAX_BUILTIN = 8                  # max skills in the BUILTIN tier
 
 
-# -- 数据类型 ----------------------------------------------------------------
+# -- Data model ---------------------------------------------------------------
 
 class SkillTier(Enum):
-    """Skill 层级。"""
-    BUILTIN = "builtin"     # 内置，始终加载
-    FREQUENT = "frequent"   # 常用，自动匹配加载
-    ARCHIVED = "archived"   # 归档，按需唤醒
+    BUILTIN = "builtin"
+    FREQUENT = "frequent"
+    ARCHIVED = "archived"
 
 
 @dataclass
 class SkillMeta:
-    """单个 Skill 的元数据。"""
+    """Per-skill metadata persisted to disk."""
 
-    name: str                           # Skill 名称
-    tier: str = "archived"              # builtin | frequent | archived
-    usage_count: int = 0                # 总使用次数
-    last_used: str = ""                 # 最后使用时间 (ISO)
-    weekly_usage: List[int] = field(default_factory=lambda: [0, 0, 0, 0])  # 最近 4 周每周使用次数
-    promoted_at: str = ""               # 晋升时间
-    archived_at: str = ""               # 归档时间
-    pinned: bool = False                # 是否锁定（锁定后不自动降级）
-    description: str = ""               # 描述
+    name: str
+    tier: str = SkillTier.ARCHIVED.value
+    usage_count: int = 0
+    last_used: str = ""                         # ISO-8601
+    weekly_usage: List[int] = field(default_factory=lambda: [0, 0, 0, 0])  # last 4 weeks
+    promoted_at: str = ""
+    archived_at: str = ""
+    pinned: bool = False
+    description: str = ""
 
-    def _ensure_weekly(self):
-        """确保 weekly_usage 长度为 4。"""
+    # -- Internal helpers -----------------------------------------------------
+
+    def _pad_weekly(self):
         while len(self.weekly_usage) < 4:
             self.weekly_usage.insert(0, 0)
         self.weekly_usage = self.weekly_usage[-4:]
 
+    # -- Public API -----------------------------------------------------------
+
     def record_use(self):
-        """记录一次使用。"""
+        """Record one usage event."""
         self.usage_count += 1
         self.last_used = datetime.now().isoformat()
-        self._ensure_weekly()
+        self._pad_weekly()
         self.weekly_usage[-1] += 1
 
     def should_promote(self) -> bool:
-        """检查是否满足晋升条件（7 天内使用 ≥ 3 次）。"""
+        """Check promotion condition: ≥3 uses in the current weekly window."""
         if self.tier != SkillTier.ARCHIVED.value:
             return False
-        self._ensure_weekly()
+        self._pad_weekly()
         return self.weekly_usage[-1] >= PROMOTION_THRESHOLD
 
     def should_demote(self) -> bool:
-        """检查是否满足降级条件（连续 7 天未使用）。"""
-        if self.tier != SkillTier.FREQUENT.value:
-            return False
-        if self.pinned:
+        """Check demotion condition: 7 idle days as FREQUENT."""
+        if self.tier != SkillTier.FREQUENT.value or self.pinned:
             return False
         if not self.last_used:
             return False
         try:
             last = datetime.fromisoformat(self.last_used)
-            return (datetime.now() - last).days >= DEMOTION_THRESHOLD_DAYS
+            return (datetime.now() - last).days >= DEMOTION_DAYS
         except (ValueError, TypeError):
             return False
 
     def should_cold_archive(self) -> bool:
-        """检查是否应冷归档（30 天未使用）。"""
+        """Check cold-archive condition: 30 idle days."""
         if not self.last_used:
             return False
         try:
@@ -134,41 +113,49 @@ class SkillMeta:
 
 @dataclass
 class SkillsMetaStore:
-    """全局 Skill 元数据存储。"""
+    """Global container for all skill metadata."""
 
     skills: Dict[str, SkillMeta] = field(default_factory=dict)
     tier_limits: Dict[str, int] = field(default_factory=lambda: {
-        "builtin": MAX_BUILTIN,
-        "frequent": MAX_FREQUENT,
+        SkillTier.BUILTIN.value: MAX_BUILTIN,
+        SkillTier.FREQUENT.value: MAX_FREQUENT,
     })
     last_evaluation: str = ""
 
 
-# -- 管理器 ------------------------------------------------------------------
+# -- Manager ------------------------------------------------------------------
 
 class SkillTierManager:
-    """Skill 三层分级管理器。
-
-    负责元数据读写、使用记录、升降级评估。
+    """Manages skill tier classification, usage tracking, and lifecycle.
 
     Args:
-        meta_path: 元数据文件路径（默认 ~/.hermes/skills_meta.json）。
+        meta_path: Path to the JSON metadata file.
+        builtin_skills: Names of skills considered always-active (builtin).
+        tier_limits: Optional per-tier capacity overrides.
     """
 
-    def __init__(self, meta_path: Optional[Path] = None):
-        self.meta_path = meta_path or META_FILE
+    def __init__(
+        self,
+        meta_path: Optional[Path] = None,
+        builtin_skills: Optional[List[str]] = None,
+        tier_limits: Optional[Dict[str, int]] = None,
+    ):
+        self.meta_path = meta_path or DEFAULT_META_PATH
+        self._builtin_skills = builtin_skills or []
+        self._tier_limits_override = tier_limits or {}
         self._store: SkillsMetaStore = SkillsMetaStore()
         self._loaded = False
 
+    # -- Persistence ----------------------------------------------------------
+
     def _ensure_loaded(self):
-        """确保元数据已加载。"""
         if self._loaded:
             return
         self.load()
         self._loaded = True
 
     def load(self) -> SkillsMetaStore:
-        """从磁盘加载元数据。"""
+        """Load metadata from disk (or initialise defaults)."""
         try:
             if self.meta_path.exists():
                 raw = json.loads(self.meta_path.read_text(encoding="utf-8"))
@@ -176,7 +163,7 @@ class SkillTierManager:
                 for name, data in raw.get("skills", {}).items():
                     skills[name] = SkillMeta(
                         name=name,
-                        tier=data.get("tier", "archived"),
+                        tier=data.get("tier", SkillTier.ARCHIVED.value),
                         usage_count=data.get("usage_count", 0),
                         last_used=data.get("last_used", ""),
                         weekly_usage=data.get("weekly_usage", [0, 0, 0, 0]),
@@ -187,26 +174,33 @@ class SkillTierManager:
                     )
                 self._store = SkillsMetaStore(
                     skills=skills,
-                    tier_limits=raw.get("tier_limits", {"builtin": MAX_BUILTIN, "frequent": MAX_FREQUENT}),
+                    tier_limits=raw.get("tier_limits", {
+                        SkillTier.BUILTIN.value: MAX_BUILTIN,
+                        SkillTier.FREQUENT.value: MAX_FREQUENT,
+                    }),
                     last_evaluation=raw.get("last_evaluation", ""),
                 )
             else:
                 self._init_defaults()
         except Exception as e:
-            logger.warning("加载 skills_meta.json 失败: %s，使用默认值", e)
+            logger.warning("Failed to load %s: %s — using defaults", self.meta_path, e)
             self._init_defaults()
 
         self._loaded = True
+
+        # Override tier limits if provided via constructor
+        if self._tier_limits_override:
+            self._store.tier_limits.update(self._tier_limits_override)
+
         return self._store
 
     def _init_defaults(self):
-        """初始化默认内置 Skill 元数据。"""
+        """Seed metadata for configured builtin skills."""
         self._store = SkillsMetaStore()
         now = datetime.now().isoformat()
-
-        for skill_name in UPSTREAM_BUILTIN_SKILLS + DEFAULT_BUILTIN_SKILLS:
-            self._store.skills[skill_name] = SkillMeta(
-                name=skill_name,
+        for name in self._builtin_skills:
+            self._store.skills[name] = SkillMeta(
+                name=name,
                 tier=SkillTier.BUILTIN.value,
                 usage_count=0,
                 last_used="",
@@ -215,7 +209,7 @@ class SkillTierManager:
             )
 
     def save(self):
-        """保存元数据到磁盘。"""
+        """Persist metadata to disk."""
         self._ensure_loaded()
         try:
             self.meta_path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,54 +226,52 @@ class SkillTierManager:
                 encoding="utf-8",
             )
         except Exception as e:
-            logger.warning("保存 skills_meta.json 失败: %s", e)
+            logger.warning("Failed to save %s: %s", self.meta_path, e)
 
-    # -- 查询 -----------------------------------------------------------------
+    # -- Queries --------------------------------------------------------------
 
     def get_skill(self, name: str) -> Optional[SkillMeta]:
-        """获取单个 Skill 的元数据。"""
         self._ensure_loaded()
         return self._store.skills.get(name)
 
     def get_tier(self, name: str) -> SkillTier:
-        """获取 Skill 当前层级。"""
         meta = self.get_skill(name)
-        if meta:
-            return SkillTier(meta.tier)
-        return SkillTier.ARCHIVED
+        return SkillTier(meta.tier) if meta else SkillTier.ARCHIVED
 
     def get_skills_by_tier(self, tier: SkillTier) -> List[str]:
-        """获取指定层级的所有 Skill 名称（按使用频率排序）。"""
+        """Return skill names in the given tier, sorted by usage (desc)."""
         self._ensure_loaded()
-        result = [
-            (name, meta.usage_count)
-            for name, meta in self._store.skills.items()
-            if meta.tier == tier.value
+        pairs = [
+            (n, m.usage_count)
+            for n, m in self._store.skills.items()
+            if m.tier == tier.value
         ]
-        result.sort(key=lambda x: -x[1])
-        return [name for name, _ in result]
+        pairs.sort(key=lambda x: -x[1])
+        return [n for n, _ in pairs]
 
     def get_active_skills(self) -> List[str]:
-        """获取应注入 context 的 Skill 列表（builtin + 部分 frequent）。"""
+        """Return skills that should be injected into the system prompt.
+
+        Builtin skills are always included; up to MAX_FREQUENT Frequent skills
+        (by usage) are appended.
+        """
         builtin = self.get_skills_by_tier(SkillTier.BUILTIN)
         frequent = self.get_skills_by_tier(SkillTier.FREQUENT)
+        limit = self._store.tier_limits.get(SkillTier.FREQUENT.value, MAX_FREQUENT)
+        return builtin + frequent[:limit]
 
-        # frequent 最多取 MAX_FREQUENT 个（按使用次数）
-        return builtin + frequent[:MAX_FREQUENT]
+    def get_archived_skills(self) -> List[str]:
+        """Return all archived skill names (zero token cost)."""
+        return self.get_skills_by_tier(SkillTier.ARCHIVED)
 
-    # -- 操作 -----------------------------------------------------------------
+    # -- Operations -----------------------------------------------------------
 
     def record_usage(self, skill_name: str):
-        """记录一次 Skill 使用。
-
-        Args:
-            skill_name: Skill 名称。
-        """
+        """Record one usage for *skill_name* and check real-time promotion."""
         self._ensure_loaded()
         skill_name = skill_name.strip().lower()
 
         if skill_name not in self._store.skills:
-            # 新 Skill → 归档
             self._store.skills[skill_name] = SkillMeta(
                 name=skill_name,
                 tier=SkillTier.ARCHIVED.value,
@@ -288,76 +280,103 @@ class SkillTierManager:
         meta = self._store.skills[skill_name]
         meta.record_use()
 
-        # 实时检查晋升条件
         if meta.should_promote():
             self._promote(skill_name)
 
         self.save()
 
     def _promote(self, skill_name: str):
-        """将一个 Skill 晋升为 frequent。"""
+        """Promote *skill_name* from archived to frequent."""
         meta = self._store.skills.get(skill_name)
         if not meta:
             return
 
         frequent = self.get_skills_by_tier(SkillTier.FREQUENT)
-        if len(frequent) >= MAX_FREQUENT:
-            # frequent 已满 → 降级使用最少的
-            least_used = None
-            least_count = float("inf")
-            for name in frequent:
-                fm = self._store.skills.get(name)
-                if fm and not fm.pinned and fm.usage_count < least_count:
-                    least_used = name
-                    least_count = fm.usage_count
-
-            if least_used:
-                self._demote(least_used)
+        limit = self._store.tier_limits.get(SkillTier.FREQUENT.value, MAX_FREQUENT)
+        if len(frequent) >= limit:
+            # Evict the least-used unpinned frequent skill
+            evict_candidates = [
+                (n, self._store.skills[n].usage_count)
+                for n in frequent
+                if not self._store.skills[n].pinned
+            ]
+            if evict_candidates:
+                evict_candidates.sort(key=lambda x: x[1])
+                self._demote(evict_candidates[0][0])
 
         meta.tier = SkillTier.FREQUENT.value
         meta.promoted_at = datetime.now().isoformat()
-        logger.info("Skill 晋升: %s → frequent", skill_name)
+        logger.info("Skill promoted: %s → frequent", skill_name)
 
     def _demote(self, skill_name: str):
-        """将一个 Skill 降级为 archived。"""
+        """Demote *skill_name* from frequent to archived."""
         meta = self._store.skills.get(skill_name)
         if not meta or meta.pinned:
             return
-
         meta.tier = SkillTier.ARCHIVED.value
         meta.archived_at = datetime.now().isoformat()
-        meta.weekly_usage = [0, 0, 0, 0]  # 重置周频率
-        logger.info("Skill 降级: %s → archived", skill_name)
+        meta.weekly_usage = [0, 0, 0, 0]
+        logger.info("Skill demoted: %s → archived", skill_name)
+
+    def promote(self, skill_name: str):
+        """Manually promote *skill_name* to frequent."""
+        self._ensure_loaded()
+        self._promote(skill_name)
+        self.save()
+
+    def demote(self, skill_name: str):
+        """Manually demote *skill_name* to archived."""
+        self._ensure_loaded()
+        self._demote(skill_name)
+        self.save()
 
     def pin_skill(self, skill_name: str):
-        """锁定一个 Skill（不自动降级）。"""
+        """Protect a skill from auto-demotion."""
         meta = self.get_skill(skill_name)
         if meta:
             meta.pinned = True
             self.save()
 
     def unpin_skill(self, skill_name: str):
-        """取消锁定。"""
+        """Remove pin protection."""
         meta = self.get_skill(skill_name)
         if meta:
             meta.pinned = False
             self.save()
 
     def set_builtin(self, skill_name: str):
-        """手动将一个 Skill 设为 builtin。"""
+        """Manually promote *skill_name* to builtin tier."""
         if skill_name not in self._store.skills:
             return
         builtin_count = len(self.get_skills_by_tier(SkillTier.BUILTIN))
-        if builtin_count >= MAX_BUILTIN:
-            logger.warning("builtin 已满 (%d), 无法添加 %s", MAX_BUILTIN, skill_name)
+        limit = self._store.tier_limits.get(SkillTier.BUILTIN.value, MAX_BUILTIN)
+        if builtin_count >= limit:
+            logger.warning("Builtin tier full (%d), cannot add %s", limit, skill_name)
             return
         self._store.skills[skill_name].tier = SkillTier.BUILTIN.value
         self.save()
 
-    # -- 批量评估 -------------------------------------------------------------
+    def set_builtin_skills(self, skills: List[str]):
+        """Set the list of builtin skills (used by prompt builder on init)."""
+        self._ensure_loaded()
+        # Ensure each listed skill exists in metadata as builtin
+        for name in skills:
+            if name not in self._store.skills:
+                self._store.skills[name] = SkillMeta(
+                    name=name,
+                    tier=SkillTier.BUILTIN.value,
+                )
+            else:
+                self._store.skills[name].tier = SkillTier.BUILTIN.value
+        self.save()
 
-    def evaluate_promotions(self):
-        """批量执行升降级评估（建议 cron 每日触发）。"""
+    # -- Batch evaluation -----------------------------------------------------
+
+    def evaluate_promotions(self) -> Dict[str, List[str]]:
+        """Run batch promotion/demotion evaluation (designed for daily cron).
+
+        Returns a dict with keys ``promoted``, ``demoted``, ``cold_archive``.
+        """
         self._ensure_loaded()
 
         promoted = []
@@ -381,16 +400,15 @@ class SkillTierManager:
             self.save()
 
         logger.info(
-            "Skill 升降级评估完成: 晋升 %d, 降级 %d, 冷归档建议 %d",
+            "Batch evaluation: %d promoted, %d demoted, %d cold-archive suggested",
             len(promoted), len(demoted), len(cold),
         )
-
         return {"promoted": promoted, "demoted": demoted, "cold_archive": cold}
 
-    # -- 统计报告 -------------------------------------------------------------
+    # -- Statistics -----------------------------------------------------------
 
     def get_stats(self) -> Dict[str, Any]:
-        """获取统计信息。"""
+        """Compute aggregate statistics."""
         self._ensure_loaded()
         tiers = {"builtin": 0, "frequent": 0, "archived": 0}
         total_usage = 0
@@ -398,8 +416,10 @@ class SkillTierManager:
             tiers[meta.tier] = tiers.get(meta.tier, 0) + 1
             total_usage += meta.usage_count
 
-        # 估算 token 节省
-        active_count = tiers["builtin"] + min(tiers["frequent"], MAX_FREQUENT)
+        active_count = (
+            tiers["builtin"]
+            + min(tiers["frequent"], self._store.tier_limits.get("frequent", MAX_FREQUENT))
+        )
         total_count = sum(tiers.values())
         token_saved_pct = round((1 - active_count / max(total_count, 1)) * 100)
 
@@ -413,30 +433,30 @@ class SkillTierManager:
         }
 
     def print_stats(self) -> str:
-        """生成中文统计报告。"""
+        """Return a human-readable English stats report."""
         stats = self.get_stats()
         lines = [
-            "=== Skill 分层统计 ===",
-            f"总数: {stats['total_skills']} 个",
-            f"├─ 内置:    {stats['by_tier']['builtin']} 个 (始终加载)",
-            f"├─ 常用:    {stats['by_tier']['frequent']} 个 (自动匹配)",
-            f"└─ 归档:    {stats['by_tier']['archived']} 个 (按需唤醒)",
-            f"活跃: {stats['active_skills']}/{stats['total_skills']}",
-            f"总使用次数: {stats['total_usage']}",
-            f"Token 节省: ~{stats['token_saved_pct']}%",
+            "=== Skill Tier Statistics ===",
+            f"Total: {stats['total_skills']}",
+            f"  Builtin:    {stats['by_tier']['builtin']} (always loaded)",
+            f"  Frequent:   {stats['by_tier']['frequent']} (auto-matched)",
+            f"  Archived:   {stats['by_tier']['archived']} (on-demand)",
+            f"Active: {stats['active_skills']}/{stats['total_skills']}",
+            f"Total uses: {stats['total_usage']}",
+            f"Token saved: ~{stats['token_saved_pct']}%",
         ]
         if stats["last_evaluation"]:
-            lines.append(f"上次评估: {stats['last_evaluation']}")
+            lines.append(f"Last evaluation: {stats['last_evaluation']}")
         return "\n".join(lines)
 
 
-# -- 全局单例 ----------------------------------------------------------------
+# -- Global convenience accessor ---------------------------------------------
 
 _mgr_instance: Optional[SkillTierManager] = None
 
 
 def get_skill_manager() -> SkillTierManager:
-    """获取全局 Skill 管理实例。"""
+    """Return the global SkillTierManager singleton."""
     global _mgr_instance
     if _mgr_instance is None:
         _mgr_instance = SkillTierManager()
@@ -444,5 +464,5 @@ def get_skill_manager() -> SkillTierManager:
 
 
 def record_skill_usage(skill_name: str):
-    """便捷函数：记录一次 Skill 使用。"""
+    """Convenience: record one usage via the global manager."""
     get_skill_manager().record_usage(skill_name)
