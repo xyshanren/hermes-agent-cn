@@ -4,6 +4,36 @@
 
 ---
 
+## v0.12.0-cn.2 (2026-05-06)
+
+### 🪜 Skill 三层管理 + 自动调度（面向上游 PR）
+
+重构了 CN 版的两个核心模块，准备推给 Hermes 官方上游：
+
+#### 🆕 SkillTierManager（`agent/skill_tier_manager.py`）
+- 三层分层：Builtin（始终注入）/ Frequent（自动匹配）/ Archived（按需唤醒）
+- 自动升降级：7 天内使用 ≥3 次 → 晋升；连续 7 天未用 → 降级
+- 统计报告：活跃/归档分布 + Token 节省百分比估算
+- 支持 Pin 保护、手动升降级、批量评估
+- **适配上游**：移除硬编码 CN Skill 列表，改为构造注入 + 配置驱动
+
+#### 🆕 SkillMatcher（`agent/skill_matcher.py`，原 `jineng_diaodu.py`）
+- 三种匹配策略：关键词精确匹配、文件扩展名上下文匹配、Description Jaccard 模糊匹配
+- 共现矩阵追踪 Skill 关联使用
+- 松耦合设计：通过 `tier_data` 参数接收 Tier 信息，不直接依赖 SkillTierManager
+- **适配上游**：英文命名/注释/日志，16 种文件扩展名映射
+
+#### 🔗 系统集成
+- `prompt_builder.py`：`build_skills_system_prompt()` 分层注入，Archived Skill 仅列名称
+- `run_agent.py`：每 20 次工具调用触发一次 `evaluate_promotions()`
+- `hermes skills tier {status|pin|unpin|evaluate}` CLI 子命令
+- 配置开关：`skills.tier_management.enabled`
+
+#### 🧹 清理
+- 删除 `agent/jineng_diaodu.py`（已替换为 `skill_matcher.py`）
+
+---
+
 ## v0.12.0-cn.1 (2026-05-03)
 
 ### 🔄 上游合并：NousResearch v0.12.0+

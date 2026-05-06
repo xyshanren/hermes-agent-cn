@@ -516,6 +516,15 @@ skills:
   #   - ~/.agents/skills
   #   - /home/shared/team-skills
 
+  # Tier-based skill lifecycle management.
+  # Automatically classifies skills into Builtin / Frequent / Archived tiers
+  # based on usage, reducing context token waste.
+  # tier_management:
+  #   enabled: true            # Enable tier-based filtering in system prompt
+  #   eval_interval: 20        # Tool-iteration between batch evaluations
+  #   promotion_threshold: 3   # Uses in 7-day window to promote → frequent
+  #   demotion_days: 7         # Consecutive idle days before demotion → archived
+
 # =============================================================================
 # Agent Behavior
 # =============================================================================
