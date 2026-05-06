@@ -9363,6 +9363,71 @@ Examples:
         help="Interactive skill configuration — enable/disable individual skills",
     )
 
+    # tier sub-action: skill lifecycle management
+    skills_tier = skills_subparsers.add_parser(
+        "tier",
+        help="Manage skill tiers — view, pin, evaluate",
+        description="View tier distribution, pin/unpin skills, and trigger batch evaluation.",
+    )
+    tier_subparsers = skills_tier.add_subparsers(dest="tier_action")
+
+    tier_subparsers.add_parser(
+        "status",
+        help="Show tier distribution and statistics",
+    )
+
+    tier_pin = tier_subparsers.add_parser(
+        "pin",
+        help="Pin a skill to prevent auto-demotion",
+    )
+    tier_pin.add_argument("skill_name", help="Skill name to pin")
+
+    tier_unpin = tier_subparsers.add_parser(
+        "unpin",
+        help="Remove pin protection from a skill",
+    )
+    tier_unpin.add_argument("skill_name", help="Skill name to unpin")
+
+    tier_subparsers.add_parser(
+        "evaluate",
+        help="Trigger batch promotion/demotion evaluation now",
+    )
+
+    def handle_skills_tier(args):
+        """Route tier sub-commands."""
+        from agent.skill_tier_manager import get_skill_manager
+        mgr = get_skill_manager()
+
+        action = getattr(args, "tier_action", None)
+
+        if action == "status":
+            print(mgr.print_stats())
+            return
+
+        if action == "pin":
+            mgr.pin_skill(args.skill_name)
+            print(f"✅ Pinned: {args.skill_name}")
+            return
+
+        if action == "unpin":
+            mgr.unpin_skill(args.skill_name)
+            print(f"✅ Unpinned: {args.skill_name}")
+            return
+
+        if action == "evaluate":
+            result = mgr.evaluate_promotions()
+            p, d, c = result["promoted"], result["demoted"], result["cold_archive"]
+            print(f"Promoted:    {len(p)} — {', '.join(p) if p else 'none'}")
+            print(f"Demoted:     {len(d)} — {', '.join(d) if d else 'none'}")
+            print(f"Cold archive: {len(c)} — {', '.join(c) if c else 'none'}")
+            return
+
+        print("Usage: hermes skills tier {status|pin|unpin|evaluate}")
+        print("  status    — Show tier statistics")
+        print("  pin       — Pin a skill against auto-demotion")
+        print("  unpin     — Remove pin")
+        print("  evaluate  — Trigger batch evaluation now")
+
     def cmd_skills(args):
         # Route 'config' action to skills_config module
         if getattr(args, "skills_action", None) == "config":
@@ -9370,6 +9435,8 @@ Examples:
             from hermes_cli.skills_config import skills_command as skills_config_command
 
             skills_config_command(args)
+        elif getattr(args, "skills_action", None) == "tier":
+            handle_skills_tier(args)
         else:
             from hermes_cli.skills_hub import skills_command
 
