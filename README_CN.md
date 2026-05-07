@@ -63,6 +63,39 @@ hermes local-models setup --yes
 
 ---
 
+### Windows WSL2 更新 hermes-agent-cn 步骤
+
+```bash
+# 1. 进入项目目录
+cd ~/hermes-agent-cn
+
+# 2. 确认当前在 cn 分支
+git branch
+
+# 3. 拉取最新代码
+git pull origin cn
+
+# 4. 重新安装（editable 模式，捕获新增依赖/入口点变化）
+pip install -e .
+
+# 4.1 如果使用的是虚拟环境（如 hermes-venv），需激活虚拟环境再安装
+source ~/hermes-venv/bin/activate
+pip install -e .
+deactivate   # 用完可以退出
+
+# 完整命令（一次性粘贴执行）
+cd ~/hermes-agent-cn && git checkout -- . && ~/hermes-venv/bin/pip install -e . && git pull origin cn && ~/hermes-venv/bin/pip install -e .
+```
+
+| 情况 | 是否需要重装 |
+|------|:-----------:|
+| 只改了 .py 逻辑 | ❌ 不需要，editable 模式自动生效 |
+| 新增了依赖包（`pyproject.toml` / `requirements.txt` 变更） | ✅ 需要 |
+| 新增了 CLI 子命令（`[project.scripts]` 变更） | ✅ 需要 |
+| 版本号变更、元数据变更 | ✅ 建议重装 |
+
+---
+
 ## 🇨🇳 关于中文版
 
 这是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的中文汉化与深度本地化版本，基于上游 **NousResearch v0.12.0+**，由 [xyshanren](https://github.com/xyshanren) 维护。
