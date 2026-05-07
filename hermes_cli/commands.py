@@ -249,6 +249,39 @@ GATEWAY_KNOWN_COMMANDS: frozenset[str] = frozenset(
 )
 
 
+def is_gateway_known_command(name: str | None) -> bool:
+    """Return True when *name* is a known gateway slash command.
+
+    Checks built-in commands (via *GATEWAY_KNOWN_COMMANDS*) and
+    plugin-registered commands.  Returns ``False`` for ``None`` and
+    empty strings.  Degrades gracefully when the plugin system is
+    unavailable.
+    """
+    if not name:
+        return False
+    if name in GATEWAY_KNOWN_COMMANDS:
+        return True
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+        return name in get_plugin_commands()
+    except Exception:
+        return False
+
+
+def _iter_plugin_command_entries():
+    """Yield ``(name, description, args_hint)`` for plugin-registered commands.
+
+    Reads plugin commands via ``get_plugin_commands()`` and yields
+    each entry.  Degrades gracefully (yields nothing) on any error.
+    """
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+        for name, cmd in get_plugin_commands().items():
+            yield name, cmd.get("description", ""), cmd.get("args_hint", "")
+    except Exception:
+        return
+
+
 def _resolve_config_gates() -> set[str]:
     """Return canonical names of commands whose ``gateway_config_gate`` is truthy.
 
