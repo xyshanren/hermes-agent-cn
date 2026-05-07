@@ -48,7 +48,56 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         transport="openai_chat",
         base_url_env_var="DEEPSEEK_BASE_URL",
     ),
-    "minimax": HermesOverlay(
+    "nous": HermesOverlay(
+        transport="openai_chat",
+        auth_type="oauth_device_code",
+        base_url_override="https://inference-api.nousresearch.com/v1",
+    ),
+    "openai-codex": HermesOverlay(
+        transport="codex_responses",
+        auth_type="oauth_external",
+        base_url_override="https://chatgpt.com/backend-api/codex",
+    ),
+    "openai-api": HermesOverlay(
+        transport="codex_responses",
+        base_url_override="https://api.openai.com/v1",
+        base_url_env_var="OPENAI_BASE_URL",
+    ),
+    "xai-oauth": HermesOverlay(
+        transport="codex_responses",
+        auth_type="oauth_external",
+        base_url_override="https://api.x.ai/v1",
+        base_url_env_var="XAI_BASE_URL",
+    ),
+    "qwen-oauth": HermesOverlay(
+        transport="openai_chat",
+        auth_type="oauth_external",
+        base_url_override="https://portal.qwen.ai/v1",
+        base_url_env_var="HERMES_QWEN_BASE_URL",
+    ),
+    "google-gemini-cli": HermesOverlay(
+        transport="openai_chat",
+        auth_type="oauth_external",
+        base_url_override="cloudcode-pa://google",
+    ),
+    "lmstudio": HermesOverlay(
+        transport="openai_chat",
+        auth_type="api_key",
+        extra_env_vars=("LM_API_KEY",),
+        base_url_override="http://127.0.0.1:1234/v1",
+        base_url_env_var="LM_BASE_URL",
+    ),
+    "copilot-acp": HermesOverlay(
+        transport="codex_responses",
+        auth_type="external_process",
+        base_url_override="acp://copilot",
+        base_url_env_var="COPILOT_ACP_BASE_URL",
+    ),
+    "github-copilot": HermesOverlay(
+        transport="openai_chat",
+        extra_env_vars=("COPILOT_GITHUB_TOKEN", "GH_TOKEN"),
+    ),
+    "anthropic": HermesOverlay(
         transport="anthropic_messages",
         base_url_env_var="MINIMAX_BASE_URL",
     ),
