@@ -62,6 +62,26 @@ export function startMemoryMonitor({
   const dumped = new Set<Exclude<MemoryLevel, 'normal'>>()
   const inFlight = new Set<Exclude<MemoryLevel, 'normal'>>()
 
+  // Early-warning state (#34095): the silent-death regime is BELOW `high`, so
+  // the level machine above never sees it. Track the previous sample and fire
+  // onWarn at most once when heap both crosses a modest absolute floor AND is
+  // climbing steeply (≥150MB between 10s ticks) — the signature of a render-
+  // tree blowup — so the user gets a visible heads-up before Node OOMs under
+  // the exit threshold. Re-armed only after heap falls back below the floor.
+  // `lastHeap < 0` marks the un-seeded first sample so a cold start that opens
+  // already-high can't be mistaken for sudden growth (growth = current - last).
+  let lastHeap = -1
+  let warned = false
+  const WARN_GROWTH_STEP = 150 * MB
+
+  // Cooldown prevents repeated auto dumps when heap oscillates around the
+  // threshold (issue #21767). `dumped` alone is not enough — it clears on
+  // every transition back to `normal`.
+  const cooldownRaw = process.env.HERMES_AUTO_HEAPDUMP_COOLDOWN_MS?.trim()
+  const cooldownParsed = cooldownRaw ? Number(cooldownRaw) : NaN
+  const cooldownMs = Number.isFinite(cooldownParsed) && cooldownParsed >= 0 ? cooldownParsed : 600_000
+  let lastAutoDumpAt = 0
+
   const tick = async () => {
     const { heapUsed, rss } = process.memoryUsage()
     const level: MemoryLevel = heapUsed >= criticalBytes ? 'critical' : heapUsed >= highBytes ? 'high' : 'normal'
@@ -75,7 +95,12 @@ export function startMemoryMonitor({
       return
     }
 
+    if (Date.now() - lastAutoDumpAt < cooldownMs) {
+      return
+    }
+
     inFlight.add(level)
+    lastAutoDumpAt = Date.now()
 
     // Prune Ink content caches before dump/exit — half on 'high' (recoverable),
     // full on 'critical' (post-dump RSS reduction, keeps user running).
