@@ -111,7 +111,7 @@ def detect_audio_environment() -> dict:
     # (issue #21203).  Only block when no forwarding is configured.
     from hermes_constants import is_container
     if is_container():
-        if has_forwarded_audio:
+        if os.environ.get('PULSE_SERVER') or os.environ.get('PIPEWIRE_REMOTE'):
             notices.append("Running inside container (Docker/Podman/LXC) with host audio forwarding")
         else:
             warnings.append(
