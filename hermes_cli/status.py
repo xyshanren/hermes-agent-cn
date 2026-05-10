@@ -138,12 +138,6 @@ def show_status(args):
         "阿里云": "DASHSCOPE_API_KEY",
         "小米 MiMo": "XIAOMI_API_KEY",
     }
-        "Kimi": "KIMI_API_KEY",
-        "MiniMax": "MINIMAX_API_KEY",
-        "MiniMax-CN": "MINIMAX_CN_API_KEY",
-        "阿里云": "DASHSCOPE_API_KEY",
-        "小米 MiMo": "XIAOMI_API_KEY",
-    }
 
     def _resolve_env(env_ref) -> str:
         """Return first non-empty env var value from a str or tuple of names."""
