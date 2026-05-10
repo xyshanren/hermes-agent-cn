@@ -32,7 +32,10 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("openrouter/elephant-alpha",       "free"),
     ("openai/gpt-5.4",                  ""),
     ("openai/gpt-5.4-mini",             ""),
-    ("xiaomi/mimo-v2-pro",               ""),
+    ("xiaomi/mimo-v2.5-pro",             ""),
+    ("xiaomi/mimo-v2.5",                 ""),
+    ("tencent/hy3-preview:free",         "free"),
+    ("tencent/hy3-preview",              ""),
     ("openai/gpt-5.3-codex",            ""),
     ("google/gemini-3-pro-image-preview", ""),
     ("google/gemini-3-flash-preview",   ""),
@@ -48,12 +51,14 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("z-ai/glm-5-turbo",                ""),
     ("moonshotai/kimi-k2.5",            ""),
     ("x-ai/grok-4.20",                  ""),
+    ("x-ai/grok-4.3",                   ""),
     ("nvidia/nemotron-3-super-120b-a12b",      ""),
     ("nvidia/nemotron-3-super-120b-a12b:free", "free"),
     ("arcee-ai/trinity-large-preview:free", "free"),
     ("arcee-ai/trinity-large-thinking",  ""),
     ("openai/gpt-5.4-pro",              ""),
     ("openai/gpt-5.4-nano",             ""),
+    ("deepseek/deepseek-v4-pro",        ""),
 ]
 
 _openrouter_catalog_cache: list[tuple[str, str]] | None = None
@@ -94,6 +99,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "z-ai/glm-5-turbo",
         "moonshotai/kimi-k2.5",
         "x-ai/grok-4.20-beta",
+        "x-ai/grok-4.3",
         "nvidia/nemotron-3-super-120b-a12b",
         "nvidia/nemotron-3-super-120b-a12b:free",
         "arcee-ai/trinity-large-preview:free",
@@ -101,6 +107,20 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "openai/gpt-5.4-pro",
         "openai/gpt-5.4-nano",
         "openrouter/elephant-alpha",
+        "deepseek/deepseek-v4-pro",
+    ],
+    # Native OpenAI Chat Completions (api.openai.com). Used by /model counts and
+    # provider_model_ids fallback when /v1/models is unavailable.
+    "openai": [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5-mini",
+        "gpt-5.3-codex",
+        "gpt-5.2-codex",
+        "gpt-4.1",
+        "gpt-4o",
+        "gpt-4o-mini",
+>>>>>>> upstream/main
     ],
     "openai-codex": _codex_curated_models(),
     "copilot-acp": [
@@ -290,6 +310,18 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "glm-5",
         "glm-4.7",
         "kimi-k2.5",
+        "MiniMax-M2.5",
+    ],
+    # Alibaba Coding Plan — same platform as alibaba (DashScope coding-intl),
+    # separate provider ID with its own base_url_env_var.
+    "alibaba-coding-plan": [
+        "qwen3.6-plus",
+        "qwen3.5-plus",
+        "qwen3-coder-plus",
+        "qwen3-coder-next",
+        "kimi-k2.5",
+        "glm-5",
+        "glm-4.7",
         "MiniMax-M2.5",
     ],
     # Curated HF model list — only agentic models that map to OpenRouter defaults.
@@ -546,6 +578,25 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     # ── 可选（非国产，有海外需求时可用） ──
     ProviderEntry("nous",           "Nous Portal",              "Nous Portal（Nous Research 订阅服务）"),
 ]
+
+# Auto-extend CANONICAL_PROVIDERS with any provider registered in providers/
+# that is not already in the list above.  Adding plugins/model-providers/<name>/
+# is sufficient to expose a new provider in the model picker, /model, and all
+# downstream consumers — no edits to this file needed.
+_canonical_slugs = {p.slug for p in CANONICAL_PROVIDERS}
+try:
+    from providers import list_providers as _list_providers_for_canonical
+    for _pp in _list_providers_for_canonical():
+        if _pp.name in _canonical_slugs:
+            continue
+        if _pp.auth_type in ("oauth_device_code", "oauth_external", "external_process", "aws_sdk", "copilot"):
+            continue  # non-api-key flows need bespoke picker UX; skip auto-inject
+        _label = _pp.display_name or _pp.name
+        _desc = _pp.description or f"{_label} (direct API)"
+        CANONICAL_PROVIDERS.append(ProviderEntry(_pp.name, _label, _desc))
+        _canonical_slugs.add(_pp.name)
+except Exception:
+    pass
 
 # Derived dicts — used throughout the codebase
 _PROVIDER_LABELS = {p.slug: p.label for p in CANONICAL_PROVIDERS}
@@ -1192,10 +1243,20 @@ def model_supports_fast_mode(model_id: Optional[str]) -> bool:
 
 
 def _is_anthropic_fast_model(model_id: Optional[str]) -> bool:
-    """Return True if the model supports Anthropic's fast mode (speed='fast')."""
+    """Return True if the model is a Claude model eligible for Anthropic Fast Mode.
+
+    Fast mode is currently supported on Claude Opus 4.6 only. Per Anthropic's
+    docs (https://platform.claude.com/docs/en/build-with-claude/fast-mode):
+    "Fast mode is currently supported on Opus 4.6 only. Sending speed: fast
+    with an unsupported model returns an error." Opus 4.7 explicitly rejects
+    the ``speed`` parameter with HTTP 400.
+    """
     raw = _strip_vendor_prefix(str(model_id or ""))
     base = raw.split(":")[0]
-    return base in _ANTHROPIC_FAST_MODE_MODELS
+    if not base.startswith("claude-"):
+        return False
+    # Only Opus 4.6 supports fast mode at present.
+    return "opus-4-6" in base or "opus-4.6" in base
 
 
 def resolve_fast_mode_overrides(model_id: Optional[str]) -> dict[str, Any] | None:
@@ -1280,7 +1341,51 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
             live = fetch_api_models(api_key, base_url)
             if live:
                 return live
-    return list(_PROVIDER_MODELS.get(normalized, []))
+
+    # Bedrock uses live discovery keyed by the resolved AWS region so that
+    # EU/AP users see eu.*/ap.* model IDs instead of the static us.* list.
+    # Note: early return intentionally skips _MODELS_DEV_PREFERRED merge
+    # below — bedrock is not expected to appear in that table.
+    if normalized == "bedrock":
+        try:
+            from agent.bedrock_adapter import bedrock_model_ids_or_none
+            ids = bedrock_model_ids_or_none()
+            if ids is not None:
+                return ids
+        except Exception:
+            pass
+
+    # ── Profile-based generic live fetch (all simple api-key providers) ──
+    # Handles any provider registered in providers/ with auth_type="api_key".
+    # Replaces per-provider copy-paste blocks (stepfun, gmi, zai, etc.).
+    try:
+        from providers import get_provider_profile
+        from hermes_cli.auth import resolve_api_key_provider_credentials
+
+        _p = get_provider_profile(normalized)
+        if _p and _p.auth_type == "api_key" and _p.base_url:
+            try:
+                creds = resolve_api_key_provider_credentials(normalized)
+                api_key = str(creds.get("api_key") or "").strip()
+                base_url = str(creds.get("base_url") or "").strip()
+            except Exception:
+                api_key, base_url = "", _p.base_url
+            if not base_url:
+                base_url = _p.base_url
+            if api_key:
+                live = _p.fetch_models(api_key=api_key)
+                if live:
+                    return live
+            # Use profile's fallback_models if defined
+            if _p.fallback_models:
+                return list(_p.fallback_models)
+    except Exception:
+        pass
+
+    curated_static = list(_PROVIDER_MODELS.get(normalized, []))
+    if normalized in _MODELS_DEV_PREFERRED:
+        return _merge_with_models_dev(normalized, curated_static)
+    return curated_static
 
 
 def _fetch_anthropic_models(timeout: float = 5.0) -> Optional[list[str]]:
@@ -1775,7 +1880,141 @@ def fetch_api_models(
     Returns a list of model ID strings, or ``None`` if the endpoint could not
     be reached (network error, timeout, auth failure, etc.).
     """
-    return probe_api_models(api_key, base_url, timeout=timeout).get("models")
+    return probe_api_models(api_key, base_url, timeout=timeout, api_mode=api_mode).get("models")
+
+
+# ---------------------------------------------------------------------------
+# Ollama Cloud — merged model discovery with disk cache
+# ---------------------------------------------------------------------------
+
+
+
+_OLLAMA_CLOUD_CACHE_TTL = 3600  # 1 hour
+
+
+def _strip_ollama_cloud_suffix(model_id: str) -> str:
+    """Strip :cloud / -cloud suffixes that models.dev appends to Ollama Cloud IDs.
+
+    The live API uses clean IDs (e.g. 'kimi-k2.6') while models.dev sometimes
+    returns them as 'kimi-k2.6:cloud'. Normalising before the dedup merge
+    prevents duplicate entries in the merged model list.
+    """
+    for suffix in (":cloud", "-cloud"):
+        if model_id.endswith(suffix):
+            return model_id[: -len(suffix)]
+    return model_id
+
+
+def _ollama_cloud_cache_path() -> Path:
+    """Return the path for the Ollama Cloud model cache."""
+    from hermes_constants import get_hermes_home
+    return get_hermes_home() / "ollama_cloud_models_cache.json"
+
+
+def _load_ollama_cloud_cache(*, ignore_ttl: bool = False) -> Optional[dict]:
+    """Load cached Ollama Cloud models from disk.
+
+    Args:
+        ignore_ttl: If True, return data even if the TTL has expired (stale fallback).
+    """
+    try:
+        cache_path = _ollama_cloud_cache_path()
+        if not cache_path.exists():
+            return None
+        with open(cache_path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return None
+        models = data.get("models")
+        if not (isinstance(models, list) and models):
+            return None
+        if not ignore_ttl:
+            cached_at = data.get("cached_at", 0)
+            if (time.time() - cached_at) > _OLLAMA_CLOUD_CACHE_TTL:
+                return None  # stale
+        return data
+    except Exception:
+        pass
+    return None
+
+
+def _save_ollama_cloud_cache(models: list[str]) -> None:
+    """Persist the merged Ollama Cloud model list to disk."""
+    try:
+        from utils import atomic_json_write
+        cache_path = _ollama_cloud_cache_path()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_json_write(cache_path, {"models": models, "cached_at": time.time()}, indent=None)
+    except Exception:
+        pass
+
+
+def fetch_ollama_cloud_models(
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    *,
+    force_refresh: bool = False,
+) -> list[str]:
+    """Fetch Ollama Cloud models by merging live API + models.dev, with disk cache.
+
+    Resolution order:
+      1. Disk cache (if fresh, < 1 hour, and not force_refresh)
+      2. Live ``/v1/models`` endpoint (primary — freshest source)
+      3. models.dev registry (secondary — fills gaps for unlisted models)
+      4. Merge: live models first, then models.dev additions (deduped)
+
+    Returns a list of model IDs (never None — empty list on total failure).
+    """
+    # 1. Check disk cache
+    if not force_refresh:
+        cached = _load_ollama_cloud_cache()
+        if cached is not None:
+            return cached["models"]
+
+    # 2. Live API probe
+    if not api_key:
+        api_key = os.getenv("OLLAMA_API_KEY", "")
+    if not base_url:
+        base_url = os.getenv("OLLAMA_BASE_URL", "") or "https://ollama.com/v1"
+
+    live_models: list[str] = []
+    if api_key:
+        result = fetch_api_models(api_key, base_url, timeout=8.0)
+        if result:
+            live_models = result
+
+    # 3. models.dev registry
+    mdev_models: list[str] = []
+    try:
+        from agent.models_dev import list_agentic_models
+        mdev_models = list_agentic_models("ollama-cloud")
+    except Exception:
+        pass
+
+    # 4. Merge: live first, then models.dev additions (deduped, order-preserving)
+    if live_models or mdev_models:
+        seen: set[str] = set()
+        merged: list[str] = []
+        for m in live_models:
+            if m and m not in seen:
+                seen.add(m)
+                merged.append(m)
+        for m in mdev_models:
+            normalized = _strip_ollama_cloud_suffix(m)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                merged.append(normalized)
+        if merged:
+            _save_ollama_cloud_cache(merged)
+            return merged
+
+    # Total failure — return stale cache if available (ignore TTL)
+    stale = _load_ollama_cloud_cache(ignore_ttl=True)
+    if stale is not None:
+        return stale["models"]
+
+    return []
+>>>>>>> upstream/main
 
 
 def validate_requested_model(
@@ -1824,8 +2063,46 @@ def validate_requested_model(
             "message": "Model names cannot contain spaces.",
         }
 
-    if normalized == "custom":
-        probe = probe_api_models(api_key, base_url)
+    if normalized == "lmstudio":
+        from hermes_cli.auth import AuthError
+        # Use probe_lmstudio_models so we can distinguish None (unreachable
+        # / malformed response) from [] (reachable, but no chat-capable models
+        # are loaded). fetch_lmstudio_models collapses both to [].
+        try:
+            models = probe_lmstudio_models(api_key=api_key, base_url=base_url)
+        except AuthError as exc:
+            return {
+                "accepted": False, "persist": False, "recognized": False,
+                "message": (
+                    f"{exc} Set `LM_API_KEY` (or update it) to match the server's bearer token."
+                ),
+            }
+        if models is None:
+            return {
+                "accepted": False, "persist": False, "recognized": False,
+                "message": f"Could not reach LM Studio's `/api/v1/models` to validate `{requested}`.",
+            }
+        if not models:
+            return {
+                "accepted": False, "persist": False, "recognized": False,
+                "message": (
+                    f"LM Studio is reachable but no chat-capable models are loaded. "
+                    f"Load `{requested}` in LM Studio (Developer tab → Load Model) and try again."
+                ),
+            }
+        if requested_for_lookup in set(models):
+            return {"accepted": True, "persist": True, "recognized": True, "message": None}
+        return {
+            "accepted": False, "persist": False, "recognized": False,
+            "message": f"Model `{requested}` was not found in LM Studio's model listing.",
+        }
+
+    if normalized == "custom" or normalized.startswith("custom:"):
+        # Try probing with correct auth for the api_mode.
+        if api_mode == "anthropic_messages":
+            probe = probe_api_models(api_key, base_url, api_mode=api_mode)
+        else:
+            probe = probe_api_models(api_key, base_url)
         api_models = probe.get("models")
         if api_models is not None:
             if requested_for_lookup in set(api_models):
@@ -1912,6 +2189,53 @@ def validate_requested_model(
             suggestion_text = ""
             if suggestions:
                 suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
+            return {
+            if suggestions:
+                suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
+            return {
+                "accepted": True,
+                "persist": True,
+                "recognized": False,
+                "message": (
+                    f"Note: `{requested}` was not found in the OpenAI Codex model listing. "
+                    "It may still work if your ChatGPT/Codex account has access to a newer or hidden model ID."
+                    f"{suggestion_text}"
+                ),
+            }
+
+    # MiniMax providers don't expose a /models endpoint — validate against
+    # the static catalog instead, similar to openai-codex.
+    if normalized in ("minimax", "minimax-cn"):
+        try:
+            catalog_models = provider_model_ids(normalized)
+        except Exception:
+            catalog_models = []
+        if catalog_models:
+            # Case-insensitive lookup (catalog uses mixed case like MiniMax-M2.7)
+            catalog_lower = {m.lower(): m for m in catalog_models}
+            if requested_for_lookup.lower() in catalog_lower:
+                return {
+                    "accepted": True,
+                    "persist": True,
+                    "recognized": True,
+                    "message": None,
+                }
+            # Auto-correct close matches (case-insensitive)
+            catalog_lower_list = list(catalog_lower.keys())
+            auto = get_close_matches(requested_for_lookup.lower(), catalog_lower_list, n=1, cutoff=0.9)
+            if auto:
+                corrected = catalog_lower[auto[0]]
+                return {
+                    "accepted": True,
+                    "persist": True,
+                    "recognized": True,
+                    "corrected_model": corrected,
+                    "message": f"Auto-corrected `{requested}` → `{corrected}`",
+                }
+            suggestions = get_close_matches(requested_for_lookup.lower(), catalog_lower_list, n=3, cutoff=0.5)
+            suggestion_text = ""
+            if suggestions:
+                suggestion_text = "\n  Similar models: " + ", ".join(f"`{catalog_lower[s]}`" for s in suggestions)
             return {
                 "accepted": True,
                 "persist": True,

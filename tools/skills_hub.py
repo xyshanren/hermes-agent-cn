@@ -219,7 +219,7 @@ class GitHubAuth:
             key_file = Path(key_path)
             if not key_file.exists():
                 return None
-            private_key = key_file.read_text()
+            private_key = key_file.read_text(encoding="utf-8")
 
             now = int(time.time())
             payload = {
@@ -2667,7 +2667,7 @@ def append_audit_log(action: str, skill_name: str, source: str,
         parts.append(extra)
     line = " ".join(parts) + "\n"
     try:
-        with open(AUDIT_LOG, "a") as f:
+        with open(AUDIT_LOG, "a", encoding="utf-8") as f:
             f.write(line)
     except OSError as e:
         logger.debug("Could not write audit log: %s", e)
@@ -2801,7 +2801,11 @@ def bundle_content_hash(bundle: SkillBundle) -> str:
     """Compute a deterministic hash for an in-memory skill bundle."""
     h = hashlib.sha256()
     for rel_path in sorted(bundle.files):
-        h.update(bundle.files[rel_path].encode("utf-8"))
+        content = bundle.files[rel_path]
+        if isinstance(content, bytes):
+            h.update(content)
+        else:
+            h.update(content.encode("utf-8"))
     return f"sha256:{h.hexdigest()[:16]}"
 
 
