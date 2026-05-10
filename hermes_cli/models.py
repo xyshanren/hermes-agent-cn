@@ -120,7 +120,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gpt-4.1",
         "gpt-4o",
         "gpt-4o-mini",
->>>>>>> upstream/main
     ],
     "openai-codex": _codex_curated_models(),
     "copilot-acp": [
@@ -2014,7 +2013,6 @@ def fetch_ollama_cloud_models(
         return stale["models"]
 
     return []
->>>>>>> upstream/main
 
 
 def validate_requested_model(
@@ -2187,9 +2185,6 @@ def validate_requested_model(
                 }
             suggestions = get_close_matches(requested_for_lookup, codex_models, n=3, cutoff=0.5)
             suggestion_text = ""
-            if suggestions:
-                suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
-            return {
             if suggestions:
                 suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
             return {
