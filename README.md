@@ -97,9 +97,9 @@ cd ~/hermes-agent-cn && git checkout -- . && ~/hermes-venv/bin/pip install -e . 
 | 平台 | 快速安装 | 详细指南 |
 |------|----------|----------|
 | **Linux** | [10 分钟快速安装](docs/installation/QUICKSTART_LINUX.md) | [完整安装指南](docs/installation/LINUX_INSTALL.md) |
-| **Windows** | [10 分钟快速安装](docs/installation/QUICKSTART_WINDOWS.md) | [完整安装指南](docs/installation/WINDOWS_INSTALL.md) |
+| **Windows** | ❌ 不支持原生环境 | ❌ 不支持原生环境 |
 | macOS | 🚧 即将推出... | 🚧 即将推出... |
-| WSL2 | 🚧 即将推出... | 🚧 即将推出... |
+| **WSL2** | [10 分钟快速安装](docs/installation/QUICKSTART_WSL2.md) | [完整安装指南](docs/installation/WSL2_INSTALL.md) |
 
 > 💡 **首次安装推荐**：查看 [Linux 快速安装指南](docs/installation/QUICKSTART_LINUX.md)（10 分钟完成安装）
 
