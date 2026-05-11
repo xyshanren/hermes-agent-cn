@@ -10,8 +10,8 @@
 |------|------|------|
 | [QUICKSTART_LINUX.md](QUICKSTART_LINUX.md) | Linux | 快速安装指南（10 分钟） |
 | [LINUX_INSTALL.md](LINUX_INSTALL.md) | Linux | 详细安装指南（完整版） |
-| | | |
-| | Windows | 即将推出... |
+| [QUICKSTART_WINDOWS.md](QUICKSTART_WINDOWS.md) | Windows | 快速安装指南（10 分钟） |
+| [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md) | Windows | 详细安装指南（完整版） |
 | | macOS | 即将推出... |
 | | WSL2 | 即将推出... |
 
