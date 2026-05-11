@@ -129,28 +129,29 @@ python --version
 ### 方法一：使用 venv（推荐）
 
 ```bash
-# 创建项目目录
-mkdir -p ~/projects
-cd ~/projects
-
-# 克隆仓库（先跳过，后面会做）
-# 创建虚拟环境
-python3.12 -m venv hermes-venv
+# 创建虚拟环境（在项目目录外，推荐做法）
+python3.12 -m venv ~/.venvs/hermes-agent-cn
 
 # 验证虚拟环境
-ls -la hermes-venv/
+ls -la ~/.venvs/hermes-agent-cn/
 # 应该看到 bin/ include/ lib/ 等目录
 
 # 激活虚拟环境
-source ~/projects/hermes-venv/bin/activate
+source ~/.venvs/hermes-agent-cn/bin/activate
 
 # 升级 pip（在虚拟环境中）
 pip install --upgrade pip setuptools wheel
 
 # 验证虚拟环境激活成功
-which python    # 应该显示 ~/projects/hermes-venv/bin/python
-which pip       # 应该显示 ~/projects/hermes-venv/bin/pip
+which python    # 应该显示 ~/.venvs/hermes-agent-cn/bin/python
+which pip       # 应该显示 ~/.venvs/hermes-agent-cn/bin/pip
 ```
+
+> **💡 为什么在项目目录外创建虚拟环境？**
+> - ✅ 避免意外提交到 Git（即使 `.gitignore` 配置正确）
+> - ✅ 项目目录更干净，只保留代码和配置
+> - ✅ 符合 Python 社区最佳实践（PEP 370、Poetry、Pipenv 等工具默认行为）
+> - ✅ 多个项目可以共享同一个虚拟环境（可选）
 
 ### 方法二：使用 virtualenv
 
@@ -158,11 +159,11 @@ which pip       # 应该显示 ~/projects/hermes-venv/bin/pip
 # 安装 virtualenv
 pip install --user virtualenv
 
-# 创建虚拟环境
-virtualenv -p python3.12 ~/projects/hermes-venv
+# 创建虚拟环境（在项目目录外）
+virtualenv -p python3.12 ~/.venvs/hermes-agent-cn
 
 # 激活
-source ~/projects/hermes-venv/bin/activate
+source ~/.venvs/hermes-agent-cn/bin/activate
 ```
 
 ### 方法三：使用 conda/mamba
@@ -181,8 +182,8 @@ which python    # 应该显示 ~/miniconda3/envs/hermes/bin/python
 ### 虚拟环境管理命令
 
 ```bash
-# 激活虚拟环境
-source ~/projects/hermes-venv/bin/activate
+# 激活虚拟环境（在项目目录外）
+source ~/.venvs/hermes-agent-cn/bin/activate
 
 # 退出虚拟环境
 deactivate
@@ -192,7 +193,7 @@ pip list
 
 # 删除虚拟环境（如果需要）
 deactivate
-rm -rf ~/projects/hermes-venv
+rm -rf ~/.venvs/hermes-agent-cn
 ```
 
 ---
@@ -251,9 +252,9 @@ git config --global user.email "your.email@example.com"
 cd ~/projects/hermes-agent-cn
 
 # 激活虚拟环境
-source ~/projects/hermes-venv/bin/activate
+source ~/.venvs/hermes-agent-cn/bin/activate
 
-# 确认虚拟环境已激活（提示符前应该有 (hermes-venv)）
+# 确认虚拟环境已激活（提示符前应该有 (hermes-agent-cn)）
 ```
 
 ### 方法一：使用 pip 安装（推荐）
@@ -311,7 +312,7 @@ python -c "import openai; import anthropic; import rich; print('✅ 核心依赖
 
 # 检查 hermes 命令是否可用
 which hermes
-# 应该显示 ~/projects/hermes-venv/bin/hermes
+# 应该显示 ~/.venvs/hermes-agent-cn/bin/hermes
 
 # 查看版本
 hermes --version
@@ -455,11 +456,11 @@ pytest tests/ -v -m "not integration"
 
 ```bash
 # 方法一：每次手动激活
-source ~/projects/hermes-venv/bin/activate
+source ~/.venvs/hermes-agent-cn/bin/activate
 hermes chat
 
 # 方法二：创建别名（推荐）
-echo 'alias hermes="source ~/projects/hermes-venv/bin/activate && hermes"' >> ~/.bashrc
+echo 'alias hermes="source ~/.venvs/hermes-agent-cn/bin/activate && hermes"' >> ~/.bashrc
 source ~/.bashrc
 hermes chat
 ```
@@ -468,11 +469,11 @@ hermes chat
 
 ```bash
 # 创建符号链接
-sudo ln -s ~/projects/hermes-venv/bin/hermes /usr/local/bin/hermes
+sudo ln -s ~/.venvs/hermes-agent-cn/bin/hermes /usr/local/bin/hermes
 
 # 或者复制到用户 bin 目录
 mkdir -p ~/.local/bin
-ln -s ~/projects/hermes-venv/bin/hermes ~/.local/bin/hermes
+ln -s ~/.venvs/hermes-agent-cn/bin/hermes ~/.local/bin/hermes
 
 # 确保 ~/.local/bin 在 PATH 中
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
@@ -523,7 +524,7 @@ hermes --version
 cd ~/projects/hermes-agent-cn
 
 # 激活虚拟环境
-source ~/projects/hermes-venv/bin/activate
+source ~/.venvs/hermes-agent-cn/bin/activate
 
 # 保存本地修改（如果有）
 git stash
@@ -546,7 +547,7 @@ cat > ~/update-hermes.sh << 'EOF'
 set -e
 
 HERMES_DIR=~/projects/hermes-agent-cn
-VENV_DIR=~/projects/hermes-venv
+VENV_DIR=~/.venvs/hermes-agent-cn
 
 echo "📦 更新 Hermes Agent CN..."
 
@@ -595,8 +596,8 @@ ERROR: Package requires Python >=3.11
 # 安装 Python 3.12
 sudo apt install -y python3.12 python3.12-venv
 
-# 使用 Python 3.12 创建虚拟环境
-python3.12 -m venv hermes-venv
+# 使用 Python 3.12 在项目目录外创建虚拟环境
+python3.12 -m venv ~/.venvs/hermes-agent-cn
 ```
 
 ---
@@ -640,10 +641,10 @@ hermes: command not found
 which hermes
 
 # 如果没有，激活虚拟环境
-source ~/projects/hermes-venv/bin/activate
+source ~/.venvs/hermes-agent-cn/bin/activate
 
 # 或者创建符号链接
-sudo ln -s ~/projects/hermes-venv/bin/hermes /usr/local/bin/hermes
+sudo ln -s ~/.venvs/hermes-agent-cn/bin/hermes /usr/local/bin/hermes
 
 # 验证
 which hermes
@@ -738,11 +739,11 @@ Error: No module named 'hermes_cli'
 ```bash
 # 删除旧的虚拟环境
 deactivate
-rm -rf ~/projects/hermes-venv
+rm -rf ~/.venvs/hermes-agent-cn
 
 # 重新创建
-python3.12 -m venv ~/projects/hermes-venv
-source ~/projects/hermes-venv/bin/activate
+python3.12 -m venv ~/.venvs/hermes-agent-cn
+source ~/.venvs/hermes-agent-cn/bin/activate
 
 # 重新安装
 cd ~/projects/hermes-agent-cn
@@ -785,7 +786,7 @@ hermes gateway --port 8001
 
 | 任务 | 命令 |
 |------|------|
-| 激活虚拟环境 | `source ~/projects/hermes-venv/bin/activate` |
+| 激活虚拟环境 | `source ~/.venvs/hermes-agent-cn/bin/activate` |
 | 启动对话 | `hermes chat` |
 | 快速配置 | `hermes quickstart` |
 | 手动配置 | `hermes setup` |

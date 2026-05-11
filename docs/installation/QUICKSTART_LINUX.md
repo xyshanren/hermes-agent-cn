@@ -28,13 +28,19 @@ cd ~
 git clone -b cn https://github.com/xyshanren/hermes-agent-cn.git
 cd hermes-agent-cn
 
-# 创建并激活虚拟环境
-python3.12 -m venv hermes-venv
-source hermes-venv/bin/activate
+# 在项目目录外创建虚拟环境（推荐做法）
+python3.12 -m venv ~/.venvs/hermes-agent-cn
+source ~/.venvs/hermes-agent-cn/bin/activate
 
 # 升级 pip
 pip install --upgrade pip
 ```
+
+> **💡 为什么在项目目录外创建虚拟环境？**
+> - ✅ 避免意外提交到 Git（即使 `.gitignore` 配置正确）
+> - ✅ 多个项目可以共享同一个虚拟环境（可选）
+> - ✅ 项目目录更干净，只保留代码和配置
+> - ✅ 符合 Python 社区最佳实践（PEP 370、Poetry、Pipenv 等工具默认行为）
 
 ### 3. 安装 Hermes
 
@@ -115,17 +121,19 @@ hermes doctor
 ### 激活虚拟环境并启动
 
 ```bash
+# 激活虚拟环境（在项目目录外）
+source ~/.venvs/hermes-agent-cn/bin/activate
+
 cd ~/hermes-agent-cn
-source hermes-venv/bin/activate
 hermes chat
 ```
 
 ### 创建全局命令（推荐）
 
 ```bash
-# 创建符号链接
+# 创建符号链接（指向虚拟环境中的 hermes 命令）
 mkdir -p ~/.local/bin
-ln -s ~/hermes-agent-cn/hermes-venv/bin/hermes ~/.local/bin/hermes
+ln -s ~/.venvs/hermes-agent-cn/bin/hermes ~/.local/bin/hermes
 
 # 添加到 PATH（如果还没有）
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
@@ -141,7 +149,7 @@ hermes chat
 
 ```bash
 cd ~/hermes-agent-cn
-source hermes-venv/bin/activate
+source ~/.venvs/hermes-agent-cn/bin/activate
 git pull origin cn
 pip install -e .
 ```
@@ -163,8 +171,8 @@ pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 # 检查虚拟环境是否激活
 which hermes
 
-# 如果没有，激活虚拟环境
-source ~/hermes-agent-cn/hermes-venv/bin/activate
+# 如果没有，激活虚拟环境（在项目目录外）
+source ~/.venvs/hermes-agent-cn/bin/activate
 ```
 
 ### 问题 3：Python 版本太低
