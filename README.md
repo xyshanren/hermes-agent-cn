@@ -92,6 +92,19 @@ cd ~/hermes-agent-cn && git checkout -- . && ~/hermes-venv/bin/pip install -e . 
 
 ---
 
+## 📚 安装指南
+
+| 平台 | 快速安装 | 详细指南 |
+|------|----------|----------|
+| **Linux** | [10 分钟快速安装](docs/installation/QUICKSTART_LINUX.md) | [完整安装指南](docs/installation/LINUX_INSTALL.md) |
+| Windows | 🚧 即将推出... | 🚧 即将推出... |
+| macOS | 🚧 即将推出... | 🚧 即将推出... |
+| WSL2 | 🚧 即将推出... | 🚧 即将推出... |
+
+> 💡 **首次安装推荐**：查看 [Linux 快速安装指南](docs/installation/QUICKSTART_LINUX.md)（10 分钟完成安装）
+
+---
+
 ## 🇨🇳 关于中文版
 
 这是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的中文汉化与深度本地化版本，基于上游 **NousResearch v0.12.0+**，由 [xyshanren](https://github.com/xyshanren) 维护。
