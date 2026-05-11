@@ -12,8 +12,9 @@
 | [LINUX_INSTALL.md](LINUX_INSTALL.md) | Linux | 详细安装指南（完整版） |
 | [QUICKSTART_WSL2.md](QUICKSTART_WSL2.md) | WSL2 | 快速安装指南（10 分钟） |
 | [WSL2_INSTALL.md](WSL2_INSTALL.md) | WSL2 | 详细安装指南（完整版） |
+| [QUICKSTART_MACOS.md](QUICKSTART_MACOS.md) | macOS | 快速安装指南（10 分钟） |
+| [MACOS_INSTALL.md](MACOS_INSTALL.md) | macOS | 详细安装指南（完整版） |
 | | Windows 原生 | ❌ 不支持（请使用 WSL2） |
-| | macOS | 即将推出... |
 
 ---
 
