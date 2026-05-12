@@ -82,7 +82,13 @@ sms = ["aiohttp>=3.9.0,<4"]
 # to it, which is already provided by the `mcp` extra.
 computer-use = ["mcp>=1.2.0,<2"]
 acp = ["agent-client-protocol>=0.9.0,<1.0"]
-mistral = ["mistralai>=2.3.0,<3"]
+mistral = [
+  "mistralai>=2.3.0,<3",
+  # NOTE: mistralai is currently quarantined on PyPI and cannot be installed via pip.
+  # If pip install -e ".[mistral]" fails, install directly from GitHub:
+  #   pip install mistralai@git+https://github.com/mistralai/client-python.git
+  # Track status: https://pypi.org/project/mistralai/
+]
 bedrock = ["boto3>=1.35.0,<2"]
 termux = [
   # Baseline Android / Termux path for reliable fresh installs.
@@ -102,6 +108,8 @@ termux-all = [
   # Excluded for now:
   # - matrix (mautrix[encryption] -> python-olm build failures on Termux)
   # - voice  (faster-whisper chain requires ctranslate2/av builds not packaged)
+  # - mistral (mistralai is quarantined on PyPI; install separately via
+  #   `pip install mistralai@git+https://github.com/mistralai/client-python.git`)
   "hermes-agent[termux]",
   "hermes-agent[messaging]",
   "hermes-agent[slack]",
@@ -109,7 +117,6 @@ termux-all = [
   "hermes-agent[dingtalk]",
   "hermes-agent[feishu]",
   "hermes-agent[google]",
-  "hermes-agent[mistral]",
   "hermes-agent[bedrock]",
   "hermes-agent[homeassistant]",
   "hermes-agent[sms]",
@@ -160,7 +167,9 @@ all = [
   "hermes-agent[dingtalk]",
   "hermes-agent[feishu]",
   "hermes-agent[google]",
-  "hermes-agent[mistral]",
+  # mistral: mistralai is quarantined on PyPI. Install separately via:
+  #   pip install mistralai@git+https://github.com/mistralai/client-python.git
+  #   # or: pip install -e ".[mistral]"  (after PyPI unquarantines it)
   "hermes-agent[bedrock]",
   "hermes-agent[web]",
 ]
