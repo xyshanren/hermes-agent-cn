@@ -4,6 +4,91 @@
 
 ---
 
+## v0.12.0-cn.3 (2026-05-12)
+
+### 🐛 修复 Provider 配置和 API 密钥检测
+
+本次更新修复了 CN 分支的 3 个关键 Bug（感谢守一测试反馈）。
+
+#### **Bug #1**: `hermes setup` 后不生成 `~/.hermes/.env` 文件
+
+- **现象**: 配置 DeepSeek API Key 后，目录中找不到 `.env` 文件
+- **原因**: `_configure_provider()` 未正确写入文件（已在 v0.12.0-cn.1 修复）
+- **状态**: ✅ 已修复
+
+#### **Bug #2**: Provider 列表问题
+
+**2.1 国外模型提供商过多**
+- **修复**: `models.py` 添加 `_cn_skip_providers` 过滤列表
+- **过滤规则**: CN 分支不显示 `minimax` (国际版)，只显示 `minimax-cn` (国内版)
+- **影响**: Provider 选择界面更简洁，只显示国内用户常用提供商
+
+**2.2 缺少硅基流动 (SiliconFlow)**
+- **新增**: `models.py` 添加 `siliconflow` 到 `CANONICAL_PROVIDERS`
+- **模型列表**: 添加 14 个常用模型（Qwen/GLM/Yi/DeepSeek 等）
+- **配置**: `auth.py` 添加 `PROVIDER_REGISTRY` 条目，支持 API Key 自动检测
+
+**2.3 DeepSeek V4 接口变化**
+- **参考**: https://api-docs.deepseek.com/zh-cn/
+- **更新**: `models.py` 更新 DeepSeek 模型列表
+  - 添加: `deepseek-v3`, `deepseek-r1-0528`, `deepseek-r1-distill-*` 系列
+  - 保留: `deepseek-chat`, `deepseek-reasoner` (兼容旧配置)
+- **注意**: `deepseek-chat` 接口未下架，但建议升级到 V3/R1
+
+#### **Bug #3**: `hermes chat` 失败（empty API key）
+
+- **现象**: 配置 DeepSeek Key 后，`hermes chat` 报错：`Provider resolver returned an empty API key`
+- **根因**: `auth.py` 的 `resolve_provider()` 使用 `os.getenv()` 检测 API Key
+  - `os.getenv()` 只检查 Shell 环境变量
+  - 不读取 `~/.hermes/.env` 文件
+  - 导致通过 `hermes setup` 保存的 Key 无法被检测
+- **修复**: 改用 `get_env_value()` (来自 `hermes_cli.config`)
+  - 优先检查 Shell 环境变量
+  - 回退到 `~/.hermes/.env` 文件
+  - 确保所有保存的 API Key 都能被正确检测
+
+#### 📝 测试文档更新
+
+- **新增**: `tests/TEST_REPORT_TEMPLATE.md` (测试报告模板)
+  - 不包含实际测试结果
+  - 包含占位符和截图位置标记
+  - 方便后续测试时填写
+- **更新**: `.gitignore` 添加 `tests/image/` (测试截图不提交)
+- **注意**: `TEST_REPORT.md` 包含实际测试结果，不提交到仓库
+
+#### 🔧 修改文件列表
+
+| 文件 | 修改内容 |
+|------|----------|
+| `hermes_cli/models.py` | 添加 siliconflow、过滤 minimax、更新 DeepSeek 模型列表 |
+| `hermes_cli/auth.py` | 修复 `resolve_provider()` API Key 检测逻辑 |
+| `tests/TEST_REPORT_TEMPLATE.md` | 新增测试报告模板 |
+| `.gitignore` | 忽略 `tests/image/` |
+
+#### 🧪 验证方式
+
+1. **Bug #1 验证**:
+   ```bash
+   hermes setup
+   # 选择 DeepSeek，输入 API Key
+   cat ~/.hermes/.env  # 应该能看到配置的 Key
+   ```
+
+2. **Bug #2 验证**:
+   ```bash
+   hermes chat
+   # 进入后按 /model，查看 Provider 列表
+   # 应该能看到 siliconflow，不应该看到 minimax (国际版)
+   ```
+
+3. **Bug #3 验证**:
+   ```bash
+   hermes chat
+   # 发送消息，不应该再报 "empty API key" 错误
+   ```
+
+---
+
 ## v0.12.0-cn.2 (2026-05-06)
 
 ### 🪜 Skill 三层管理 + 自动调度（面向上游 PR）
