@@ -194,12 +194,14 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "kimi-k2-turbo-preview",
         "kimi-k2-0905-preview",
     ],
+    # MiniMax 国际版 (已从 cn 分支 UI 移除，国内用户请使用 minimax-cn)
     "minimax": [
         "MiniMax-M2.7",
         "MiniMax-M2.5",
         "MiniMax-M2.1",
         "MiniMax-M2",
     ],
+    # MiniMax 国内版
     "minimax-cn": [
         "MiniMax-M2.7",
         "MiniMax-M2.5",
@@ -216,8 +218,23 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "claude-haiku-4-5-20251001",
     ],
     "deepseek": [
+        # DeepSeek V4 / Chat 接口 (2025-12)
         "deepseek-chat",
-        "deepseek-reasoner",
+        # DeepSeek V3 (当前主力)
+        "deepseek-v3",
+        # DeepSeek R1 (推理模型)
+        "deepseek-r1",
+        "deepseek-r1-250120",
+        "deepseek-r1-0528",
+        # DeepSeek R1 Distill 系列
+        "deepseek-r1-distill-qwen-7b",
+        "deepseek-r1-distill-qwen-14b",
+        "deepseek-r1-distill-qwen-32b",
+        "deepseek-r1-distill-llama-8b",
+        "deepseek-r1-distill-llama-70b",
+        "deepseek-r1-distill-llama-24b",
+        "deepseek-r1-distill-qwen-1.5b",
+        "deepseek-r1-distill-qwen-0.5b",
     ],
     "xiaomi": [
         "mimo-v2-pro",
@@ -349,6 +366,40 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "deepseek.v3.2",
         "us.meta.llama4-maverick-17b-instruct-v1:0",
         "us.meta.llama4-scout-17b-instruct-v1:0",
+    ],
+    # SiliconFlow (硅基流动) - OpenAI 兼容 API，聚合多个国产模型
+    "siliconflow": [
+        # Qwen 系列
+        "Qwen/Qwen2.5-72B-Instruct",
+        "Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-14B-Instruct",
+        "Qwen/Qwen2.5-32B-Instruct",
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen2.5-1.5B-Instruct",
+        "Qwen/Qwen2-7B-Instruct-AWQ",
+        "Qwen/Qwen2-1.5B-Instruct-AWQ",
+        # GLM 系列
+        "ZhipuAI/GLM-4-9B-Chat",
+        "ZhipuAI/GLM-4-9B-Chat-1M",
+        "ZhipuAI/GLM-4-Plus",
+        "ZhipuAI/GLM-4-Flash",
+        # DeepSeek 系列
+        "deepseek-ai/DeepSeek-V3",
+        "deepseek-ai/DeepSeek-R1",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+        "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+        "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+        # Yi 系列
+        "01ai/Yi-1.5-34B-Chat-16K",
+        "01ai/Yi-1.5-9B-Chat-16K",
+        "01ai/Yi-1.5-6B-Chat",
+        # Bento 系列
+        "bentouai/bentouai-7B",
+        # LLaMA 系列
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/Llama-3.1-8B-Instruct",
     ],
 }
 
@@ -561,15 +612,15 @@ class ProviderEntry(NamedTuple):
 
 CANONICAL_PROVIDERS: list[ProviderEntry] = [
     # ── 国产模型提供商 ──
-    ProviderEntry("deepseek",       "DeepSeek",                 "DeepSeek（DeepSeek-V3、R1、coder 系列 — 直连 API）"),
+    ProviderEntry("deepseek",       "DeepSeek",                 "DeepSeek（DeepSeek-V3/R1/V4 系列 — 直连 API）"),
     ProviderEntry("kimi-coding",    "Kimi / Moonshot",         "Kimi Coding 套餐（api.kimi.com）及 Moonshot API"),
     ProviderEntry("kimi-coding-cn", "Kimi / Moonshot（国内）",  "Kimi / Moonshot 国内版（Moonshot CN 直连 API）"),
-    ProviderEntry("minimax",        "MiniMax",                  "MiniMax（国际版直连 API）"),
     ProviderEntry("minimax-cn",     "MiniMax（国内）",          "MiniMax 国内版（境内直连 API）"),
     ProviderEntry("zai",            "智谱 AI / GLM",           "Z.AI / GLM（智谱 AI 直连 API）"),
     ProviderEntry("alibaba",        "阿里云（DashScope）",      "阿里云 / DashScope 编程助手（通义千问 + 多厂商模型）"),
     ProviderEntry("xiaomi",         "小米 MiMo",              "小米 MiMo（MiMo-V2 系列 — pro、omni、flash）"),
     ProviderEntry("qwen-oauth",     "通义千问 OAuth（Portal）",  "通义千问 OAuth（复用本地 Qwen CLI 登录）"),
+    ProviderEntry("siliconflow",    "硅基流动（SiliconFlow）",  "硅基流动（聚合 Qwen/GLM/Yi/DeepSeek 等 — OpenAI 兼容）"),
 
     # ── 本地模型 ──
     ProviderEntry("ollama",         "Ollama（本地）",           "Ollama 本地模型（llama.cpp 等 — 需本地运行）"),
@@ -583,11 +634,15 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
 # is sufficient to expose a new provider in the model picker, /model, and all
 # downstream consumers — no edits to this file needed.
 _canonical_slugs = {p.slug for p in CANONICAL_PROVIDERS}
+# Skip international versions in cn branch (users should use cn variants)
+_cn_skip_providers = {"minimax"}  # cn branch only shows minimax-cn
 try:
     from providers import list_providers as _list_providers_for_canonical
     for _pp in _list_providers_for_canonical():
         if _pp.name in _canonical_slugs:
             continue
+        if _pp.name in _cn_skip_providers:
+            continue  # skip cn-branch exclusions
         if _pp.auth_type in ("oauth_device_code", "oauth_external", "external_process", "aws_sdk", "copilot"):
             continue  # non-api-key flows need bespoke picker UX; skip auto-inject
         _label = _pp.display_name or _pp.name
@@ -653,6 +708,10 @@ _PROVIDER_ALIASES = {
     "grok": "xai",
     "x-ai": "xai",
     "x.ai": "xai",
+    # SiliconFlow (硅基流动)
+    "sf": "siliconflow",
+    "silicon": "siliconflow",
+    "siliconflow": "siliconflow",
 }
 
 

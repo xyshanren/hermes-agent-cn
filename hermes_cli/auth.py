@@ -198,6 +198,15 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=(),
         base_url_env_var="OLLAMA_BASE_URL",
     ),
+    # 硅基流动 - OpenAI 兼容 API，聚合多个国产模型
+    "siliconflow": ProviderConfig(
+        id="siliconflow",
+        name="SiliconFlow (硅基流动)",
+        auth_type="api_key",
+        inference_base_url="https://api.siliconflow.cn/v1",
+        api_key_env_vars=("SILICONFLOW_API_KEY",),
+        base_url_env_var="SILICONFLOW_BASE_URL",
+    ),
 }
 
 # Auto-extend PROVIDER_REGISTRY with any api-key provider registered in
@@ -1200,10 +1209,13 @@ def resolve_provider(
     except Exception as e:
         logger.debug("Could not detect active auth provider: %s", e)
 
-    if has_usable_secret(os.getenv("OPENAI_API_KEY")) or has_usable_secret(os.getenv("OPENROUTER_API_KEY")):
+    # Use get_env_value() to read from both shell env and ~/.hermes/.env
+    from hermes_cli.config import get_env_value as _get_env_value
+    if has_usable_secret(_get_env_value("OPENAI_API_KEY") or "") or has_usable_secret(_get_env_value("OPENROUTER_API_KEY") or ""):
         return "openrouter"
 
     # Auto-detect API-key providers by checking their env vars
+    # Use get_env_value() which reads from both shell env and ~/.hermes/.env
     for pid, pconfig in PROVIDER_REGISTRY.items():
         if pconfig.auth_type != "api_key":
             continue
@@ -1213,7 +1225,8 @@ def resolve_provider(
         if pid == "copilot":
             continue
         for env_var in pconfig.api_key_env_vars:
-            if has_usable_secret(os.getenv(env_var, "")):
+            from hermes_cli.config import get_env_value
+            if has_usable_secret(get_env_value(env_var) or ""):
                 return pid
 
     # AWS Bedrock — detect via boto3 credential chain (IAM roles, SSO, env vars).
