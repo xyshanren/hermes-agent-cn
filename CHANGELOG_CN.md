@@ -15,7 +15,7 @@
 - `.gitignore` 忽略 `graphify-out/`, `entities.json` 等生成文件
 - AGENTS.md 新增 MemPalace/graphify 使用指南
 
-MCP 集成（用户本地配置）：
+MCP 集成（quickstart 自动配置，无需手动编辑）：
 ```yaml
 # ~/.hermes/config.yaml
 mcp_servers:
@@ -48,6 +48,29 @@ mcp_servers:
 - 嵌入式模型就绪状态
 
 #### ✅ Doctor 路由配置检查段
+
+### Quickstart MemPalace MCP 自动配置
+
+#### ✅ `_detect_mempalace()`
+- 三级检测：pip 包可用 → 宫殿已初始化 → MCP 已配置
+- 返回 None 或 details dict
+
+#### ✅ `_configure_mempalace_mcp()`
+- 自动写入 `~/.hermes/config.yaml` 的 `mcp_servers.mempalace`
+- 使用 `sys.executable` 作为 Python 路径
+- 已配置时自动跳过（不覆盖）
+
+#### ✅ 主流程集成
+- Step 1 资源扫描：显示 MemPalace 状态（已初始化/待配置）
+- Step 3 后：自动配置 MCP（如果有 MemPalace 但未配置）
+- 结果摘要：显示知识库就绪状态
+
+#### ✅ 使用文档更新
+- `docs/Hermes集成指南_MemPalace与graphify.md` 新增「最大化使用指南（CN 分支）」
+- 决策日志模式 vs 代码 mine 模式对比
+- graphify 重构前专用策略
+- 数据维护节奏表
+- 与 MEMORY.md 互补关系说明
 
 在 `hermes doctor` 中新增"◆ 路由配置"段：
 - 检查 `model_routing` 配置存在性
