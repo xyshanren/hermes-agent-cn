@@ -4839,8 +4839,104 @@ def _model_flow_bedrock(config, current_model=""):
         print("  No change.")
 
 
-def _model_flow_api_key_provider(config, provider_id, current_model=""):
-    """Generic flow for API-key providers (z.ai, MiniMax, OpenCode, etc.)."""
+def _auto_configure_local_fallback(config: dict, new_provider_id: str) -> None:
+    """检测本地模型（Ollama / 嵌入式），自动配置为 fallback_model。
+
+    在用户通过 setup/model 配置云端提供商后调用。
+    如果检测到本地模型，将其追加到 fallback_model 链中，
+    实现智能路由：云端主力 → 本地兜底。
+    """
+    from hermes_cli.config import save_config
+
+    # 检测 Ollama
+    ollama_info = None
+    try:
+        ollama_info = _detect_ollama_for_fallback()
+    except Exception:
+        pass
+
+    # 检测嵌入式模型
+    has_embedded = False
+    try:
+        from hermes_cli.model_manager import is_installed
+        has_embedded = is_installed("qwen-0.5b") or is_installed("qwen-coder-1.5b")
+    except Exception:
+        pass
+
+    if not ollama_info and not has_embedded:
+        return  # 无本地模型，跳过
+
+    # 读取现有 fallback 链
+    existing_fb = config.get("fallback_model")
+    if isinstance(existing_fb, dict) and existing_fb.get("provider"):
+        existing_fb = [existing_fb]
+    elif not isinstance(existing_fb, list):
+        existing_fb = []
+
+    # 构建要添加的本地 fallback 条目
+    local_entries = []
+
+    # Ollama — 本地推理兜底
+    if ollama_info and new_provider_id != "ollama":
+        ollama_entry = {
+            "provider": "ollama",
+            "model": ollama_info.get("default_model", "llama3.2"),
+            "base_url": "http://localhost:11434",
+        }
+        # 去重
+        existing_providers = {f.get("provider") for f in existing_fb}
+        if "ollama" not in existing_providers:
+            local_entries.append(ollama_entry)
+
+    # 嵌入式模型 — 断网最终兜底
+    if has_embedded and new_provider_id != "embedded":
+        embedded_entry = {
+            "provider": "embedded",
+            "model": "qwen-0.5b",
+        }
+        existing_providers = {f.get("provider") for f in existing_fb}
+        if "embedded" not in existing_providers:
+            local_entries.append(embedded_entry)
+
+    if not local_entries:
+        return
+
+    # 合并到现有 fallback 链（本地模型追加到末尾）
+    merged_chain = list(existing_fb) + local_entries
+    config["fallback_model"] = merged_chain
+    save_config(config)
+
+    # 显示提示
+    parts = []
+    for entry in local_entries:
+        p = entry.get("provider", "")
+        m = entry.get("model", "")
+        parts.append(f"{p} ({m})")
+    print(f"  ✅ 已自动配置本地回退路由: {' → '.join(parts)}")
+
+
+def _detect_ollama_for_fallback():
+    """检测本地 Ollama（供 _auto_configure_local_fallback 使用）。"""
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(
+        "http://localhost:11434/api/tags",
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    resp = urllib.request.urlopen(req, timeout=2)
+    if resp.status == 200:
+        data = json.loads(resp.read().decode())
+        models = data.get("models", [])
+        if models:
+            model_names = [m.get("name", "") for m in models if m.get("name")]
+            return {
+                "available": True,
+                "models": model_names,
+                "default_model": model_names[0] if model_names else "llama3.2",
+            }
+    return None
     from hermes_cli.auth import (
         LMSTUDIO_NOAUTH_PLACEHOLDER,
         PROVIDER_REGISTRY,
@@ -5091,6 +5187,10 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             model.pop("api_mode", None)
         save_config(cfg)
         deactivate_provider()
+
+        # ── 自动配置本地回退路由 ──
+        # 检测 Ollama / 嵌入式模型，自动写入 fallback_model 链
+        _auto_configure_local_fallback(cfg, provider_id)
 
         print(f"默认模型已设置为：{selected} (通过 {pconfig.name})")
     else:

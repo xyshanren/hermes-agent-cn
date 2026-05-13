@@ -98,7 +98,7 @@ export MINIMAX_API_KEY="eyJxxx"
 - 官网: https://platform.deepseek.com
 - 注册 Key: https://platform.deepseek.com/api_keys
 - 价格: ¥1/M tokens (输入), ¥2/M tokens (输出)  — 性价比极高
-- 推荐模型: deepseek-chat (V3), deepseek-reasoner (R1)
+- 推荐模型: deepseek-v4-flash (主力), deepseek-v4-pro (增强)
 - 环境变量: `DEEPSEEK_API_KEY`
 
 ### MiniMax
