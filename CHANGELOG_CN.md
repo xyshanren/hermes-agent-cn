@@ -4,6 +4,48 @@
 
 ---
 
+## v0.12.0-cn.4 (2026-05-13)
+
+### feat: Phase 2 — model_routing 配置 + 消息级模型选择
+
+实现 `PROPOSAL-multi-model-routing.md` 方案 A：
+
+#### ✅ `agent/zhineng_luyou.py` 修复
+- `check_cloud()` 和 `_select_cloud_model()` 改用 `get_env_value()` 检测 API Key
+- 确保读取 `~/.hermes/.env` 文件（同 Bug #3 修复）
+
+#### ✅ `run_agent.py` 新增运行时路由
+- 新增 `_apply_model_routing()` 方法
+  - 从 `config.yaml` 读取 `model_routing` 配置段
+  - 按优先级检测消息内容自动选择模型：
+    1. 图片附件（multimodal content）→ `model_routing.vision`
+    2. 视觉关键词（看图、截图）→ `model_routing.vision`
+    3. 推理关键词（分析、推理）→ `model_routing.reasoning`
+    4. 默认 → `model_routing.default`
+  - 每 turn 只执行一次（`_routing_applied` 标志）
+- 在 `_build_api_kwargs()` 开头调用，所有 API 模式自动生效
+- `run_conversation()` 入口重置标志（支持 CLI 模式复用 agent 实例）
+
+#### 配置示例
+
+```yaml
+model_routing:
+  default:
+    model: "qwen3:32b"
+  vision:
+    model: "qwen3-vl:8b"
+  reasoning:
+    model: "qwen3:32b"
+```
+
+#### Commit
+```
+630751c2c feat: Phase 2 — model_routing 配置 + 消息级模型选择
+2 files changed, 107 insertions(+), 5 deletions(-)
+```
+
+---
+
 ## v0.12.0-cn.3 (2026-05-13)
 
 ### 🩺 Doctor 诊断增强（D3: 外部模型服务检查）
