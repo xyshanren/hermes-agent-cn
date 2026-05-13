@@ -4,7 +4,7 @@
 
 ---
 
-## v0.12.0-cn.3 (2026-05-12)
+## v0.12.0-cn.3 (2026-05-13)
 
 ### 🩺 Doctor 诊断增强（D3: 外部模型服务检查）
 
@@ -24,6 +24,30 @@
 - 检测主力模型是否同时出现在 Fallback 链中
 - 额外检测：`fallback_model` 和 `fallback_providers` 键同时存在的不一致状态
 - 显示 auxiliary.vision 视觉模型配置状态
+
+#### 🔧 D2: Python 环境类型检测（Conda/Pyenv/venv/系统）
+
+在 `◆ Python 环境` 检查段中，将原来简单的虚拟环境判断扩展为四级环境检测：
+
+- **Conda**: 检测 `CONDA_DEFAULT_ENV` / `CONDA_PREFIX`，显示 conda 环境名
+- **Pyenv**: 检测 `PYENV_SHELL` / `PYENV_VERSION`，显示 Pyenv 管理状态
+- **venv**: 原有 `sys.prefix != sys.base_prefix` 逻辑
+- **系统 Python** ⚠️: 以上皆非时警告用户创建虚拟环境
+- 所有情况均显示 `sys.executable` 解释器完整路径
+
+#### 🔧 D1: .env 文件内容智能检测
+
+在 `◆ 配置文件` 检查段中，新增 `.env` 文件内容深度检测（`_check_env_content()`）：
+
+- **空值检测**: 检测 `KEY=` 形式的空值，提示填入有效值
+- **格式检测**: 检测 `export KEY=VALUE`（不需要 export 前缀）和 `KEY = VALUE`（等号两侧不应有空格）
+- **注释干扰**: 检测 `# KEY=xxx` 被注释的 Key，提示取消注释
+- **重复 key**: 检测同一 KEY 被多次定义，提示 dotenv 行为是后者覆盖前者
+- 无问题时显示 `✓ .env 内容检测通过`
+
+| 文件 | 修改内容 |
+|------|----------|
+| `hermes_cli/doctor.py` | 新增 `_check_env_content()` 函数（62 行）+ 重构 Python 环境检测段 |
 
 ### 🐛 修复 Provider 配置和 API 密钥检测
 

@@ -87,6 +87,70 @@ def _has_provider_env_config(content: str) -> bool:
     return any(key in content for key in _PROVIDER_ENV_HINTS)
 
 
+def _check_env_content(env_path: Path) -> None:
+    """智能检测 .env 文件内容问题（空值、格式、注释干扰、重复 key）。"""
+    try:
+        content = env_path.read_text(encoding="utf-8")
+    except Exception:
+        return
+
+    lines = content.splitlines()
+    seen_keys = {}
+    has_issues = False
+
+    # 1. 空值检测 + 重复 key 追踪
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" in stripped:
+            key, _, val = stripped.partition("=")
+            key = key.strip()
+            val = val.strip()
+            if not val and key in _PROVIDER_ENV_HINTS:
+                check_warn(f".env: {key} 值为空", "(填入有效值)")
+                has_issues = True
+            seen_keys[key] = seen_keys.get(key, 0) + 1
+
+    # 2. 格式检测（export 前缀、等号两侧空格）
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("export "):
+            check_warn(f".env 第 {i} 行: 不需要 'export' 前缀", "(直接写 KEY=VALUE)")
+            has_issues = True
+        elif " = " in stripped and not stripped.startswith("#"):
+            key_raw = stripped.split(" = ")[0].strip()
+            if key_raw in _PROVIDER_ENV_HINTS:
+                check_warn(
+                    f".env 第 {i} 行: '{key_raw} = VALUE' 等号两侧不要有空格",
+                    f"(改为 {key_raw}=VALUE)",
+                )
+                has_issues = True
+
+    # 3. 注释干扰检测
+    commented_keys = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            inner = stripped[1:].strip()
+            if "=" in inner:
+                key_raw = inner.split("=", 1)[0].strip()
+                if key_raw in _PROVIDER_ENV_HINTS and key_raw not in commented_keys:
+                    commented_keys.append(key_raw)
+    if commented_keys:
+        check_warn(f".env: 被注释的 Key: {', '.join(commented_keys)}", "(取消注释以启用)")
+        has_issues = True
+
+    # 4. 重复 key 检测
+    for key, count in seen_keys.items():
+        if count > 1:
+            check_warn(f".env: {key} 定义了 {count} 次", "(dotenv 行为是后者覆盖前者)")
+            has_issues = True
+
+    if not has_issues:
+        check_ok(".env 内容检测通过", "(无空值/格式/重复问题)")
+
+
 def _honcho_is_configured_for_doctor() -> bool:
     """Return True when Honcho is configured, even if this process has no active session."""
     try:
@@ -195,12 +259,24 @@ def run_doctor(args):
         check_fail(f"Python {py_version.major}.{py_version.minor}.{py_version.micro}", "(3.10+ required)")
         issues.append("Upgrade Python to 3.10+")
     
-    # Check if in virtual environment
+    # Check virtual environment type (Conda / Pyenv / venv / system)
+    conda_env = os.getenv("CONDA_DEFAULT_ENV", "")
+    conda_prefix = os.getenv("CONDA_PREFIX", "")
+    pyenv_shell = os.getenv("PYENV_SHELL", "")
+    pyenv_version = os.getenv("PYENV_VERSION", "")
     in_venv = sys.prefix != sys.base_prefix
-    if in_venv:
-        check_ok("Virtual environment active")
+
+    if conda_env:
+        check_ok(f"Conda 环境: {conda_env}")
+        check_info(f"解释器路径: {sys.executable}")
+    elif pyenv_shell:
+        check_ok(f"Pyenv 管理", f"(Python {pyenv_version or 'global'})")
+        check_info(f"解释器路径: {sys.executable}")
+    elif in_venv:
+        check_ok("Virtual environment active", "(venv)")
     else:
-        check_warn("Not in virtual environment", "(recommended)")
+        check_warn("系统 Python", f"(建议创建虚拟环境: python -m venv venv)")
+        check_info(f"解释器路径: {sys.executable}")
     
     # =========================================================================
     # Check: Required packages
@@ -255,6 +331,9 @@ def run_doctor(args):
         else:
             check_warn(f"No API key found in {_DHH}/.env")
             issues.append("Run 'hermes setup' to configure API keys")
+
+        # D1: .env 内容智能检测
+        _check_env_content(env_path)
     else:
         # Also check project root as fallback
         fallback_env = PROJECT_ROOT / '.env'
