@@ -1,6 +1,6 @@
 # Doctor 输出优化 — 待评估改进方案
 
-> 状态：待评估 | 来源：v0.12.0-cn.3 手工测试阶段发现（问题 D）
+> 状态：已评估（2026-05-13）| 来源：v0.12.0-cn.3 手工测试阶段发现（问题 D）
 > 日期：2026-05-13
 
 ## 背景
@@ -199,10 +199,59 @@ def _check_fallback_chain(cfg: dict) -> list[str]:
 
 ---
 
-## 优先级排序
+## 评估结论（2026-05-13）
 
-1. **D3** — 本地模型与 Fallback 链一致性（直接影响路由可用性）
-2. **D1** — .env 内容智能检测（减少无效配置导致的问题）
-3. **D2** — Conda/系统 Python 环境检测（改善开发者体验）
-4. **D4** — 输出格式优化（锦上添花）
-5. **D5** — 路由状态可视化（依赖多模型路由方案）
+基于 `hermes_cli/doctor.py`（1101 行，12 大类检查）的代码审查结果：
+
+### 实际检查 vs 提案对照
+
+| 方向 | 当前实现 | 差距 | 评估 |
+|------|---------|------|------|
+| **D1 .env 内容检测** | `_has_provider_env_config()` 仅做子串匹配 | 中等 | 影响已降低（v0.12.0-cn.3 已修 API Key 读取问题） |
+| **D2 Conda/系统 Python** | `sys.prefix != sys.base_prefix` 基本检测 | 较大 | 用户已反馈此问题 |
+| **D3 Fallback 链一致性** | **未实现** | 全部缺失 | 直接影响路由可用性 |
+| **D4 输出格式优化** | 纯文本输出 | 中 | 锦上添花 |
+| **D5 路由状态可视化** | 依赖多模型路由 Phase 2+ | 全部缺失 | 暂不实施 |
+
+### 实施建议（重新排序）
+
+考虑到 D5 依赖尚未实施的 Phase 2，**建议优先实施 D3 + D2，D1 降级**。
+
+| 优先级 | 方向 | 预估工时 | 原因 |
+|--------|------|---------|------|
+| **P0** | **D3** — Fallback 链 + Ollama 状态 | 2h | 直接影响路由可用性；本次手工测试已发现问题 |
+| **P1** | **D2** — Conda/Pyenv 环境检测 | 1h | 用户已反馈；文档 FAQ 已记录 |
+| **P2** | **D1** — .env 内容智能检测 | 1.5h | 收益降低（Core Bug 已修） |
+| **P3** | **D4** — 输出格式优化 | 2h | 纯体验提升 |
+| ⏸️ | **D5** — 路由状态可视化 | 待定 | 依赖多模型路由 Phase 2 |
+
+### D3 子项目拆分
+
+| 子项 | 工时 | 说明 |
+|------|------|------|
+| D3.1 Ollama 运行状态检测 | 0.5h | `curl http://localhost:11434/api/tags` |
+| D3.2 Fallback 链读取 & 一致性检查 | 1h | 从 config 读 fallback 链，检测空值/重复/连通性 |
+| D3.3 主力-Fallback 重复检测 | 0.5h | 主力模型同时出现在 fallback 链中 |
+
+### 快速启动
+
+从 D3.1 开始：
+```python
+# 在 doctor.py 的 "本地模型" 检查段之后，新增 "外部模型服务" 段
+def _check_ollama_status():
+    """检测 Ollama 是否运行并列出已部署模型。"""
+    import httpx
+    try:
+        r = httpx.get("http://localhost:11434/api/tags", timeout=3)
+        if r.status_code == 200:
+            models = r.json().get("models", [])
+            check_ok(f"Ollama 服务运行中（{len(models)} 个模型）")
+            for m in models:
+                check_info(f"  {m['name']}")
+        else:
+            check_warn("Ollama 服务响应异常", f"HTTP {r.status_code}")
+    except httpx.ConnectError:
+        check_warn("Ollama 未运行", "(如需本地推理: ollama serve &)")
+    except Exception as e:
+        check_warn("Ollama 检测失败", str(e))
+```
