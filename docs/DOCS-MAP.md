@@ -123,9 +123,9 @@
 
 | 文档 | 来源 | 说明 |
 |------|------|------|
+| API 文档 | ✅ 已完成 | `docs/API.md` |
 | 架构设计文档 | ✅ 已完成 | `docs/ARCHITECTURE.md` |
-| API 文档 | **缺失** | 核心 API 没有独立文档（函数散落在代码中） |
-| 常见问题 FAQ | ✅ 已完成 | `docs/FAQ.md`
+| 常见问题 FAQ | ✅ 已完成 | `docs/FAQ.md` |
 
 ---
 
@@ -176,8 +176,9 @@
 
 ### 📌 中期（与 Phase 2/3 同步）
 
-6. [ ] 评估实施 PROPOSAL-doctor-improvements.md（建议从 D3/D1 开始）
-7. [ ] 规划 PROPOSAL-multi-model-routing.md Phase 2
+6. ✅ ~~创建 `docs/API.md` — API 参考文档（CLI + 配置 + Provider）~~（已完成）
+7. [ ] 评估实施 PROPOSAL-doctor-improvements.md（建议从 D3/D1 开始）
+8. [ ] 规划 PROPOSAL-multi-model-routing.md Phase 2
 
 ---
 
