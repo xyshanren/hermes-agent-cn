@@ -6,6 +6,30 @@
 
 ## v0.12.0-cn.5 (2026-05-14)
 
+### MemPalace + graphify 知识库集成
+
+#### ✅ MemPalace 结构化记忆
+- 提交 `mempalace.yaml` 宫殿配置（29 rooms, 1714 drawers）
+- Wing→Room→Hall→Drawer 四层结构，96.6% LongMemEval 召回
+- 零 API 调用，纯本地运行
+- `.gitignore` 忽略 `graphify-out/`, `entities.json` 等生成文件
+- AGENTS.md 新增 MemPalace/graphify 使用指南
+
+MCP 集成（用户本地配置）：
+```yaml
+# ~/.hermes/config.yaml
+mcp_servers:
+  mempalace:
+    command: python  # 使用虚拟环境路径
+    args: [-m, mempalace.mcp_server]
+```
+
+#### ✅ graphify 代码知识图谱
+- AST 提取代码结构（Phase 1，纯本地，无需 API）
+- 36,384 nodes, 115,166 edges, 421 communities
+- 71.5x token 节省（vs 读原文件）
+- 概念提取层（Phase 3）暂不启用（需 Claude API，与 CN 分支本地化定位冲突）
+
 ### Phase 2 收尾 + D5 路由可视化
 
 #### ✅ quickstart 自动生成 model_routing 配置
