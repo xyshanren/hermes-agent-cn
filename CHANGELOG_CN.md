@@ -6,6 +6,25 @@
 
 ## v0.12.0-cn.3 (2026-05-12)
 
+### 🩺 Doctor 诊断增强（D3: 外部模型服务检查）
+
+在 `hermes doctor` 中新增"外部模型服务"检查段（位于"本地模型"与"配置文件"之间），包含三项检测：
+
+#### ✅ D3.1: Ollama 运行状态检测
+- 调用 `GET http://localhost:11434/api/tags` 检测 Ollama 服务
+- 成功时显示运行中的模型列表（前 5 个）
+- 失败时区分"未运行"和"响应异常"两种状态
+
+#### ✅ D3.2: Fallback 链一致性检查
+- 从 config.yaml 读取 `fallback_providers` / `fallback_model` 配置
+- 检测空 Fallback 链，提示"未配置回退模型"
+- 逐条检测每个条目的 provider/model 缺失
+
+#### ✅ D3.3: 主力-Fallback 重复检测
+- 检测主力模型是否同时出现在 Fallback 链中
+- 额外检测：`fallback_model` 和 `fallback_providers` 键同时存在的不一致状态
+- 显示 auxiliary.vision 视觉模型配置状态
+
 ### 🐛 修复 Provider 配置和 API 密钥检测
 
 本次更新修复了 CN 分支的 3 个关键 Bug（感谢守一测试反馈）。

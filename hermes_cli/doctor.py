@@ -1022,6 +1022,94 @@ def run_doctor(args):
         check_warn("本地模型检查失败", str(e))
 
     # =========================================================================
+    # External Model Services (Ollama, Fallback Chain)
+    # =========================================================================
+    print()
+    print(color("◆ 外部模型服务", Colors.CYAN, Colors.BOLD))
+
+    _config = None  # lazy-loaded
+
+    try:
+        from hermes_cli.config import load_config as _load_config_for_doctor
+        _config = _load_config_for_doctor()
+    except Exception:
+        pass
+
+    # ── D3.1: Ollama 运行状态检测 ──
+    try:
+        import httpx as _httpx
+        _ollama_url = "http://localhost:11434/api/tags"
+        _ollama_resp = _httpx.get(_ollama_url, timeout=3)
+        if _ollama_resp.status_code == 200:
+            _models = _ollama_resp.json().get("models", [])
+            _model_names = [m.get("name", "?") for m in _models]
+            _size_str = f"（{len(_models)} 个模型: {', '.join(_model_names[:5])}{'...' if len(_model_names) > 5 else ''}）"
+            check_ok("Ollama 服务运行中", _size_str)
+        else:
+            check_warn("Ollama 服务响应异常", f"HTTP {_ollama_resp.status_code}")
+    except ImportError:
+        check_warn("Ollama 状态检测", "httpx 未安装，跳过")
+    except _httpx.ConnectError:
+        check_warn("Ollama 未运行", "（如需本地推理: ollama serve &）")
+    except Exception as _e:
+        check_warn("Ollama 检测失败", str(_e))
+
+    # ── D3.2 + D3.3: Fallback 链一致性检测 ──
+    if _config is None:
+        check_warn("Fallback 链检测", "（无法读取配置文件，跳过）")
+    else:
+        _model_cfg = _config.get("model", {}) or {}
+        _primary_model = _model_cfg.get("default", "") if isinstance(_model_cfg, dict) else ""
+        _primary_provider = _model_cfg.get("provider", "") if isinstance(_model_cfg, dict) else ""
+
+        if _primary_model:
+            check_ok(f"主力模型: {_primary_model}", f"（Provider: {_primary_provider or '未指定'}）")
+        else:
+            check_warn("未配置主力模型", "（运行 hermes setup 或 quickstart）")
+
+        # 收集 fallback 链
+        _fb_chain = []
+        _fb_config = _config.get("fallback_providers") or _config.get("fallback_model") or []
+        if isinstance(_fb_config, dict):
+            _fb_config = [_fb_config]
+        if isinstance(_fb_config, list):
+            _fb_chain = _fb_config
+
+        if not _fb_chain:
+            check_warn("未配置 Fallback 链", "（主力模型失败时将无法自动切换）")
+        else:
+            check_ok(f"Fallback 链已配置", f"（{len(_fb_chain)} 个条目）")
+
+            for _i, _entry in enumerate(_fb_chain):
+                _fb_provider = _entry.get("provider", "") if isinstance(_entry, dict) else ""
+                _fb_model = _entry.get("model", "") if isinstance(_entry, dict) else ""
+                _prefix = f"  [{_i + 1}]"
+
+                if not _fb_provider:
+                    check_warn(f"{_prefix} Fallback 条目缺少 provider")
+                if not _fb_model:
+                    check_warn(f"{_prefix} Fallback 条目缺少 model")
+
+                # D3.3: 主力-Fallback 重复检测
+                if _primary_model and _fb_model == _primary_model:
+                    check_warn(f"{_prefix} Fallback 包含主力模型", f"（{_fb_model} — 故障切换时将跳过）")
+
+                if _fb_provider and _fb_model:
+                    check_ok(f"{_prefix} {_fb_provider}/{_fb_model}")
+
+        # 检查 auxiliary.vision 配置
+        _aux_cfg = _config.get("auxiliary", {}) or {}
+        _vision_cfg = _aux_cfg.get("vision", {}) or {}
+        if _vision_cfg.get("model"):
+            check_ok("Auxiliary 视觉模型已配置", f"（{_vision_cfg.get('provider', '?')}/{_vision_cfg.get('model', '?')}）")
+
+        # 配置不一致检测
+        _has_fb_model = "fallback_model" in _config
+        _has_fb_providers = "fallback_providers" in _config
+        if _has_fb_model and _has_fb_providers:
+            check_warn("配置不一致", "同时存在 fallback_model 和 fallback_providers 两个键，建议统一为 fallback_providers")
+
+    # =========================================================================
     # Profiles
     # =========================================================================
     try:
