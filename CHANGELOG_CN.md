@@ -25,6 +25,15 @@
 - 额外检测：`fallback_model` 和 `fallback_providers` 键同时存在的不一致状态
 - 显示 auxiliary.vision 视觉模型配置状态
 
+#### 🔧 D4: 静默模式 + 全局检测统计
+
+在 `hermes doctor` 中新增两项输出优化：
+
+- **静默模式**: `hermes doctor --quiet` 只显示 ⚠ 和 ✗ 项目，✓ 通过项和 → 信息项全部隐藏
+- **检测统计**: Summary 末尾显示 `检测项: N ✓  N ⚠  N ✗`，方便快速了解整体健康度
+- 实现方式：`_quiet_mode` 全局标志 + 全局计数器 `_total_ok/warn/fail`
+- P3 项（D4.3 三级颜色分级 / D4.4 JSON 输出）暂未实施
+
 #### 🔧 D2: Python 环境类型检测（Conda/Pyenv/venv/系统）
 
 在 `◆ Python 环境` 检查段中，将原来简单的虚拟环境判断扩展为四级环境检测：
@@ -48,6 +57,8 @@
 | 文件 | 修改内容 |
 |------|----------|
 | `hermes_cli/doctor.py` | 新增 `_check_env_content()` 函数（62 行）+ 重构 Python 环境检测段 |
+| `hermes_cli/doctor.py` | 新增 `--quiet` 模式 + 全局检测统计（✓/⚠/✗ 计数）|
+| `hermes_cli/main.py` | doctor 子命令新增 `--quiet` 参数 |
 
 ### 🐛 修复 Provider 配置和 API 密钥检测
 

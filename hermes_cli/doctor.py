@@ -178,16 +178,39 @@ def _apply_doctor_tool_availability_overrides(available: list[str], unavailable:
     return updated_available, updated_unavailable
 
 
+# ── D4: 分组摘要 & quiet 模式  ──
+_quiet_mode: bool = False
+_total_ok: int = 0
+_total_warn: int = 0
+_total_fail: int = 0
+
+
+def _reset_totals() -> None:
+    """重置全局计数器（每次 run_doctor 调用前）。"""
+    global _total_ok, _total_warn, _total_fail
+    _total_ok = _total_warn = _total_fail = 0
+
+
 def check_ok(text: str, detail: str = ""):
+    global _quiet_mode, _total_ok
+    _total_ok += 1
+    if _quiet_mode:
+        return
     print(f"  {color('✓', Colors.GREEN)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_warn(text: str, detail: str = ""):
+    global _total_warn
+    _total_warn += 1
     print(f"  {color('⚠', Colors.YELLOW)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_fail(text: str, detail: str = ""):
+    global _total_fail
+    _total_fail += 1
     print(f"  {color('✗', Colors.RED)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_info(text: str):
+    if _quiet_mode:
+        return
     print(f"    {color('→', Colors.CYAN)} {text}")
 
 
@@ -227,6 +250,12 @@ def _check_gateway_service_linger(issues: list[str]) -> None:
 def run_doctor(args):
     """Run diagnostic checks."""
     should_fix = getattr(args, 'fix', False)
+    should_quiet = getattr(args, 'quiet', False)
+
+    # D4: 设置 quiet 模式（静默输出只显示 ⚠ 和 ✗）
+    global _quiet_mode
+    _quiet_mode = should_quiet
+    _reset_totals()
 
     # Doctor runs from the interactive CLI, so CLI-gated tool availability
     # checks (like cronjob management) should see the same context as `hermes`.
@@ -1239,6 +1268,20 @@ def run_doctor(args):
     # Summary
     # =========================================================================
     print()
+
+    # D4: 显示检测项统计
+    total_checks = _total_ok + _total_warn + _total_fail
+    if total_checks > 0:
+        stat_parts = []
+        if _total_ok:
+            stat_parts.append(color(f"{_total_ok} ✓", Colors.GREEN))
+        if _total_warn:
+            stat_parts.append(color(f"{_total_warn} ⚠", Colors.YELLOW))
+        if _total_fail:
+            stat_parts.append(color(f"{_total_fail} ✗", Colors.RED))
+        print(f"  检测项: {'  '.join(stat_parts)}")
+        print()
+
     remaining_issues = issues + manual_issues
     if should_fix and fixed_count > 0:
         print(color("─" * 60, Colors.GREEN))

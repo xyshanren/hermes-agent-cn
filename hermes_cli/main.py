@@ -10052,6 +10052,9 @@ def main():
     doctor_parser.add_argument(
         "--fix", action="store_true", help="Attempt to fix issues automatically"
     )
+    doctor_parser.add_argument(
+        "--quiet", action="store_true", help="Only show warnings and errors (suppress ✓ and → output)"
+    )
     doctor_parser.set_defaults(func=cmd_doctor)
 
     # =========================================================================
