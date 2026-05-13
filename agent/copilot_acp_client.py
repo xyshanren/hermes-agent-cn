@@ -97,8 +97,12 @@ def _build_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     home = _resolve_home_dir()
     env["HOME"] = home
-    from hermes_constants import apply_subprocess_home_env
-    apply_subprocess_home_env(env)
+    # Always expose the real user home so child scripts can find
+    # ~/.hermes/ even when HOME is overridden for profile isolation.
+    from hermes_constants import get_real_home
+    real = get_real_home()
+    if real and real != home:
+        env["HERMES_REAL_HOME"] = real
     return env
 
 
