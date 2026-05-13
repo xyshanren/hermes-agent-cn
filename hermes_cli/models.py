@@ -634,8 +634,27 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
 # is sufficient to expose a new provider in the model picker, /model, and all
 # downstream consumers — no edits to this file needed.
 _canonical_slugs = {p.slug for p in CANONICAL_PROVIDERS}
-# Skip international versions in cn branch (users should use cn variants)
-_cn_skip_providers = {"minimax"}  # cn branch only shows minimax-cn
+# Skip international/non-CN providers in cn branch
+_cn_skip_providers = {
+    "minimax",           # cn branch only shows minimax-cn
+    "anthropic",
+    "gemini",
+    "openrouter",
+    "azure-foundry",
+    "arcee",
+    "gmi",
+    "huggingface",
+    "nvidia",
+    "stepfun",
+    "xai",
+    "ollama-cloud",
+    "opencode-zen",
+    "opencode-go",
+    "ai-gateway",
+    "alibaba-coding-plan",
+    "custom",
+    "kilocode",
+}
 try:
     from providers import list_providers as _list_providers_for_canonical
     for _pp in _list_providers_for_canonical():

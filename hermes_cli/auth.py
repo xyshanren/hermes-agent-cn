@@ -117,6 +117,12 @@ SERVICE_PROVIDER_NAMES: Dict[str, str] = {
 DEFAULT_GEMINI_CLOUDCODE_BASE_URL = "cloudcode-pa://google"
 GEMINI_OAUTH_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 60  # refresh 60s before expiry
 
+# LM Studio's default no-auth mode still requires *some* non-empty bearer for
+# the API-key code paths (auxiliary_client, runtime resolver) to treat the
+# provider as configured. This sentinel is sent only to LM Studio, never to
+# any remote service.
+LMSTUDIO_NOAUTH_PLACEHOLDER = "dummy-lm-api-key"
+
 
 # =============================================================================
 # Provider Registry
