@@ -1162,6 +1162,7 @@ class AIAgent:
         _install_safe_stdio()
 
         self.model = model
+        self._routing_applied = False  # model_routing 每 turn 只应用一次
         self.max_iterations = max_iterations
         # Shared iteration budget — parent creates, children inherit.
         # Consumed by every LLM turn across parent + all subagents.
@@ -8808,8 +8809,108 @@ class AIAgent:
                     content[-1]["cache_control"] = {"type": "ephemeral"}
                 break
 
+    def _apply_model_routing(self, api_messages: list) -> None:
+        """根据 model_routing 配置，按消息内容选择模型（每 turn 只执行一次）。
+
+        任务检测策略（按优先级）：
+        1. 消息包含图片附件 → model_routing.vision
+        2. 消息包含视觉关键词 → model_routing.vision
+        3. 消息包含推理关键词 → model_routing.reasoning
+        4. 默认 → model_routing.default（沿用 self.model）
+
+        配置示例 (config.yaml):
+            model_routing:
+              default:
+                provider: "ollama"
+                model: "qwen3:32b"
+              vision:
+                provider: "ollama"
+                model: "qwen3-vl:8b"
+              reasoning:
+                provider: "ollama"
+                model: "qwen3:32b"
+        """
+        if getattr(self, "_routing_applied", False):
+            return
+        self._routing_applied = True
+
+        try:
+            from hermes_cli.config import load_config
+            config = load_config()
+            route_config = config.get("model_routing", {})
+        except Exception:
+            return
+
+        if not route_config:
+            return
+
+        # 查找最后一条用户消息
+        for msg in reversed(api_messages):
+            if msg.get("role") != "user":
+                continue
+
+            content = msg.get("content", "")
+
+            # 检测图片内容（multimodal content）
+            if isinstance(content, list):
+                has_image = False
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and "image_url" in part:
+                        has_image = True
+                    elif isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                if has_image:
+                    vision_cfg = route_config.get("vision", {})
+                    if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
+                        logger.debug(
+                            "model_routing: 检测到图片附件 → vision model: %s",
+                            vision_cfg["model"],
+                        )
+                        self.model = vision_cfg["model"]
+                        return
+                content = " ".join(text_parts)
+
+            text_lower = (content or "").lower()
+
+            # 视觉关键词检测（乐观匹配，只匹配明确信号）
+            _vision_kw = ["看图", "图片", "截图", "识别图中", "这张图"]
+            if any(kw in text_lower for kw in _vision_kw):
+                vision_cfg = route_config.get("vision", {})
+                if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
+                    logger.debug(
+                        "model_routing: 视觉关键词匹配 → vision model: %s",
+                        vision_cfg["model"],
+                    )
+                    self.model = vision_cfg["model"]
+                    return
+
+            # 推理关键词检测
+            _reasoning_kw = ["分析", "推理", "证明", "思考"]
+            if any(kw in text_lower for kw in _reasoning_kw):
+                reasoning_cfg = route_config.get("reasoning", {})
+                if isinstance(reasoning_cfg, dict) and reasoning_cfg.get("model"):
+                    logger.debug(
+                        "model_routing: 推理关键词匹配 → reasoning model: %s",
+                        reasoning_cfg["model"],
+                    )
+                    self.model = reasoning_cfg["model"]
+                    return
+
+            # 默认模型（从路由配置读取）
+            default_cfg = route_config.get("default", {})
+            if isinstance(default_cfg, dict) and default_cfg.get("model"):
+                logger.debug(
+                    "model_routing: 使用默认路由模型: %s",
+                    default_cfg["model"],
+                )
+                self.model = default_cfg["model"]
+
+            break
+
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Build the keyword arguments dict for the active API mode."""
+        self._apply_model_routing(api_messages)
         if self.api_mode == "anthropic_messages":
             _transport = self._get_transport()
             anthropic_messages = self._prepare_anthropic_messages_for_api(api_messages)
@@ -11064,6 +11165,7 @@ class AIAgent:
         # Reset retry counters and iteration budget at the start of each turn
         # so subagent usage from a previous turn doesn't eat into the next one.
         self._invalid_tool_retries = 0
+        self._routing_applied = False  # model_routing 每 turn 重新路由
         self._invalid_json_retries = 0
         self._empty_content_retries = 0
         self._incomplete_scratchpad_retries = 0

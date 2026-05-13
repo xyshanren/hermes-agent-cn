@@ -230,7 +230,7 @@ class SmartRouter:
         # 国产云端 Provider 列表
         cloud_providers = ["deepseek", "minimax", "minimax-cn", "kimi-for-coding", "zai"]
 
-        # 从环境变量检测
+        # 从环境变量 + .env 文件检测
         provider_env_map = {
             "deepseek": "DEEPSEEK_API_KEY",
             "minimax": "MINIMAX_API_KEY",
@@ -239,10 +239,10 @@ class SmartRouter:
             "zai": "GLM_API_KEY",
         }
 
-        import os
+        from hermes_cli.config import get_env_value
         for provider_id in cloud_providers:
             env_var = provider_env_map.get(provider_id, "")
-            if env_var and os.environ.get(env_var):
+            if env_var and get_env_value(env_var):
                 self._set_cache("cloud_available", True)
                 return True
 
@@ -297,10 +297,10 @@ class SmartRouter:
             ("zai", "glm-5.1"),
         ]
 
-        import os
+        from hermes_cli.config import get_env_value
         for provider_id, model_id in cloud_models:
             env_var = f"{provider_id.upper().replace('-', '_')}_API_KEY"
-            if os.environ.get(env_var):
+            if get_env_value(env_var):
                 return f"{provider_id}:{model_id}"
 
         # Fallback: 检查 config
