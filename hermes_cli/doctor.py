@@ -183,29 +183,56 @@ _quiet_mode: bool = False
 _total_ok: int = 0
 _total_warn: int = 0
 _total_fail: int = 0
+_section_ok: int = 0
+_section_warn: int = 0
+_section_fail: int = 0
 
 
 def _reset_totals() -> None:
     """重置全局计数器（每次 run_doctor 调用前）。"""
-    global _total_ok, _total_warn, _total_fail
+    global _total_ok, _total_warn, _total_fail, _section_ok, _section_warn, _section_fail
     _total_ok = _total_warn = _total_fail = 0
+    _section_ok = _section_warn = _section_fail = 0
+
+
+def _section_reset() -> None:
+    """重置每段计数器（在每个 ◆ 标题后调用）。"""
+    global _section_ok, _section_warn, _section_fail
+    _section_ok = _section_warn = _section_fail = 0
+
+
+def _section_summary() -> None:
+    """打印当前段的检测汇总。"""
+    global _section_ok, _section_warn, _section_fail
+    parts = []
+    if _section_ok:
+        parts.append(color(f"{_section_ok} ✓", Colors.GREEN))
+    if _section_warn:
+        parts.append(color(f"{_section_warn} ⚠", Colors.YELLOW))
+    if _section_fail:
+        parts.append(color(f"{_section_fail} ✗", Colors.RED))
+    if parts:
+        print(f"  {color('─' * 4, Colors.DIM)} {'  '.join(parts)}")
 
 
 def check_ok(text: str, detail: str = ""):
-    global _quiet_mode, _total_ok
+    global _quiet_mode, _total_ok, _section_ok
     _total_ok += 1
+    _section_ok += 1
     if _quiet_mode:
         return
     print(f"  {color('✓', Colors.GREEN)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_warn(text: str, detail: str = ""):
-    global _total_warn
+    global _total_warn, _section_warn
     _total_warn += 1
+    _section_warn += 1
     print(f"  {color('⚠', Colors.YELLOW)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_fail(text: str, detail: str = ""):
-    global _total_fail
+    global _total_fail, _section_fail
     _total_fail += 1
+    _section_fail += 1
     print(f"  {color('✗', Colors.RED)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_info(text: str):
@@ -275,6 +302,7 @@ def run_doctor(args):
     # =========================================================================
     print()
     print(color("◆ Python 环境", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     py_version = sys.version_info
     if py_version >= (3, 11):
@@ -310,8 +338,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: Required packages
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 必需的包", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     required_packages = [
         ("openai", "OpenAI SDK"),
@@ -345,8 +375,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: Configuration files
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 配置文件", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     # Check ~/.hermes/.env (primary location for user config)
     env_path = HERMES_HOME / '.env'
@@ -459,8 +491,10 @@ def run_doctor(args):
             from hermes_cli.config import validate_config_structure
             config_issues = validate_config_structure()
             if config_issues:
+                _section_summary()
                 print()
                 print(color("◆ 配置结构", Colors.CYAN, Colors.BOLD))
+                _section_reset()
                 for ci in config_issues:
                     if ci.severity == "error":
                         check_fail(ci.message)
@@ -476,8 +510,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: Directory structure
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 目录结构", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     hermes_home = HERMES_HOME
     if hermes_home.exists():
@@ -596,8 +632,10 @@ def run_doctor(args):
     # Check: Command installation (hermes bin symlink)
     # =========================================================================
     if sys.platform != "win32":
+        _section_summary()
         print()
         print(color("◆ 命令安装", Colors.CYAN, Colors.BOLD))
+        _section_reset()
 
         # Determine the venv entry point location
         _venv_bin = None
@@ -675,8 +713,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: External tools
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 外部工具", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     # Git
     if shutil.which("git"):
@@ -819,8 +859,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: API connectivity
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ API 连通性", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     # -- API-key providers --
     # Tuple: (name, env_vars, default_url, base_env, supports_models_endpoint)
@@ -913,8 +955,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: Submodules
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 子模块", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     # tinker-atropos (RL training backend)
     tinker_dir = PROJECT_ROOT / "tinker-atropos"
@@ -935,8 +979,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: Tool Availability
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 工具可用性", Colors.CYAN, Colors.BOLD))
+    _section_reset()
     
     try:
         # Add project root to path for imports
@@ -968,8 +1014,10 @@ def run_doctor(args):
     # =========================================================================
     # Check: Skills Hub
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 技能中心", Colors.CYAN, Colors.BOLD))
+    _section_reset()
 
     hub_dir = HERMES_HOME / "skills" / ".hub"
     if hub_dir.exists():
@@ -1000,8 +1048,10 @@ def run_doctor(args):
     # =========================================================================
     # Memory Provider (only check the active provider, if any)
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 记忆提供商", Colors.CYAN, Colors.BOLD))
+    _section_reset()
 
     _active_memory_provider = ""
     try:
@@ -1079,8 +1129,10 @@ def run_doctor(args):
     # =========================================================================
     # Local Models
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 本地模型", Colors.CYAN, Colors.BOLD))
+    _section_reset()
 
     try:
         from hermes_cli.model_manager import (
@@ -1132,8 +1184,10 @@ def run_doctor(args):
     # =========================================================================
     # External Model Services (Ollama, Fallback Chain)
     # =========================================================================
+    _section_summary()
     print()
     print(color("◆ 外部模型服务", Colors.CYAN, Colors.BOLD))
+    _section_reset()
 
     _config = None  # lazy-loaded
 
@@ -1267,6 +1321,7 @@ def run_doctor(args):
     # =========================================================================
     # Summary
     # =========================================================================
+    _section_summary()
     print()
 
     # D4: 显示检测项统计
