@@ -123,7 +123,7 @@
 
 | 文档 | 来源 | 说明 |
 |------|------|------|
-| 架构设计文档 | **缺失** | 当前无独立的架构概览文档（`AGENTS.md` 不含架构图） |
+| 架构设计文档 | ✅ 已完成 | `docs/ARCHITECTURE.md` |
 | API 文档 | **缺失** | 核心 API 没有独立文档（函数散落在代码中） |
 | 常见问题 FAQ | ✅ 已完成 | `docs/FAQ.md`
 
@@ -167,7 +167,7 @@
 
 ### 📌 短期（下一轮迭代前）
 
-4. [ ] 创建 `docs/ARCHITECTURE.md` — 架构设计概览
+4. ✅ ~~创建 `docs/ARCHITECTURE.md` — 架构设计概览~~（已完成）
    - 系统架构图（CN 版定制的组成部分）
    - Provider 体系说明（国产 Provider vs 上游 Provider）
    - 关键数据流（config → auth → model → agent loop）
