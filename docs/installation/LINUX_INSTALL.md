@@ -546,6 +546,9 @@ cat > ~/update-hermes.sh << 'EOF'
 #!/bin/bash
 set -e
 
+# 初始化 conda（适用于脚本中的 conda activate）
+# eval "$(conda shell.bash hook)"
+
 HERMES_DIR=~/projects/hermes-agent-cn
 VENV_DIR=~/.venvs/hermes-agent-cn
 
