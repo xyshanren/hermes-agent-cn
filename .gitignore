@@ -75,3 +75,9 @@ models-dev-upstream/
 
 # WorkBuddy working memory (local session context)
 .workbuddy/
+
+# MemPalace + graphify generated files (knowledge base artifacts)
+graphify-out/
+entities.json
+KNOWLEDGE_UPDATE.md
+mempalace-status.json

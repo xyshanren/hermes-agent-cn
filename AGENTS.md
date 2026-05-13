@@ -983,3 +983,47 @@ not the specific names.
 
 Reviewers should reject new change-detector tests; authors should convert
 them into invariants before re-requesting review.
+
+## MemPalace + graphify (Knowledge Base)
+
+This project uses MemPalace (spatial memory) and graphify (code knowledge
+graph) to build a persistent knowledge base that survives session restarts.
+
+### MemPalace — Structured Knowledge
+
+- **Config**: `mempalace.yaml` in repo root
+- **Hierarchy**: Wing (project) → Room (module) → Hall (topic) → Drawer (fact)
+- **Search**: `mempalace search "query" [--room ROOM]`
+- **Update**: `mempalace mine . --limit 100` (after significant changes)
+- **Status**: `mempalace status`
+
+After making architectural changes or fixing a tricky bug, mine the
+knowledge base so future sessions can recall what was done:
+
+```bash
+# In repo root
+mempalace mine . --limit 50
+```
+
+### graphify — Code Knowledge Graph
+
+- **Output**: `graphify-out/` (generated, NOT committed — see .gitignore)
+- **AST extraction only** (Phase 1) — no external API required
+- **Update**: `graphify update .` (re-extract AST from all source files)
+- **Query**: `graphify explain "file.py"` or `graphify query "how does X work?"`
+
+Regenerate the graph after major refactors:
+
+```bash
+graphify update .
+```
+
+### When to use which
+
+| Scenario | Tool |
+|----------|------|
+| "What did we decide about X?" | MemPalace search |
+| "How is module X connected to module Y?" | graphify path |
+| "What are all the files in module X?" | MemPalace (Room) |
+| "How does the fallback chain work?" | graphify query |
+| "What was the commit history of X?" | git log |

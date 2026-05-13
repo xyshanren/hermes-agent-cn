@@ -1,0 +1,140 @@
+wing: hermes_agent
+rooms:
+- name: acp_adapter
+  description: Files from acp_adapter/
+  keywords:
+  - acp_adapter
+  - acp_adapter
+- name: acp_registry
+  description: Files from acp_registry/
+  keywords:
+  - acp_registry
+  - acp_registry
+- name: agent
+  description: Files from agent/
+  keywords:
+  - agent
+  - agent
+- name: design
+  description: Files from assets/
+  keywords:
+  - design
+  - assets
+- name: cron
+  description: Files from cron/
+  keywords:
+  - cron
+  - cron
+- name: datagen_config_examples
+  description: Files from datagen-config-examples/
+  keywords:
+  - datagen_config_examples
+  - datagen-config-examples
+- name: docker
+  description: Files from docker/
+  keywords:
+  - docker
+  - docker
+- name: documentation
+  description: Files from docs/
+  keywords:
+  - documentation
+  - docs
+- name: environments
+  description: Files from environments/
+  keywords:
+  - environments
+  - environments
+- name: gateway
+  description: Files from gateway/
+  keywords:
+  - gateway
+  - gateway
+- name: hermes_agent.egg_info
+  description: Files from hermes_agent.egg-info/
+  keywords:
+  - hermes_agent.egg_info
+  - hermes_agent.egg-info
+- name: hermes_cli
+  description: Files from hermes_cli/
+  keywords:
+  - hermes_cli
+  - hermes_cli
+- name: nix
+  description: Files from nix/
+  keywords:
+  - nix
+  - nix
+- name: optional_skills
+  description: Files from optional-skills/
+  keywords:
+  - optional_skills
+  - optional-skills
+- name: packaging
+  description: Files from packaging/
+  keywords:
+  - packaging
+  - packaging
+- name: plans
+  description: Files from plans/
+  keywords:
+  - plans
+  - plans
+- name: plugins
+  description: Files from plugins/
+  keywords:
+  - plugins
+  - plugins
+- name: scripts
+  description: Files from scripts/
+  keywords:
+  - scripts
+  - scripts
+- name: skills
+  description: Files from skills/
+  keywords:
+  - skills
+  - skills
+- name: testing
+  description: Files from tests/
+  keywords:
+  - testing
+  - tests
+- name: tinker_atropos
+  description: Files from tinker-atropos/
+  keywords:
+  - tinker_atropos
+  - tinker-atropos
+- name: tui_gateway
+  description: Files from tui_gateway/
+  keywords:
+  - tui_gateway
+  - tui_gateway
+- name: ui_tui
+  description: Files from ui-tui/
+  keywords:
+  - ui_tui
+  - ui-tui
+- name: web
+  description: Files from web/
+  keywords:
+  - web
+  - web
+- name: website
+  description: Files from website/
+  keywords:
+  - website
+  - website
+- name: planning
+  description: Files from specs/
+  keywords:
+  - planning
+  - specs
+- name: research
+  description: Files from research/
+  keywords:
+  - research
+  - research
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
