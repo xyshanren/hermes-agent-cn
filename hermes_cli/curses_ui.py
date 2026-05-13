@@ -228,7 +228,7 @@ def curses_radiolist(
 
                     stdscr.addnstr(
                         row, 0,
-                        "  \u2191\u2193 navigate  ENTER/SPACE select  ESC cancel",
+                        "  \u2191\u2193 导航  回车/空格 选择  ESC 取消",
                         max_x - 1, curses.A_DIM,
                     )
                     row += 1
@@ -301,7 +301,7 @@ def _radio_numbered_fallback(
         print(f"  {marker} {i + 1:>2}. {label}")
     print()
     try:
-        val = input(color(f"  Choice [default {selected + 1}]: ", Colors.DIM)).strip()
+        val = input(color(f"  选择 [默认 {selected + 1}]：", Colors.DIM)).strip()
         if not val:
             return selected
         idx = int(val) - 1
@@ -424,7 +424,7 @@ def _numbered_single_fallback(
         print(f"  {i}. {label}")
     print()
     try:
-        val = input(f"  Choice [1-{len(items)}]: ").strip()
+        val = input(f"  选择 [1-{len(items)}]：").strip()
         if not val:
             return None
         idx = int(val) - 1

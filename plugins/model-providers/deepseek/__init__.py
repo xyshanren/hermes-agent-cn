@@ -11,10 +11,10 @@ deepseek = ProviderProfile(
     description="DeepSeek — native DeepSeek API",
     signup_url="https://platform.deepseek.com/",
     fallback_models=(
-        "deepseek-chat",
-        "deepseek-reasoner",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
     ),
-    base_url="https://api.deepseek.com/v1",
+    base_url="https://api.deepseek.com",
 )
 
 register_provider(deepseek)

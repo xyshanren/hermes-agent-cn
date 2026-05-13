@@ -218,23 +218,9 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "claude-haiku-4-5-20251001",
     ],
     "deepseek": [
-        # DeepSeek V4 / Chat 接口 (2025-12)
-        "deepseek-chat",
-        # DeepSeek V3 (当前主力)
-        "deepseek-v3",
-        # DeepSeek R1 (推理模型)
-        "deepseek-r1",
-        "deepseek-r1-250120",
-        "deepseek-r1-0528",
-        # DeepSeek R1 Distill 系列
-        "deepseek-r1-distill-qwen-7b",
-        "deepseek-r1-distill-qwen-14b",
-        "deepseek-r1-distill-qwen-32b",
-        "deepseek-r1-distill-llama-8b",
-        "deepseek-r1-distill-llama-70b",
-        "deepseek-r1-distill-llama-24b",
-        "deepseek-r1-distill-qwen-1.5b",
-        "deepseek-r1-distill-qwen-0.5b",
+        # DeepSeek 官方模型（2026-05 更新，仅保留官方在线模型）
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
     ],
     "xiaomi": [
         "mimo-v2-pro",

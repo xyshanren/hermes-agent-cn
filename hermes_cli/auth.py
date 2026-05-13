@@ -150,7 +150,7 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         id="deepseek",
         name="DeepSeek",
         auth_type="api_key",
-        inference_base_url="https://api.deepseek.com/v1",
+        inference_base_url="https://api.deepseek.com",
         api_key_env_vars=("DEEPSEEK_API_KEY",),
         base_url_env_var="DEEPSEEK_BASE_URL",
     ),
@@ -4051,7 +4051,7 @@ def _reset_config_provider() -> Path:
     if isinstance(model, dict):
         model["provider"] = "auto"
         if "base_url" in model:
-            model["base_url"] = "https://api.deepseek.com/v1"
+            model["base_url"] = "https://api.deepseek.com"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False))
     return config_path
 
@@ -4150,8 +4150,8 @@ def _prompt_model_selection(
         from simple_term_menu import TerminalMenu
 
         choices = [f"  {_label(mid)}" for mid in ordered]
-        choices.append("  Enter custom model name")
-        choices.append("  Skip (keep current)")
+        choices.append("  输入自定义模型名称")
+        choices.append("  跳过（保持当前）")
 
         # Print the unavailable block BEFORE the menu via regular print().
         # simple_term_menu pads title lines to terminal width (causes wrapping),
@@ -4201,8 +4201,8 @@ def _prompt_model_selection(
     for i, mid in enumerate(ordered, 1):
         print(f"  {i:>{num_width}}. {_label(mid)}")
     n = len(ordered)
-    print(f"  {n + 1:>{num_width}}. Enter custom model name")
-    print(f"  {n + 2:>{num_width}}. Skip (keep current)")
+    print(f"  {n + 1:>{num_width}}. 输入自定义模型名称")
+    print(f"  {n + 2:>{num_width}}. 跳过（保持当前）")
 
     if _unavailable:
         _upgrade_url = (portal_url or DEFAULT_NOUS_PORTAL_URL).rstrip("/")
@@ -4214,7 +4214,7 @@ def _prompt_model_selection(
 
     while True:
         try:
-            choice = input(f"Choice [1-{n + 2}] (default: skip): ").strip()
+            choice = input(f"选择 [1-{n + 2}]（默认：跳过）：").strip()
             if not choice:
                 return None
             idx = int(choice)
@@ -5043,7 +5043,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                     )
             _portal = auth_state.get("portal_base_url", "")
             if model_ids:
-                print(f"Showing {len(model_ids)} curated models — use \"Enter custom model name\" for others.")
+                print(f"显示 {len(model_ids)} 个精选模型 — 使用\"输入自定义模型名称\"添加其他模型。")
                 selected_model = _prompt_model_selection(
                     model_ids, pricing=pricing,
                     unavailable_models=unavailable_models,
@@ -5054,7 +5054,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                 print("No free models currently available.")
                 print(f"Upgrade at {_url} to access paid models.")
             else:
-                print("No curated models available for Nous Portal.")
+                print("Nous Portal 没有可用的精选模型。")
         except Exception as exc:
             message = format_auth_error(exc) if isinstance(exc, AuthError) else str(exc)
             print()
@@ -5087,7 +5087,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
         )
         if selected_model:
             _save_model_choice(selected_model)
-            print(f"Default model set to: {selected_model}")
+            print(f"默认模型已设置为：{selected_model}")
         print(f"  Config updated: {config_path} (model.provider=nous)")
 
     except KeyboardInterrupt:

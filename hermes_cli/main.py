@@ -2035,26 +2035,26 @@ def select_provider_and_model(args=None):
     default_idx = 0
     for key, label in all_providers:
         if active and key == active:
-            ordered.append((key, f"{label}  ← currently active"))
+            ordered.append((key, f"{label}  ← 当前使用"))
             default_idx = len(ordered) - 1
         else:
             ordered.append((key, label))
 
-    ordered.append(("custom", "Custom endpoint (enter URL manually)"))
+    ordered.append(("custom", "自定义端点（手动输入 URL）"))
     _has_saved_custom_list = isinstance(config.get("custom_providers"), list) and bool(
         config.get("custom_providers")
     )
     if _has_saved_custom_list:
-        ordered.append(("remove-custom", "Remove a saved custom provider"))
-    ordered.append(("aux-config", "Configure auxiliary models..."))
-    ordered.append(("cancel", "Leave unchanged"))
+        ordered.append(("remove-custom", "移除已保存的自定义提供商"))
+    ordered.append(("aux-config", "配置辅助模型..."))
+    ordered.append(("cancel", "保持不变"))
 
     provider_idx = _prompt_provider_choice(
         [label for _, label in ordered],
         default=default_idx,
     )
     if provider_idx is None or ordered[provider_idx][0] == "cancel":
-        print("No change.")
+        print("未更改。")
         return
 
     selected_provider = ordered[provider_idx][0]
@@ -2092,7 +2092,7 @@ def select_provider_and_model(args=None):
         if provider_info is None:
             print(
                 "Warning: the selected saved custom provider is no longer available. "
-                "It may have been removed from config.yaml. No change."
+                "该提供商可能已从 config.yaml 中移除。未更改。"
             )
             return
         _model_flow_named_custom(config, provider_info)
@@ -2457,7 +2457,7 @@ def _aux_flow_provider_model(
             pricing=pricing,
         )
         if selected is None:
-            print("No change.")
+            print("未更改。")
             return
 
     _save_aux_choice(
@@ -2491,7 +2491,7 @@ def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
         return
     url = url or current_base_url
     if not url:
-        print("No URL provided. No change.")
+        print("未提供 URL，未更改。")
         return
     try:
         model_prompt = (
@@ -2573,7 +2573,7 @@ def _model_flow_openrouter(config, current_model=""):
 
     api_key = get_env_value("OPENROUTER_API_KEY")
     if not api_key:
-        print("No OpenRouter API key configured.")
+        print("未配置 OpenRouter API 密钥。")
         print("Get one at: https://openrouter.ai/keys")
         print()
         try:
@@ -2584,10 +2584,10 @@ def _model_flow_openrouter(config, current_model=""):
             print()
             return
         if not key:
-            print("Cancelled.")
+            print("已取消。")
             return
         save_env_value("OPENROUTER_API_KEY", key)
-        print("API key saved.")
+        print("API 密钥已保存。")
         print()
 
     from hermes_cli.models import model_ids, get_pricing_for_provider
@@ -2616,9 +2616,9 @@ def _model_flow_openrouter(config, current_model=""):
         model["api_mode"] = "chat_completions"
         save_config(cfg)
         deactivate_provider()
-        print(f"Default model set to: {selected} (via OpenRouter)")
+        print(f"默认模型已设置为：{selected} (通过 OpenRouter)")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _model_flow_ai_gateway(config, current_model=""):
@@ -2632,7 +2632,7 @@ def _model_flow_ai_gateway(config, current_model=""):
 
     api_key = get_env_value("AI_GATEWAY_API_KEY")
     if not api_key:
-        print("No Vercel AI Gateway API key configured.")
+        print("未配置 Vercel AI Gateway API 密钥。")
         print(
             "Create API key here: https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway&title=AI+Gateway"
         )
@@ -2646,10 +2646,10 @@ def _model_flow_ai_gateway(config, current_model=""):
             print()
             return
         if not key:
-            print("Cancelled.")
+            print("已取消。")
             return
         save_env_value("AI_GATEWAY_API_KEY", key)
-        print("API key saved.")
+        print("API 密钥已保存。")
         print()
 
     from hermes_cli.models import ai_gateway_model_ids, get_pricing_for_provider
@@ -2675,9 +2675,9 @@ def _model_flow_ai_gateway(config, current_model=""):
         model["api_mode"] = "chat_completions"
         save_config(cfg)
         deactivate_provider()
-        print(f"Default model set to: {selected} (via Vercel AI Gateway)")
+        print(f"默认模型已设置为：{selected} (通过 Vercel AI Gateway)")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _model_flow_nous(config, current_model="", args=None):
@@ -2845,11 +2845,11 @@ def _model_flow_nous(config, current_model="", args=None):
             save_env_value("OPENAI_BASE_URL", "")
             save_env_value("OPENAI_API_KEY", "")
         save_config(config)
-        print(f"Default model set to: {selected} (via Nous Portal)")
+        print(f"默认模型已设置为：{selected} (通过 Nous Portal)")
         # Offer Tool Gateway enablement for paid subscribers
         prompt_enable_tool_gateway(config)
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _model_flow_openai_codex(config, current_model=""):
@@ -2937,9 +2937,9 @@ def _model_flow_openai_codex(config, current_model=""):
     if selected:
         _save_model_choice(selected)
         _update_config_for_provider("openai-codex", DEFAULT_CODEX_BASE_URL)
-        print(f"Default model set to: {selected} (via OpenAI Codex)")
+        print(f"默认模型已设置为：{selected} (通过 OpenAI Codex)")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 _DEFAULT_QWEN_PORTAL_MODELS = [
@@ -2986,9 +2986,9 @@ def _model_flow_qwen_oauth(_config, current_model=""):
     if selected:
         _save_model_choice(selected)
         _update_config_for_provider("qwen-oauth", DEFAULT_QWEN_BASE_URL)
-        print(f"Default model set to: {selected} (via Qwen OAuth)")
+        print(f"默认模型已设置为：{selected} (通过 Qwen OAuth)")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _model_flow_minimax_oauth(config, current_model="", args=None):
@@ -3109,10 +3109,10 @@ def _model_flow_google_gemini_cli(_config, current_model=""):
             "google-gemini-cli", DEFAULT_GEMINI_CLOUDCODE_BASE_URL
         )
         print(
-            f"Default model set to: {selected} (via Google Gemini OAuth / Code Assist)"
+            f"默认模型已设置为：{selected} (通过 Google Gemini OAuth / Code Assist)"
         )
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _model_flow_custom(config):
@@ -3144,11 +3144,11 @@ def _model_flow_custom(config):
             f"API key [{current_key[:8] + '...' if current_key else 'optional'}]: "
         ).strip()
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print("\n已取消。")
         return
 
     if not base_url and not current_url:
-        print("No URL provided. Cancelled.")
+        print("未提供 URL，已取消。")
         return
 
     # Validate URL format
@@ -3246,7 +3246,7 @@ def _model_flow_custom(config):
         default_name = _auto_provider_name(effective_url)
         display_name = input(f"Display name [{default_name}]: ").strip() or default_name
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print("\n已取消。")
         return
 
     context_length = None
@@ -3286,7 +3286,7 @@ def _model_flow_custom(config):
         # the stale values from its own config dict (#4172).
         config["model"] = dict(model)
 
-        print(f"Default model set to: {model_name} (via {effective_url})")
+        print(f"默认模型已设置为：{model_name} (通过 {effective_url})")
     else:
         if base_url or api_key:
             deactivate_provider()
@@ -3469,7 +3469,7 @@ def _model_flow_azure_foundry(config, current_model=""):
             f"API endpoint URL [{current_base_url or 'e.g. https://your-resource.openai.azure.com/openai/v1'}]: "
         ).strip()
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print("\n已取消。")
         return
 
     effective_url = (base_url or current_base_url).rstrip("/")
@@ -3487,7 +3487,7 @@ def _model_flow_azure_foundry(config, current_model=""):
             f"API key [{current_api_key[:8] + '...' if current_api_key else 'required'}]: "
         ).strip()
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print("\n已取消。")
         return
 
     effective_key = api_key or current_api_key
@@ -3529,7 +3529,7 @@ def _model_flow_azure_foundry(config, current_model=""):
                 or default_choice
             )
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print("\n已取消。")
             return
         api_mode = "anthropic_messages" if mode_choice == "2" else "chat_completions"
 
@@ -3550,7 +3550,7 @@ def _model_flow_azure_foundry(config, current_model=""):
                 f"Pick by number, or type a deployment name [{current_model or discovered_models[0]}]: "
             ).strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print("\n已取消。")
             return
         if not pick:
             effective_model = current_model or discovered_models[0]
@@ -3564,7 +3564,7 @@ def _model_flow_azure_foundry(config, current_model=""):
                 f"Model / deployment name [{current_model or 'e.g. gpt-5.4, claude-sonnet-4-6'}]: "
             ).strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print("\n已取消。")
             return
         effective_model = model_name or current_model
 
@@ -3671,7 +3671,7 @@ def _remove_custom_provider(config):
             idx = None
 
     if idx is None or idx >= len(providers):
-        print("No change.")
+        print("未更改。")
         return
 
     removed = providers.pop(idx)
@@ -3747,7 +3747,7 @@ def _model_flow_named_custom(config, provider_info):
             flush_stdin()
             print()
             if idx is None or idx >= len(models):
-                print("Cancelled.")
+                print("已取消。")
                 return
             model_name = models[idx]
         except (ImportError, NotImplementedError, OSError, subprocess.SubprocessError):
@@ -3759,29 +3759,29 @@ def _model_flow_named_custom(config, provider_info):
             try:
                 val = input(f"Choice [1-{len(models) + 1}]: ").strip()
                 if not val:
-                    print("Cancelled.")
+                    print("已取消。")
                     return
                 idx = int(val) - 1
                 if idx < 0 or idx >= len(models):
-                    print("Cancelled.")
+                    print("已取消。")
                     return
                 model_name = models[idx]
             except (ValueError, KeyboardInterrupt, EOFError):
-                print("\nCancelled.")
+                print("\n已取消。")
                 return
     elif saved_model:
         print("Could not fetch models from endpoint.")
         try:
             model_name = input(f"Model name [{saved_model}]: ").strip() or saved_model
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print("\n已取消。")
             return
     else:
         print("Could not fetch models from endpoint. Enter model name manually.")
         try:
             model_name = input("Model name: ").strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print("\n已取消。")
             return
         if not model_name:
             print("No model specified. Cancelled.")
@@ -4140,14 +4140,14 @@ def _model_flow_copilot(config, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"Default model set to: {selected} (via {pconfig.name})")
+        print(f"默认模型已设置为：{selected} (通过 {pconfig.name})")
         if reasoning_efforts:
             if selected_effort == "none":
                 print("Reasoning disabled for this model.")
             elif selected_effort:
                 print(f"Reasoning effort set to: {selected_effort}")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _model_flow_copilot_acp(config, current_model=""):
@@ -4236,7 +4236,7 @@ def _model_flow_copilot_acp(config, current_model=""):
             selected = None
 
     if not selected:
-        print("No change.")
+        print("未更改。")
         return
 
     selected = (
@@ -4260,7 +4260,7 @@ def _model_flow_copilot_acp(config, current_model=""):
     save_config(cfg)
     deactivate_provider()
 
-    print(f"Default model set to: {selected} (via {pconfig.name})")
+    print(f"默认模型已设置为：{selected} (通过 {pconfig.name})")
 
 
 def _prompt_api_key(pconfig, existing_key: str, provider_id: str = "") -> tuple:
@@ -4297,15 +4297,15 @@ def _prompt_api_key(pconfig, existing_key: str, provider_id: str = "") -> tuple:
 
     # First-time entry ────────────────────────────────────────────────────
     if not existing_key:
-        print(f"No {pconfig.name} API key configured.")
+        print(f"未配置 {pconfig.name} API 密钥。")
         if not key_env:
             return "", True
         new_key = _prompt_new_key(allow_lmstudio_default=True)
         if not new_key:
-            print("Cancelled.")
+            print("已取消。")
             return "", True
         save_env_value(key_env, new_key)
-        print("API key saved.")
+        print("API 密钥已保存。")
         print()
         return new_key, False
 
@@ -4316,7 +4316,7 @@ def _prompt_api_key(pconfig, existing_key: str, provider_id: str = "") -> tuple:
         print()
         return existing_key, False
     try:
-        choice = input("  [K]eep / [R]eplace / [C]lear (default K): ").strip().lower()
+        choice = input("  [K]保留 / [R]替换 / [C]清除 (默认 K): ").strip().lower()
     except (KeyboardInterrupt, EOFError):
         print()
         choice = "k"
@@ -4324,18 +4324,18 @@ def _prompt_api_key(pconfig, existing_key: str, provider_id: str = "") -> tuple:
     if choice.startswith("r"):
         new_key = _prompt_new_key(allow_lmstudio_default=False)
         if not new_key:
-            print("  No change.")
+            print("  未更改。")
             print()
             return existing_key, False
         save_env_value(key_env, new_key)
-        print("  API key updated.")
+        print("  API 密钥已更新。")
         print()
         return new_key, False
 
     if choice.startswith("c"):
         save_env_value(key_env, "")
         print(
-            f"  API key cleared.  Re-run `hermes setup` to configure {pconfig.name} again."
+            f"  API 密钥已清除。重新运行 `hermes setup` 以重新配置 {pconfig.name}。"
         )
         return "", True
 
@@ -4435,9 +4435,9 @@ def _model_flow_kimi(config, current_model=""):
         deactivate_provider()
 
         endpoint_label = "Kimi Coding" if is_coding_plan else "Moonshot"
-        print(f"Default model set to: {selected} (via {endpoint_label})")
+        print(f"默认模型已设置为：{selected} (通过 {endpoint_label})")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _infer_stepfun_region(base_url: str) -> str:
@@ -4520,7 +4520,7 @@ def _model_flow_stepfun(config, current_model=""):
 
     region_idx = _prompt_provider_choice([label for _, label in ordered_regions])
     if region_idx is None or ordered_regions[region_idx][0] == "cancel":
-        print("No change.")
+        print("未更改。")
         return
 
     selected_region = ordered_regions[region_idx][0]
@@ -4563,9 +4563,9 @@ def _model_flow_stepfun(config, current_model=""):
         deactivate_provider()
 
         config["model"] = dict(model)
-        print(f"Default model set to: {selected} (via {pconfig.name})")
+        print(f"默认模型已设置为：{selected} (通过 {pconfig.name})")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _model_flow_bedrock_api_key(config, region, current_model=""):
@@ -4650,7 +4650,7 @@ def _model_flow_bedrock_api_key(config, region, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"  Default model set to: {selected} (via Bedrock API Key, {region})")
+        print(f"  默认模型已设置为：{selected} (通过 Bedrock API Key, {region})")
         print(f"  Endpoint: {mantle_base_url}")
     else:
         print("  No change.")
@@ -4834,7 +4834,7 @@ def _model_flow_bedrock(config, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"  Default model set to: {selected} (via AWS Bedrock, {region})")
+        print(f"  默认模型已设置为：{selected} (通过 AWS Bedrock, {region})")
     else:
         print("  No change.")
 
@@ -4953,14 +4953,14 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
     effective_base = current_base or pconfig.inference_base_url
 
     try:
-        override = input(f"Base URL [{effective_base}]: ").strip()
+        override = input(f"Base URL [{effective_base}]：").strip()
     except (KeyboardInterrupt, EOFError):
         print()
         override = ""
     if override and base_url_env:
         if not override.startswith(("http://", "https://")):
             print(
-                "  Invalid URL — must start with http:// or https://. Keeping current value."
+                "  无效 URL — 必须以 http:// 或 https:// 开头。保持当前值。"
             )
         else:
             save_env_value(base_url_env, override)
@@ -5006,14 +5006,19 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
     else:
         curated = _PROVIDER_MODELS.get(provider_id, [])
 
+        # CN branch: for providers with curated lists, prefer curated over
+        # models.dev to avoid showing deprecated/unsupported models.
+        _cn_prefer_curated = provider_id == "deepseek"
+
         # Try models.dev first — returns tool-capable models, filtered for noise
         mdev_models: list = []
-        try:
-            from agent.models_dev import list_agentic_models
+        if not _cn_prefer_curated:
+            try:
+                from agent.models_dev import list_agentic_models
 
-            mdev_models = list_agentic_models(provider_id)
-        except Exception:
-            pass
+                mdev_models = list_agentic_models(provider_id)
+            except Exception:
+                pass
 
         if mdev_models:
             # Merge models.dev with curated list so newly added models
@@ -5028,12 +5033,12 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
                 model_list = merged
             else:
                 model_list = mdev_models
-            print(f"  Found {len(model_list)} model(s) from models.dev registry")
-        elif curated and len(curated) >= 8:
+            print(f"  从 models.dev 注册表找到 {len(model_list)} 个模型")
+        elif curated and (len(curated) >= 8 or _cn_prefer_curated):
             # Curated list is substantial — use it directly, skip live probe
             model_list = curated
             print(
-                f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
+                f'  显示 {len(model_list)} 个精选模型 — 使用"输入自定义模型名称"添加其他模型。'
             )
         else:
             api_key_for_probe = existing_key or (
@@ -5042,12 +5047,12 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             live_models = fetch_api_models(api_key_for_probe, effective_base)
             if live_models and len(live_models) >= len(curated):
                 model_list = live_models
-                print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
+                print(f"  从 {pconfig.name} API 找到 {len(model_list)} 个模型")
             else:
                 model_list = curated
                 if model_list:
                     print(
-                        f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
+                        f'  显示 {len(model_list)} 个精选模型 — 使用"输入自定义模型名称"添加其他模型。'
                     )
             # else: no defaults either, will fall through to raw input
 
@@ -5087,9 +5092,9 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"Default model set to: {selected} (via {pconfig.name})")
+        print(f"默认模型已设置为：{selected} (通过 {pconfig.name})")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def _run_anthropic_oauth_flow(save_env_value):
@@ -5287,7 +5292,7 @@ def _model_flow_anthropic(config, current_model=""):
             print("  ✓ API key saved.")
 
         else:
-            print("  No change.")
+            print("  未更改。")
             return
     print()
 
@@ -5318,9 +5323,9 @@ def _model_flow_anthropic(config, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"Default model set to: {selected} (via Anthropic)")
+        print(f"默认模型已设置为：{selected} (通过 Anthropic)")
     else:
-        print("No change.")
+        print("未更改。")
 
 
 def cmd_login(args):
@@ -7848,7 +7853,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             # Prefer a graceful SIGUSR1 restart so in-flight
                             # agent runs drain instead of being SIGKILLed.
                             # The gateway's SIGUSR1 handler calls
-                            # request_restart(via_service=True) → drain →
+                            # request_restart(通过_service=True) → drain →
                             # exit(75); systemd's Restart=on-failure (and
                             # RestartForceExitStatus=75) respawns the unit.
                             _main_pid = 0
@@ -10938,7 +10943,7 @@ Examples:
                 if not _confirm_prompt(
                     f"Delete session '{resolved_session_id}' and all its messages? [y/N] "
                 ):
-                    print("Cancelled.")
+                    print("已取消。")
                     return
             sessions_dir = get_hermes_home() / "sessions"
             if db.delete_session(resolved_session_id, sessions_dir=sessions_dir):
@@ -10953,7 +10958,7 @@ Examples:
                 if not _confirm_prompt(
                     f"Delete all ended sessions older than {days} days{source_msg}? [y/N] "
                 ):
-                    print("Cancelled.")
+                    print("已取消。")
                     return
             sessions_dir = get_hermes_home() / "sessions"
             count = db.prune_sessions(
@@ -10989,7 +10994,7 @@ Examples:
 
             selected_id = _session_browse_picker(sessions)
             if not selected_id:
-                print("Cancelled.")
+                print("已取消。")
                 return
 
             # Launch hermes --resume <id> by replacing the current process

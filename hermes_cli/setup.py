@@ -698,26 +698,23 @@ def setup_model_provider(config: dict, *, quick: bool = False):
             manual_count = sum(1 for entry in entries if str(getattr(entry, "source", "")).startswith("manual"))
             auto_count = entry_count - manual_count
             print()
-            print_header("Same-Provider Fallback & Rotation")
+            print_header("同提供商回退与轮换")
             print_info(
-                "Hermes can keep multiple credentials for one provider and rotate between"
+                "Hermes 可以为同一提供商保存多个凭证，并在某个凭证用尽或触发限流时"
             )
             print_info(
-                "them when a credential is exhausted or rate-limited. This preserves"
-            )
-            print_info(
-                "your primary provider while reducing interruptions from quota issues."
+                "自动轮换。这可以保留你的主提供商配置，同时减少配额问题导致的中断。"
             )
             print()
             if auto_count > 0:
                 print_info(
-                    f"Current pooled credentials for {selected_provider}: {entry_count} "
-                    f"({manual_count} manual, {auto_count} auto-detected from env/shared auth)"
+                    f"{selected_provider} 当前池化的凭证数：{entry_count} "
+                    f"（{manual_count} 个手动配置，{auto_count} 个从环境/共享认证自动检测）"
                 )
             else:
-                print_info(f"Current pooled credentials for {selected_provider}: {entry_count}")
+                print_info(f"{selected_provider} 当前池化的凭证数：{entry_count}")
 
-            while prompt_yes_no("Add another credential for same-provider fallback?", False):
+            while prompt_yes_no("为同提供商回退添加另一个凭证？", False):
                 auth_add_command(
                     SimpleNamespace(
                         provider=selected_provider,
