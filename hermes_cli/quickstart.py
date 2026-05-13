@@ -77,6 +77,49 @@ _PROVIDER_CHECKS = [
 
 _CN_PROVIDER_IDS = {p["id"] for p in _PROVIDER_CHECKS}
 
+# ── Ollama 模型分类关键词 ──
+_VISION_KEYWORDS = ("vl", "vision", "llava", "cogvlm", "minicpm-v")
+_REASONING_KEYWORDS = ("r1", "reasoning", "think", "qwq")
+
+
+def _classify_ollama_model(name: str) -> str:
+    """根据模型名称启发式分类。
+
+    Returns:
+        "vision" | "reasoning" | "text"
+    """
+    name_lower = name.lower().split(":")[0]  # 去掉标签（如 :8b）
+    if any(kw in name_lower for kw in _VISION_KEYWORDS):
+        return "vision"
+    if any(kw in name_lower for kw in _REASONING_KEYWORDS):
+        return "reasoning"
+    return "text"
+
+
+def _pick_ollama_primary(models: list[str]) -> str:
+    """从 Ollama 多模型中选择主力模型。
+
+    优先级：text/reasoning > vision（视觉模型不适合做通用主力）。
+    同类型中选最后一个（通常是用户最新拉取的）。
+    """
+    if not models:
+        return "llama3.2"
+
+    classified = [(name, _classify_ollama_model(name)) for name in models]
+    # 优先 text/reasoning
+    non_vision = [name for name, t in classified if t != "vision"]
+    if non_vision:
+        return non_vision[-1]  # 最后一个（通常最大/最新）
+    return models[-1]  # 全是视觉模型时取最后一个
+
+
+def _find_ollama_vision_model(models: list[str]) -> Optional[str]:
+    """找到 Ollama 中的视觉模型。有多个时取第一个。"""
+    for name in models:
+        if _classify_ollama_model(name) == "vision":
+            return name
+    return None
+
 
 # ── 资源检测函数 ──
 
@@ -91,7 +134,7 @@ def _detect_api_key_providers() -> list[dict]:
 
 
 def _detect_ollama() -> Optional[dict]:
-    """检测本地 Ollama 服务是否运行，返回可用模型列表。"""
+    """检测本地 Ollama 服务是否运行，返回可用模型列表（含分类）。"""
     try:
         import urllib.request
 
@@ -106,10 +149,16 @@ def _detect_ollama() -> Optional[dict]:
             models = data.get("models", [])
             if models:
                 model_names = [m.get("name", "") for m in models if m.get("name")]
+                classified = [
+                    {"name": n, "type": _classify_ollama_model(n)}
+                    for n in model_names
+                ]
                 return {
                     "available": True,
                     "models": model_names,
-                    "default_model": model_names[0] if model_names else "llama3.2",
+                    "classified_models": classified,
+                    "default_model": _pick_ollama_primary(model_names),
+                    "vision_model": _find_ollama_vision_model(model_names),
                 }
             return {"available": True, "models": [], "default_model": "llama3.2"}
     except Exception:
@@ -222,10 +271,10 @@ def _build_fallback_chain(
     """构建 fallback_model 链。
 
     规则：
-    - 已作为主力的 provider 不再放入 fallback
+    - 已作为主力的 provider + 模型不放 fallback
     - 云端 API 作为第一 fallback
+    - Ollama 非 vision 模型作为第二 fallback（如果 Ollama 有多个模型且是主力）
     - 嵌入式模型始终放最后（断网兜底）
-    - Ollama（如果不是主力）放在云端和嵌入式之间
     """
     chain: list[dict] = []
 
@@ -244,6 +293,17 @@ def _build_fallback_chain(
             "model": ollama_info["default_model"],
             "base_url": "http://localhost:11434",
         })
+    elif ollama_info and primary_provider_id == "ollama":
+        # Ollama 是主力但有多个模型 — 将非 vision 非主力模型加入 fallback
+        primary_model = ollama_info["default_model"]
+        for m in ollama_info.get("models", []):
+            if m != primary_model and _classify_ollama_model(m) != "vision":
+                chain.append({
+                    "provider": "ollama",
+                    "model": m,
+                    "base_url": "http://localhost:11434",
+                })
+                break  # 只加一个 Ollama fallback
 
     # 嵌入式模型 — 断网兜底（始终放最后）
     if has_embedded and primary_provider_id != "embedded":
@@ -260,10 +320,11 @@ def _write_smart_routing(
     primary_model: str,
     fallback_chain: list[dict],
     api_providers: list[dict],
+    ollama_info: Optional[dict] = None,
 ) -> bool:
     """将智能路由配置写入 config.yaml。
 
-    包括：主力模型 + fallback_model 链 + API Key 保存。
+    包括：主力模型 + fallback_model 链 + auxiliary.vision + API Key 保存。
     """
     try:
         from hermes_cli.config import load_config, save_config, save_env_value
@@ -283,6 +344,25 @@ def _write_smart_routing(
             cfg["fallback_model"] = fallback_chain
         else:
             cfg.pop("fallback_model", None)
+
+        # 自动配置 auxiliary.vision（如果 Ollama 有视觉模型）
+        if ollama_info:
+            vision_model = ollama_info.get("vision_model")
+            if vision_model:
+                aux = cfg.setdefault("auxiliary", {})
+                if not isinstance(aux, dict):
+                    aux = {}
+                    cfg["auxiliary"] = aux
+                vision_cfg = aux.get("vision", {})
+                # 仅在当前未配置或为 auto 时自动设置
+                current_provider = str(vision_cfg.get("provider", "auto")).strip()
+                if current_provider in ("auto", "", "ollama"):
+                    aux["vision"] = {
+                        "provider": "ollama",
+                        "model": vision_model,
+                        "base_url": "http://localhost:11434",
+                        "api_key": "",
+                    }
 
         save_config(cfg)
 
@@ -409,9 +489,25 @@ def cmd_quickstart(args) -> int:
 
     if ollama_info:
         models = ollama_info.get("models", [])
-        if models:
-            print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中 ({', '.join(models[:3])})")
-        else:
+        classified = ollama_info.get("classified_models", [])
+        if models and len(models) == 1:
+            print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中 ({models[0]})")
+        elif models and len(models) > 1:
+            # 多模型：按类型分组显示
+            print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中 ({len(models)} 个模型)")
+            primary = ollama_info.get("default_model", "")
+            vision = ollama_info.get("vision_model")
+            for m_info in classified:
+                name = m_info["name"]
+                mtype = m_info["type"]
+                tag = ""
+                if name == primary:
+                    tag = " (主力)"
+                elif name == vision:
+                    tag = " → auxiliary.vision"
+                type_label = {"vision": "视觉", "reasoning": "推理", "text": "文本"}.get(mtype, mtype)
+                print(f"      {type_label:4s}: {name}{tag}")
+        elif not models:
             print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中（暂无模型）")
     else:
         print(f"  {color('⚠', Colors.YELLOW)} Ollama 本地推理: 未运行")
@@ -506,7 +602,7 @@ def cmd_quickstart(args) -> int:
                 break
 
     # 然后写入完整的智能路由（覆盖上面写入的 model 配置）
-    _write_smart_routing(primary_id, primary_model, fallback_chain, api_providers)
+    _write_smart_routing(primary_id, primary_model, fallback_chain, api_providers, ollama_info)
 
     # ── 显示结果 ──
     print()
@@ -522,6 +618,11 @@ def cmd_quickstart(args) -> int:
 
     primary_name = _provider_names.get(primary_id, primary_id)
     print(f"  🔵 主力推理: {primary_name} — {primary_model}")
+
+    # auxiliary.vision 显示
+    vision_model = (ollama_info or {}).get("vision_model")
+    if vision_model:
+        print(f"  👁 视觉分析: Ollama（本地） — {vision_model} (auxiliary)")
 
     # fallback 链
     if fallback_chain:

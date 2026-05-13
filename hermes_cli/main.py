@@ -4840,11 +4840,12 @@ def _model_flow_bedrock(config, current_model=""):
 
 
 def _auto_configure_local_fallback(config: dict, new_provider_id: str) -> None:
-    """检测本地模型（Ollama / 嵌入式），自动配置为 fallback_model。
+    """检测本地模型（Ollama / 嵌入式），自动配置为 fallback_model + auxiliary.vision。
 
     在用户通过 setup/model 配置云端提供商后调用。
     如果检测到本地模型，将其追加到 fallback_model 链中，
     实现智能路由：云端主力 → 本地兜底。
+    如果 Ollama 有视觉模型，自动配置 auxiliary.vision。
     """
     from hermes_cli.config import save_config
 
@@ -4876,7 +4877,7 @@ def _auto_configure_local_fallback(config: dict, new_provider_id: str) -> None:
     # 构建要添加的本地 fallback 条目
     local_entries = []
 
-    # Ollama — 本地推理兜底
+    # Ollama — 本地推理兜底（优先用文本模型，不用视觉模型做 fallback）
     if ollama_info and new_provider_id != "ollama":
         ollama_entry = {
             "provider": "ollama",
@@ -4904,6 +4905,24 @@ def _auto_configure_local_fallback(config: dict, new_provider_id: str) -> None:
     # 合并到现有 fallback 链（本地模型追加到末尾）
     merged_chain = list(existing_fb) + local_entries
     config["fallback_model"] = merged_chain
+
+    # 自动配置 auxiliary.vision（如果 Ollama 有视觉模型）
+    vision_model = (ollama_info or {}).get("vision_model")
+    if vision_model:
+        aux = config.setdefault("auxiliary", {})
+        if not isinstance(aux, dict):
+            aux = {}
+            config["auxiliary"] = aux
+        vision_cfg = aux.get("vision", {})
+        current_provider = str(vision_cfg.get("provider", "auto")).strip()
+        if current_provider in ("auto", "", "ollama"):
+            aux["vision"] = {
+                "provider": "ollama",
+                "model": vision_model,
+                "base_url": "http://localhost:11434",
+                "api_key": "",
+            }
+
     save_config(config)
 
     # 显示提示
@@ -4913,6 +4932,8 @@ def _auto_configure_local_fallback(config: dict, new_provider_id: str) -> None:
         m = entry.get("model", "")
         parts.append(f"{p} ({m})")
     print(f"  ✅ 已自动配置本地回退路由: {' → '.join(parts)}")
+    if vision_model:
+        print(f"  👁 已自动配置视觉分析: Ollama ({vision_model}) → auxiliary.vision")
 
 
 def _detect_ollama_for_fallback():
@@ -4931,10 +4952,22 @@ def _detect_ollama_for_fallback():
         models = data.get("models", [])
         if models:
             model_names = [m.get("name", "") for m in models if m.get("name")]
+            # 使用 quickstart 的分类函数
+            from hermes_cli.quickstart import (
+                _classify_ollama_model,
+                _pick_ollama_primary,
+                _find_ollama_vision_model,
+            )
+            classified = [
+                {"name": n, "type": _classify_ollama_model(n)}
+                for n in model_names
+            ]
             return {
                 "available": True,
                 "models": model_names,
-                "default_model": model_names[0] if model_names else "llama3.2",
+                "classified_models": classified,
+                "default_model": _pick_ollama_primary(model_names),
+                "vision_model": _find_ollama_vision_model(model_names),
             }
     return None
     from hermes_cli.auth import (
