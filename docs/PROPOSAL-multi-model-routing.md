@@ -300,12 +300,22 @@ def _resolve_model_for_message(self, messages: list) -> tuple[str, str]:
 
 ```
 Phase 1（方案 B）: quickstart 多模型自动检测 + auxiliary 配置
-  ↓ 改动最小，即插即用，解决 80% 场景
+  ↓ 改动最小，即插即用，解决 80% 场景 ✅ 已完成
 Phase 2（方案 A）: model_routing 配置 + 消息级模型选择
-  ↓ 覆盖主对话中的图片理解等场景
-Phase 3（方案 C）: 运行时动态切换（如需）
-  ↓ 完整的条件路由能力
+  ↓ 覆盖主对话中的图片理解等场景 ✅ 已完成
+Phase 3（方案 C）: 运行时动态切换
+  ↓ ❌ 已关闭 — 见下方评估
 ```
+
+### Phase 3 关闭原因 (2026-05-14)
+
+| 子阶段 | 评估 | 结论 |
+|--------|------|------|
+| 3a `/model` 命令运行时切换 | Phase 9 已弱化为只读（启动时绑定），此设计合理；与 Phase 2 自动路由功能冗余；用户手动切换会被自动路由覆盖，造成困惑 | ❌ 不做 |
+| 3b 上下文管理 | 当前所有路由模型在同一 Ollama provider 下，使用相同 API mode（chat_completions），无需重建上下文。只有跨 provider 切换才需要，而 Phase 2 设计正是避免跨 provider | ❌ 不需要 |
+
+**结论**: Phase 2 的 `_apply_model_routing()` 已实现消息级自动模型选择，
+无需手动切换（3a），且当前架构下不存在上下文兼容性问题（3b）。Phase 3 关闭。
 
 ---
 

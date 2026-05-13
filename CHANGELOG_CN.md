@@ -31,6 +31,14 @@
 - 未配置时提示"运行 quickstart 自动生成"
 - 正确包裹 `_section_reset`/`_section_summary`
 
+#### ❌ Phase 3 关闭
+
+经评估，Phase 3（运行时动态切换）不需要实施：
+- **3a `/model` 运行时切换**：与 Phase 9 设计决策冲突（弱化为只读），
+  且与 Phase 2 自动路由功能冗余
+- **3b 上下文管理**：当前所有路由模型在同一 Ollama provider 下，
+  使用相同 API mode（chat_completions），无需重建上下文
+
 #### Commit
 ```
 5bfad5f82 feat: Phase 2 收尾 + D5 路由可视化
