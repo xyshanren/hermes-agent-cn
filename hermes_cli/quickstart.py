@@ -364,6 +364,45 @@ def _write_smart_routing(
                         "api_key": "",
                     }
 
+        # Phase 2: 自动生成 model_routing 配置（多模型时）
+        # 条件：Ollama 有 ≥2 个模型，且有视觉模型 + 文本模型
+        if ollama_info and len(ollama_info.get("models", [])) >= 2:
+            classified = ollama_info.get("classified_models", [])
+            vision_models = [m for m in classified if m.get("type") == "vision"]
+            text_models = [m for m in classified if m.get("type") != "vision"]
+
+            if vision_models and text_models:
+                routing = cfg.get("model_routing", {})
+                if not isinstance(routing, dict):
+                    routing = {}
+
+                # default：主力文本模型
+                if "default" not in routing:
+                    routing["default"] = {
+                        "model": primary_model,
+                    }
+
+                # vision：第一个视觉模型
+                if "vision" not in routing:
+                    routing["vision"] = {
+                        "model": vision_models[0]["name"],
+                    }
+
+                # reasoning：有推理模型时优先，否则用主力
+                reasoning_models = [m for m in classified if m.get("type") == "reasoning"]
+                if "reasoning" not in routing:
+                    routing["reasoning"] = {
+                        "model": reasoning_models[0]["name"] if reasoning_models else primary_model,
+                    }
+
+                cfg["model_routing"] = routing
+                logger.info(
+                    "自动生成 model_routing 配置: default=%s, vision=%s, reasoning=%s",
+                    primary_model,
+                    vision_models[0]["name"],
+                    routing["reasoning"]["model"],
+                )
+
         save_config(cfg)
 
         # 保存所有 API Key 到 .env

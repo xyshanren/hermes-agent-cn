@@ -5555,6 +5555,16 @@ def cmd_doctor(args):
     run_doctor(args)
 
 
+def cmd_route_status(args):
+    """显示智能路由引擎状态（Ollama / 云端 / 嵌入式）。"""
+    from agent.zhineng_luyou import SmartRouter
+    from hermes_cli.config import load_config
+
+    config = load_config()
+    router = SmartRouter(config)
+    print(router.print_status())
+
+
 def cmd_dump(args):
     """Dump setup summary for support/debugging."""
     from hermes_cli.dump import run_dump
@@ -10056,6 +10066,16 @@ def main():
         "--quiet", action="store_true", help="Only show warnings and errors (suppress ✓ and → output)"
     )
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    # =========================================================================
+    # route-status command
+    # =========================================================================
+    route_status_parser = subparsers.add_parser(
+        "route-status",
+        help="显示智能路由引擎状态（Ollama / 云端 API / 嵌入式）",
+        description="显示三层路由引擎的当前状态：Ollama 本地模型可用性、云端 API 配置状态、嵌入式模型就绪状态",
+    )
+    route_status_parser.set_defaults(func=cmd_route_status)
 
     # =========================================================================
     # dump command

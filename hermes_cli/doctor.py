@@ -1272,6 +1272,38 @@ def run_doctor(args):
             check_warn("配置不一致", "同时存在 fallback_model 和 fallback_providers 两个键，建议统一为 fallback_providers")
 
     # =========================================================================
+    # 路由配置 (Phase 2)
+    # =========================================================================
+    _section_summary()
+    _section_reset()
+    print()
+    print(color("◆ 路由配置", Colors.CYAN, Colors.BOLD))
+
+    _routing_cfg = _config.get("model_routing", {}) or {}
+    if not _routing_cfg:
+        check_warn(
+            "未配置 model_routing",
+            "（图片/推理消息将使用统一模型，运行 quickstart 自动生成）",
+        )
+    else:
+        _routing_default = _routing_cfg.get("default", {}) or {}
+        _routing_vision = _routing_cfg.get("vision", {}) or {}
+        _routing_reasoning = _routing_cfg.get("reasoning", {}) or {}
+
+        if _routing_default.get("model"):
+            check_ok(f"默认路由模型", f"（{_routing_default.get('model')}）")
+        else:
+            check_warn("缺少默认路由模型")
+
+        if _routing_vision.get("model"):
+            check_ok(f"视觉路由模型", f"（{_routing_vision.get('model')}）")
+        else:
+            check_warn("缺少视觉路由模型", "（图片/截图将无法自动切换模型）")
+
+        if _routing_reasoning.get("model"):
+            check_ok(f"推理路由模型", f"（{_routing_reasoning.get('model')}）")
+
+    # =========================================================================
     # Profiles
     # =========================================================================
     try:
