@@ -4,6 +4,41 @@
 
 ---
 
+## v0.12.0-cn.5 (2026-05-14)
+
+### Phase 2 收尾 + D5 路由可视化
+
+#### ✅ quickstart 自动生成 model_routing 配置
+
+`_write_smart_routing()` 新增自动检测逻辑：
+- 当 Ollama 有 ≥2 个模型，且有视觉模型 + 文本模型时
+- 自动写入 `model_routing` 配置段（default/vision/reasoning）
+- 已有自定义配置时不会覆盖（`not in routing` 检查）
+
+#### ✅ `hermes route-status` CLI 命令
+
+新增子命令，调用 `SmartRouter().print_status()` 显示：
+- 路由模式（auto）
+- Ollama 在线状态
+- 云端 API 配置状态
+- 嵌入式模型就绪状态
+
+#### ✅ Doctor 路由配置检查段
+
+在 `hermes doctor` 中新增"◆ 路由配置"段：
+- 检查 `model_routing` 配置存在性
+- 检查 default/vision/reasoning 三个路由项
+- 未配置时提示"运行 quickstart 自动生成"
+- 正确包裹 `_section_reset`/`_section_summary`
+
+#### Commit
+```
+5bfad5f82 feat: Phase 2 收尾 + D5 路由可视化
+3 files changed, 91 insertions(+)
+```
+
+---
+
 ## v0.12.0-cn.4 (2026-05-13)
 
 ### feat: Phase 2 — model_routing 配置 + 消息级模型选择
