@@ -704,6 +704,124 @@ python -m mempalace.mcp_server --help
 
 ---
 
+## 最大化使用指南（CN 分支）
+
+> CN 分支已集成 MemPalace + graphify，并支持 `hermes quickstart` 自动配置。
+> 以下指南教你如何发挥这两个工具的最大价值，而不是仅仅「安装后就忘了」。
+
+### 核心理念：工具因场景而生
+
+两个工具不是「每天都用」的，而是「在特定时刻提供巨大帮助」的：
+
+| 工具 | 什么时候用 | 什么时候不值得用 |
+|------|-----------|----------------|
+| **MemPalace** | 记录决策、bug 修复、架构变更 | mine 所有代码文件 → 噪音巨大 |
+| **graphify** | 重构前分析影响面、理解依赖链 | 日常小改动 → 36K nodes 的图对改文案来说太重 |
+
+### MemPalace：决策日志模式
+
+#### ❌ 错误做法：mine 所有代码
+
+```bash
+# 不推荐：mine 整个项目，生成 1714 个 drawers 全是文件片段
+mempalace mine . --mode projects --wing hermes_agent
+# → 搜索结果被代码片段淹没，找不到真正需要的决策记录
+```
+
+#### ✅ 正确做法：只记录决策、Bug、架构变更
+
+写完代码后，花 30 秒记录「为什么这样写」：
+
+```bash
+# 记录关键决策
+mempalace add "Phase 3 关闭原因"
+  --wing hermes_agent
+  --room "03-汉化策略"
+  --content "Phase 3 (运行时模型切换) 错误后关闭：3a 与 Phase 2 自动路由冗余，3b 同 provider 不需要"
+
+# 记录 Bug 修复
+mempalace add "API Key 检测修复"
+  --wing hermes_agent
+  --room "05-问题与解决"
+  --content "auth.py 的 resolve_provider() 从 os.getenv() 改为 get_env_value()，修复 hermes chat 空 API Key 问题"
+```
+
+**更理想的方式**：MCP 配置完成后，Hermes 会在对话中自动调用 `mempalace_add_drawer` 记录决策，你完全不需要手动操作。
+
+### graphify：重构前专用
+
+```bash
+# 场景 1：重构核心模块前
+# 先看看 auxiliary_client.py 影响了哪些东西
+graphify explain "auxiliary_client.py"
+# → 输出 71 个连接，了解影响面
+
+# 场景 2：排查调用链
+graphify path "hermes_cli/commands.py" "agent/auxiliary_client.py"
+# → 输出最短路径，理解数据流
+
+# 场景 3：自然语言查询
+graphify query "how does the fallback chain work?"
+# → 返回调用链和相关文件
+```
+
+**不需要每次 commit 都跑**。只在准备动核心模块时手动执行，1 分钟搞定。
+
+### 数据维护节奏
+
+| 时机 | 操作 | 说明 |
+|------|------|------|
+| 重大决策后 | `mempalace add` 记录 | MCP 配通后 Hermes 自动完成 |
+| Bug 修复后 | `mempalace add` 记录 | 踩过的坑记下来 |
+| Phase 完成后 | `mempalace mine . --limit 50` | 增量更新新文件 |
+| 重构前 | `graphify update .` | 重新生成图谱 |
+| 上游合并后 | `mempalace mine . --limit 50` | 同步新代码 |
+
+### quickstart 自动配置
+
+CN 分支的 `hermes quickstart` 已集成 MemPalace 检测和 MCP 自动配置：
+
+```bash
+hermes quickstart
+# 自动检测：
+#   ✓ 云端 API Key
+#   ✓ Ollama 本地推理
+#   ✓ MemPalace 记忆库 — 自动配置 MCP
+```
+
+如果 MemPalace 已安装但 MCP 未配置，quickstart 会自动往 `~/.hermes/config.yaml` 写入：
+
+```yaml
+mcp_servers:
+  mempalace:
+    command: /path/to/python
+    args: [-m, mempalace.mcp_server]
+```
+
+### Windows 环境注意
+
+MemPalace 和 graphify 都基于 Python，理论上 Windows 原生可运行，但官方推荐 WSL2。
+
+- **WSL2 内**：完整支持，已验证
+- **Windows 原生**：pip 安装后手动测试
+
+如果 MemPalace 装在 WSL2 的 venv 里，MCP 配置的 `command` 需要指向 WSL2 中的 Python 路径。
+
+### 与 MEMORY.md 的关系
+
+MemPalace **不是** MEMORY.md 的替代品，两者互补：
+
+| | MEMORY.md | MemPalace |
+|---|---|---|
+| 内容 | 对话总结、任务跟踪 | 结构化决策记录 |
+| 搜索方式 | 全文 grep | 语义搜索 + Wing/Room 过滤 |
+| 访问 | 文本文件，无需依赖 | 需要 mempalace 服务 |
+| 使用场景 | 日常快速记录 | 长期知识积累 |
+
+建议：MEMORY.md 继续用于日常记录，MemPalace 用于重要的、需要跨会话检索的决策和知识。
+
+---
+
 ## 最佳实践
 
 ### MemPalace 使用技巧
@@ -781,8 +899,8 @@ python -m mempalace.mcp_server --help
 
 ---
 
-**最后更新：** 2026-04-16
-**维护者：** 用户773444
+**最后更新：** 2026-05-14
+**维护者：** CN 分支
 
 ---
 
@@ -856,5 +974,5 @@ graphify-out/
 
 ---
 
-**最后更新：** 2026-04-16
-**维护者：** 用户773444
+**最后更新：** 2026-05-14
+**维护者：** CN 分支

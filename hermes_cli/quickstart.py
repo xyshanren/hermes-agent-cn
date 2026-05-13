@@ -494,6 +494,86 @@ def _prompt_install_local_model() -> int:
 
 # ── 主入口 ──
 
+# ── MemPalace 知识库检测 ──
+
+def _detect_mempalace() -> Optional[dict]:
+    """检测 MemPalace 是否可用，返回配置信息。"""
+    result: dict = {"installed": False, "initialized": False, "palace_path": ""}
+
+    # 1. 检查 pip 包是否安装
+    try:
+        import importlib
+        importlib.import_module("mempalace")
+        result["installed"] = True
+    except ImportError:
+        return None
+
+    # 2. 检查宫殿是否已初始化
+    try:
+        from hermes_cli.config import get_hermes_home
+        hermes_home = get_hermes_home()
+        # 可能的宫殿位置：项目根目录 > ~/.mempalace/palace
+        palace_dirs = [
+            os.path.join(hermes_home, "..", "mempalace", "palace"),
+            os.path.expanduser("~/.mempalace/palace"),
+        ]
+        for d in palace_dirs:
+            if os.path.isdir(d):
+                result["initialized"] = True
+                result["palace_path"] = d
+                break
+    except Exception:
+        pass
+
+    # 3. 检查 MCP 是否已配置
+    result["mcp_configured"] = False
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        mcp = cfg.get("mcp_servers", {})
+        if isinstance(mcp, dict) and "mempalace" in mcp:
+            result["mcp_configured"] = True
+    except Exception:
+        pass
+
+    return result
+
+
+def _configure_mempalace_mcp() -> bool:
+    """将 MemPalace MCP 服务器配置写入 config.yaml。
+
+    自动检测 Python 路径，优先使用当前运行的解释器。
+    如果 MCP 已配置，跳过不覆盖。
+    """
+    try:
+        from hermes_cli.config import load_config, save_config
+
+        cfg = load_config()
+        mcp = cfg.get("mcp_servers", {})
+        if not isinstance(mcp, dict):
+            mcp = {}
+
+        # 已配置则跳过
+        if "mempalace" in mcp:
+            return True
+
+        python_path = sys.executable
+
+        mcp["mempalace"] = {
+            "command": python_path,
+            "args": ["-m", "mempalace.mcp_server"],
+            "env": {},
+        }
+        cfg["mcp_servers"] = mcp
+        save_config(cfg)
+
+        logger.info("MemPalace MCP 已配置: command=%s", python_path)
+        return True
+    except Exception as e:
+        logger.warning("配置 MemPalace MCP 失败: %s", e)
+        return False
+
+
 def cmd_quickstart(args) -> int:
     """一键快速配置 Hermes-Agent-CN 智能路由。
 
@@ -514,6 +594,7 @@ def cmd_quickstart(args) -> int:
     api_providers = _detect_api_key_providers()
     ollama_info = _detect_ollama()
     has_embedded = _has_embedded_models()
+    mempalace_info = _detect_mempalace()
 
     resource_count = len(api_providers) + (1 if ollama_info else 0) + (1 if has_embedded else 0)
 
@@ -555,6 +636,11 @@ def cmd_quickstart(args) -> int:
         print(f"  {color('✓', Colors.GREEN)} 离线兜底模型: 已安装")
     else:
         print(f"  {color('⚠', Colors.YELLOW)} 离线兜底模型: 未安装")
+
+    if mempalace_info and mempalace_info.get("installed"):
+        mcp_status = "已配置" if mempalace_info.get("mcp_configured") else "待配置"
+        init_status = "已初始化" if mempalace_info.get("initialized") else "未初始化"
+        print(f"  {color('✓', Colors.GREEN)} MemPalace 记忆库: {init_status}（MCP {mcp_status}）")
 
     print()
 
@@ -643,6 +729,14 @@ def cmd_quickstart(args) -> int:
     # 然后写入完整的智能路由（覆盖上面写入的 model 配置）
     _write_smart_routing(primary_id, primary_model, fallback_chain, api_providers, ollama_info)
 
+    # MemPalace MCP 自动配置（如果已安装且未配置）
+    if mempalace_info and mempalace_info.get("installed"):
+        if not mempalace_info.get("mcp_configured"):
+            if _configure_mempalace_mcp():
+                print(f"  {color('✓', Colors.GREEN)} MemPalace MCP 已自动配置")
+            else:
+                print(f"  {color('⚠', Colors.YELLOW)} MemPalace MCP 配置失败，请手动设置")
+
     # ── 显示结果 ──
     print()
     print(f"{'=' * 60}")
@@ -657,6 +751,12 @@ def cmd_quickstart(args) -> int:
 
     primary_name = _provider_names.get(primary_id, primary_id)
     print(f"  🔵 主力推理: {primary_name} — {primary_model}")
+
+    # MemPalace 知识库状态
+    if mempalace_info and mempalace_info.get("installed"):
+        mcp_ok = mempalace_info.get("mcp_configured")
+        status_text = "已就绪" if mcp_ok else "已启用（下次重启生效）"
+        print(f"  🧠 知识库: MemPalace — {status_text}")
 
     # auxiliary.vision 显示
     vision_model = (ollama_info or {}).get("vision_model")
