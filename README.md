@@ -9,7 +9,7 @@
 # Hermes Agent ☤ 中文版
 
 <p align="center">
-  <a href="https://img.shields.io/badge/版本-v0.12.0--cn.1-blue?style=for-the-badge"><img src="https://img.shields.io/badge/版本-v0.12.0--cn.1-blue?style=for-the-badge" alt="版本"></a>
+  <a href="https://img.shields.io/badge/版本-v0.12.0--cn.3-blue?style=for-the-badge"><img src="https://img.shields.io/badge/版本-v0.12.0--cn.3-blue?style=for-the-badge" alt="版本"></a>
   <a href="https://img.shields.io/badge/上游-NousResearch%20v0.12.0%2B-FFD700?style=for-the-badge"><img src="https://img.shields.io/badge/上游-NousResearch%20v0.12.0%2B-FFD700?style=for-the-badge" alt="上游"></a>
   <a href="https://img.shields.io/badge/状态-稳定-green?style=for-the-badge"><img src="https://img.shields.io/badge/状态-稳定-green?style=for-the-badge" alt="状态"></a>
   <a href="./CHANGELOG_CN.md"><img src="https://img.shields.io/badge/更新日志-查看-orange?style=for-the-badge" alt="更新日志"></a>
@@ -410,7 +410,7 @@ hermes local-models test qwen-0.5b
 
 ```bash
 # 当前版本
-v0.12.0-cn.1（2026-05-03）
+v0.12.0-cn.3（2026-05-13）
 
 # 上游同步
 NousResearch v0.12.0+（已合并 972 个上游 commit）
