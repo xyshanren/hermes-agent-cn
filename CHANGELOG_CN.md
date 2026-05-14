@@ -103,24 +103,36 @@ mcp_servers:
 - 通过 `skills.firewall.enabled` 配置开关（默认启用）
 - 清理残留：拦截时删除已创建的空目录
 
-在 `hermes doctor` 中新增"◆ 路由配置"段：
-- 检查 `model_routing` 配置存在性
-- 检查 default/vision/reasoning 三个路由项
-- 未配置时提示"运行 quickstart 自动生成"
-- 正确包裹 `_section_reset`/`_section_summary`
+#### ✅ 与 skills_guard.py 的关键区别
 
-#### ❌ Phase 3 关闭
+| | skills_guard.py | semantic_firewall.py |
+|---|---|---|
+| 时机 | 写入**后**扫描，失败则回滚 | 写入**前**拦截 |
+| 范围 | 外部 hub 安装的技能 | agent 创建/修改的所有技能 |
+| 方法 | 正则 + 信任级别 (builtin/trusted/community) | 正则 + LLM 语义分析 |
+| 来源感知 | community/hub 源 | ingested/user/curator 来源 |
+| 默认状态 | 外部技能默认开启 | **全部**技能都过（可关闭） |
+| LLM 分析 | ❌ | ✅ 核心防御层 |
 
-经评估，Phase 3（运行时动态切换）不需要实施：
-- **3a `/model` 运行时切换**：与 Phase 9 设计决策冲突（弱化为只读），
-  且与 Phase 2 自动路由功能冗余
-- **3b 上下文管理**：当前所有路由模型在同一 Ollama provider 下，
-  使用相同 API mode（chat_completions），无需重建上下文
+#### ✅ 关键安全属性
+
+- **Fail-closed 设计**：LLM 不可用时默认拒绝（不信任）
+- **来源敏感置信度**：ingested 来源需要 ≥0.85 置信度，其他只需 ≥0.80
+- **写入前拦截**：写入磁盘前验证，不是写入后扫描再回滚
+- **隔离不删除**：可疑技能进入隔离区，不自动激活，留待人工审核
+
+#### ✅ 文件清单
+
+| 文件 | 类型 | 行数 |
+|------|------|------|
+| `agent/semantic_firewall.py` | 新建 | ~520 |
+| `tools/skill_manager_tool.py` | 修改 | +108 |
 
 #### Commit
 ```
-5bfad5f82 feat: Phase 2 收尾 + D5 路由可视化
-3 files changed, 91 insertions(+)
+d57f5be5b feat(cn): 语义防火墙 — 防护间接提示词注入和持久化记忆投毒
+aec4ff134 docs: CHANGELOG_CN.md — 语义防火墙条目
+2 files changed, 1114 insertions(+)
 ```
 
 ---
