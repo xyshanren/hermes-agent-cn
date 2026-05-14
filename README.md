@@ -9,7 +9,7 @@
 # Hermes Agent ☤ 中文版
 
 <p align="center">
-  <a href="https://img.shields.io/badge/版本-v0.12.0--cn.3-blue?style=for-the-badge"><img src="https://img.shields.io/badge/版本-v0.12.0--cn.3-blue?style=for-the-badge" alt="版本"></a>
+  <a href="https://img.shields.io/badge/版本-v0.12.0--cn.5-blue?style=for-the-badge"><img src="https://img.shields.io/badge/版本-v0.12.0--cn.5-blue?style=for-the-badge" alt="版本"></a>
   <a href="https://img.shields.io/badge/上游-NousResearch%20v0.12.0%2B-FFD700?style=for-the-badge"><img src="https://img.shields.io/badge/上游-NousResearch%20v0.12.0%2B-FFD700?style=for-the-badge" alt="上游"></a>
   <a href="https://img.shields.io/badge/状态-稳定-green?style=for-the-badge"><img src="https://img.shields.io/badge/状态-稳定-green?style=for-the-badge" alt="状态"></a>
   <a href="./CHANGELOG_CN.md"><img src="https://img.shields.io/badge/更新日志-查看-orange?style=for-the-badge" alt="更新日志"></a>
@@ -78,6 +78,9 @@ CN 版在上游 Hermes 基础上增加了以下能力。完整设计说明见 [A
 | **Skill 分层** | 内置/常用/归档三级，不常用 skill 不占上下文 | `hermes skills tier show` |
 | **Ollama 多模型** | 自动检测模型类型（文本/视觉/推理），智能分配 | `hermes quickstart` |
 | **Doctor 诊断** | 中文输出，支持 Ollama 状态 + Fallback 链检测 | `hermes doctor` |
+| **语义防火墙** | 5 层纵深防御，防护提示词注入和持久化记忆投毒 | `hermes firewall review` |
+| **路由可视化** | 查看当前路由模式、Ollama/云端/嵌入式模型就绪状态 | `hermes route-status` |
+| **知识库集成** | MemPalace 结构化记忆 + graphify 代码知识图谱，自动配置 MCP | `hermes quickstart` |
 
 ### 精简的 Provider 生态
 
@@ -142,6 +145,8 @@ hermes curator run --dry-run # 预览审查结果
 | `hermes model` | 选择模型和 Provider |
 | `hermes doctor` | 环境诊断 |
 | `hermes local-models setup` | **[CN]** 安装本地模型 |
+| `hermes route-status` | **[CN]** 查看模型路由状态 |
+| `hermes firewall review` | **[CN]** 审核防火墙隔离的技能 |
 
 ### 进阶命令
 
@@ -163,7 +168,7 @@ hermes curator run --dry-run # 预览审查结果
 
 ```bash
 # 当前版本
-v0.12.0-cn.3（2026-05-13）
+v0.12.0-cn.5（2026-05-14）
 
 # 上游同步
 NousResearch v0.12.0+（已合并 972 个上游 commit）

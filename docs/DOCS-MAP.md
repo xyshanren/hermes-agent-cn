@@ -146,13 +146,13 @@
 
 ### 📄 PROPOSAL-multi-model-routing.md
 
-> **状态**: Phase 1 ✅ 已实现，Phase 2/3 ⏳ 待实现  
+> **状态**: Phase 1+2 ✅ 已实现，Phase 3 ⏳ 待实现  
 > **三种方案**: A(推荐) / B(轻量) / C(最强)
 
 | Phase | 内容 | 复杂度 | 状态 |
 |-------|------|--------|------|
 | 1 | quickstart 多模型自动检测 + auxiliary 配置 | 低 | ✅ 已实现 |
-| 2 | model_routing 配置 + 运行时模型选择 | 中 | ⏳ 待实现 |
+| 2 | model_routing 配置 + 运行时模型选择 | 中 | ✅ 已实现（v0.12.0-cn.4） |
 | 3 | 运行时动态模型切换 + 上下文管理 | 高 | ⏳ 待实现 |
 
 ---
@@ -177,8 +177,9 @@
 ### 📌 中期（与 Phase 2/3 同步）
 
 6. ✅ ~~创建 `docs/API.md` — API 参考文档（CLI + 配置 + Provider）~~（已完成）
-7. [ ] 评估实施 PROPOSAL-doctor-improvements.md（建议从 D3/D1 开始）
-8. [ ] 规划 PROPOSAL-multi-model-routing.md Phase 2
+7. ✅ ~~评估实施 PROPOSAL-doctor-improvements.md~~（D3 已完成，D2 待实施）
+8. ✅ ~~规划 PROPOSAL-multi-model-routing.md Phase 2~~（v0.12.0-cn.4 已实现）
+9. ✅ 语义防火墙 — 5 层纵深防御（v0.12.0-cn.5 已实现）
 
 ---
 
