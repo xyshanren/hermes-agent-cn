@@ -1113,6 +1113,7 @@ class AIAgent:
         checkpoint_max_total_size_mb: int = 500,
         checkpoint_max_file_size_mb: int = 10,
         pass_session_id: bool = False,
+        disable_model_routing: bool = False,
     ):
         """
         Initialize the AI Agent.
@@ -1162,6 +1163,7 @@ class AIAgent:
         _install_safe_stdio()
 
         self.model = model
+        self._disable_model_routing = disable_model_routing
         self._routing_applied = False  # model_routing 每 turn 只应用一次
         self.max_iterations = max_iterations
         # Shared iteration budget — parent creates, children inherit.
@@ -8884,9 +8886,12 @@ class AIAgent:
             return
         self._routing_applied = True
 
-        # Skip routing when fallback is active — routing rules use primary
-        # provider model names that may not be valid for the current
-        # fallback provider (e.g. Ollama model names sent to DeepSeek API).
+        # Skip routing when:
+        # 1. Disabled by caller (e.g. CLI fallback from Ollama to DeepSeek)
+        # 2. Runtime fallback is active (routing rules use primary provider
+        #    model names that may not be valid for the fallback provider).
+        if getattr(self, "_disable_model_routing", False):
+            return
         if getattr(self, "_fallback_activated", False):
             return
 

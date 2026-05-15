@@ -3740,6 +3740,7 @@ class HermesCLI:
                         _cprint(f"⚠️  Primary auth failed — switching to fallback: {_fb_provider} / {_fb_model}")
                         self.requested_provider = _fb_provider
                         self.model = _fb_model
+                        self._fallback_applied = True
                         _primary_exc = None
                         break
                     except Exception:
@@ -4025,6 +4026,7 @@ class HermesCLI:
                 pass_session_id=self.pass_session_id,
                 skip_context_files=self.ignore_rules,
                 skip_memory=self.ignore_rules,
+                disable_model_routing=getattr(self, "_fallback_applied", False),
                 tool_progress_callback=self._on_tool_progress,
                 tool_start_callback=self._on_tool_start if self._inline_diffs_enabled else None,
                 tool_complete_callback=self._on_tool_complete if self._inline_diffs_enabled else None,
