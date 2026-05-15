@@ -466,6 +466,10 @@ def _write_smart_routing(
             model_cfg = {}
         model_cfg["default"] = primary_model
         model_cfg["provider"] = primary_provider_id
+        # 恢复 Ollama 的 base_url — 云 Provider 配置（如 deepseek）
+        # 会覆写 model.base_url，导致后续 provider=custom 时读取到错误 URL
+        if primary_provider_id == "ollama" and not model_cfg.get("base_url", "").startswith("http://localhost"):
+            model_cfg["base_url"] = "http://localhost:11434/v1"
         cfg["model"] = model_cfg
 
         # 写入 fallback 链
