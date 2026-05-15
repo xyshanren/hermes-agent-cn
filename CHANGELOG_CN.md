@@ -1,4 +1,4 @@
-﻿# Hermes Agent 中文版 变更记录
+# Hermes Agent 中文版 变更记录
 
 本文档记录 Hermes Agent 中文版的更新历史。
 
@@ -6,7 +6,12 @@
 
 ---
 
-## v0.12.0-cn.7 (2026-05-15)
+### 根因更深层修复
+
+- **runtime_provider.py**: 在 OpenRouter fallback 前增加 `provider=="custom"` 处理，读取 `model.base_url`，返回 `api_key="no-key-required"`
+- **cli.py**: 保留 `elif resolved_provider=="custom"` 安全网
+- **UTF-8 BOM 清理**: 修复所有修改文件的 BOM
+
 
 ### Bug 修复
 
