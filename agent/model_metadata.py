@@ -1251,8 +1251,8 @@ def get_model_context_length(
     0. Explicit config override (model.context_length or custom_providers per-model)
     1. Persistent cache (previously discovered via probing)
     1b. AWS Bedrock static table (must precede custom-endpoint probe)
-    2. Active endpoint metadata (/models for explicit custom endpoints)
-    3. Local server query (for local endpoints)
+    2. Local server query (Ollama, LM Studio, etc.)
+    3. Active endpoint metadata (/models for explicit custom endpoints)
     4. Anthropic /v1/models API (API-key users only, not OAuth)
     5. OpenRouter live API metadata
     6. Nous suffix-match via OpenRouter cache
@@ -1329,7 +1329,17 @@ def get_model_context_length(
         except ImportError:
             pass  # boto3 not installed — fall through to generic resolution
 
-    # 2. Active endpoint metadata for truly custom/unknown endpoints.
+    # 2. Local server query — runs BEFORE custom-endpoint probe so that
+    # Ollama/LM Studio context is detected even when base_url is a
+    # well-known provider URL (e.g. http://localhost:11434 for Ollama).
+    if is_local_endpoint(base_url):
+        local_ctx = _query_local_context_length(model, base_url, api_key=api_key)
+        if local_ctx and local_ctx > 0:
+            if provider != "lmstudio":
+                save_context_length(model, base_url, local_ctx)
+            return local_ctx
+
+    # 3. Active endpoint metadata for truly custom/unknown endpoints.
     # Known providers (Copilot, OpenAI, Anthropic, etc.) skip this — their
     # /models endpoint may report a provider-imposed limit (e.g. Copilot
     # returns 128k) instead of the model's full context (400k).  models.dev
@@ -1338,21 +1348,14 @@ def get_model_context_length(
         context_length = _resolve_endpoint_context_length(model, base_url, api_key=api_key)
         if context_length is not None:
             return context_length
-        if not _is_known_provider_base_url(base_url):
-            # 3. Try querying local server directly
-            if is_local_endpoint(base_url):
-                local_ctx = _query_local_context_length(model, base_url, api_key=api_key)
-                if local_ctx and local_ctx > 0:
-                    if provider != "lmstudio":
-                        save_context_length(model, base_url, local_ctx)
-                    return local_ctx
-            logger.info(
-                "Could not detect context length for model %r at %s — "
-                "defaulting to %s tokens (probe-down). Set model.context_length "
-                "in config.yaml to override.",
-                model, base_url, f"{DEFAULT_FALLBACK_CONTEXT:,}",
-            )
-            return DEFAULT_FALLBACK_CONTEXT
+        # Local endpoint already handled above (step 2).
+        logger.info(
+            "Could not detect context length for model %r at %s — "
+            "defaulting to %s tokens (probe-down). Set model.context_length "
+            "in config.yaml to override.",
+            model, base_url, f"{DEFAULT_FALLBACK_CONTEXT:,}",
+        )
+        return DEFAULT_FALLBACK_CONTEXT
 
     # 4. Anthropic /v1/models API (only for regular API keys, not OAuth)
     if provider == "anthropic" or (
