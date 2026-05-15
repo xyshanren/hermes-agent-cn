@@ -942,6 +942,11 @@ def cmd_quickstart(args) -> int:
     if vision_model:
         print(f"  👁 视觉分析: Ollama（本地） — {vision_model} (auxiliary)")
 
+    # coding 模型显示
+    coding_models = [m for m in (ollama_info or {}).get("classified_models", []) if m.get("type") == "coding"]
+    if coding_models:
+        print(f"  💻 代码编程: Ollama（本地） — {coding_models[0]['name']} (coding)"
+
     # fallback 链
     if fallback_chain:
         print(f"  📋 回退路由:")

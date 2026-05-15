@@ -1204,11 +1204,17 @@ def resolve_provider(
     if explicit_api_key or explicit_base_url:
         return "openrouter"
 
-    # Check auth store for an active OAuth provider
+    # Check auth store for an active provider
     try:
         auth_store = _load_auth_store()
         active = auth_store.get("active_provider")
+        if active:
+            # Apply alias mapping (e.g. ollama → custom)
+            active = _PROVIDER_ALIASES.get(active, active)
         if active and active in PROVIDER_REGISTRY:
+            # Custom providers (Ollama/LM Studio) don't require OAuth or API key
+            if active == "custom":
+                return active
             status = get_auth_status(active)
             if status.get("logged_in"):
                 return active
