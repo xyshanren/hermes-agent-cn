@@ -1329,6 +1329,31 @@ def resolve_runtime_provider(
             "requested_provider": requested_provider,
         }
 
+
+    # Handle "custom" / Ollama provider — no API key, uses local base_url.
+    if provider == "custom":
+        _cfg = load_config().get("model", {}) or {}
+        cfg_base = ""
+        if isinstance(_cfg, dict):
+            cfg_p = str(_cfg.get("provider") or "").strip().lower()
+            if cfg_p in ("custom", "ollama"):
+                cfg_base = (_cfg.get("base_url") or "").strip().rstrip("/")
+        base_url = explicit_base_url or cfg_base
+        if not base_url:
+            raise AuthError(
+                "No base_url for custom provider. Set model.base_url in config.yaml "
+                "or pass --base-url.",
+                code="no_custom_base_url",
+            )
+        return {
+            "provider": "custom",
+            "api_mode": "chat_completions",
+            "base_url": base_url,
+            "api_key": "no-key-required",
+            "source": "config:model.base_url",
+            "requested_provider": requested_provider,
+        }
+
     runtime = _resolve_openrouter_runtime(
         requested_provider=requested_provider,
         explicit_api_key=explicit_api_key,

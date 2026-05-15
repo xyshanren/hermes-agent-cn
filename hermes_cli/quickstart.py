@@ -1,4 +1,4 @@
-﻿"""
+"""
 Hermes-Agent-CN 快捷启动 — 智能路由配置。
 
 快速检测所有可用资源（API Key + Ollama + 本地离线模型），
