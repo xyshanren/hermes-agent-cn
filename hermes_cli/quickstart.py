@@ -81,18 +81,125 @@ _CN_PROVIDER_IDS = {p["id"] for p in _PROVIDER_CHECKS}
 _VISION_KEYWORDS = ("vl", "vision", "llava", "cogvlm", "minicpm-v")
 _REASONING_KEYWORDS = ("r1", "reasoning", "think", "qwq")
 
+# L2 层：无需 API 调用的已知视觉家族检测
+# 部分模型（如 qwen3.5）是原生多模态，名称不含 "vl" 但支持视觉
+_VISION_FAMILIES = (
+    "qwen3",
+    "qwen3.5",
+    "yi-vl", "internvl2", "internvl",
+    "pixtral", "bakllava",
+    "moondream", "llama-v", "llava-llama",
+)
+# 匹配家族但实际是编码专用模型的排除关键词
+_VISION_FAMILY_EXCLUSIONS = ("coder", "code-", "instruct-code")
+
+_OLLAMA_MODEL_INFO_CACHE = {}
+
+
+def _get_ollama_model_info(name: str) -> Optional[dict]:
+    """Query Ollama /api/show for model details, with in-memory cache.
+
+    Returns the full /api/show response dict, or None on failure.
+    Results are cached so repeated calls for the same model are free.
+    """
+    if name in _OLLAMA_MODEL_INFO_CACHE:
+        return _OLLAMA_MODEL_INFO_CACHE[name]
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            "http://localhost:11434/api/show",
+            data=json.dumps({"name": name}).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=5)
+        if resp.status == 200:
+            info = json.loads(resp.read().decode())
+            _OLLAMA_MODEL_INFO_CACHE[name] = info
+            return info
+    except Exception:
+        pass
+    _OLLAMA_MODEL_INFO_CACHE[name] = None
+    return None
+
+
+def _get_param_size(name: str) -> float:
+    """Get parameter size as float (e.g. "7B" -> 7.0, "32B" -> 32.0).
+
+    Falls back to parsing the model tag suffix (e.g. "qwen3:8b" -> 8.0)
+    if /api/show is unavailable.
+    """
+    import re
+
+    info = _get_ollama_model_info(name)
+    if info:
+        details = info.get("details", {})
+        size_str = details.get("parameter_size", "")
+        if size_str:
+            match = re.match(r"([\d.]+)\s*[Bb]", str(size_str).strip())
+            if match:
+                return float(match.group(1))
+
+    # Fallback: parse from tag suffix (e.g. "qwen3:8b" → 8)
+    match = re.search(r":(\d+\.?\d*)\s*[bB]?$", name)
+    if match:
+        return float(match.group(1))
+    return 0.0
+
+
+def _check_vision_template(name: str) -> bool:
+    """Check if model template contains vision-related markers via /api/show.
+
+    Vision model chat templates contain image handling logic.  This is the
+    ground-truth check (L3 layer) when name heuristics fail.
+    """
+    info = _get_ollama_model_info(name)
+    if not info:
+        return False
+    template = info.get("template", "")
+    if not template:
+        return False
+    # Vision models' chat templates handle image_data, image_url, or .Images
+    template_lower = template.lower()
+    vision_markers = ("image_url", "image_data", "images", "vision")
+    return any(m in template_lower for m in vision_markers)
+
 
 def _classify_ollama_model(name: str) -> str:
-    """根据模型名称启发式分类。
+    """Three-layer classification of Ollama models.
+
+    L1: Name keyword matching (fast, no API)
+        - Vision: vl, vision, llava, cogvlm, minicpm-v
+        - Reasoning: r1, reasoning, think, qwq
+    L2: Known family matching (fast, no API)
+        - Vision families: qwen3, qwen3.5, yi-vl, internvl2, etc.
+        - Excludes coding-specialized models (e.g. qwen3-coder)
+    L3: /api/show template inspection (API call, cached)
+        - Checks if chat template handles image content
 
     Returns:
         "vision" | "reasoning" | "text"
     """
     name_lower = name.lower().split(":")[0]  # 去掉标签（如 :8b）
+
+    # L1: 关键词匹配
     if any(kw in name_lower for kw in _VISION_KEYWORDS):
         return "vision"
     if any(kw in name_lower for kw in _REASONING_KEYWORDS):
         return "reasoning"
+
+    # L2: 已知视觉家族检测（排除编码专用模型）
+    for family in _VISION_FAMILIES:
+        if family in name_lower:
+            if not any(excl in name_lower for excl in _VISION_FAMILY_EXCLUSIONS):
+                return "vision"
+            # 被排除（编码专用模型），继续检查其他家族
+
+    # L3: 模板探查（仅对 L1+L2 未分类的模型）
+    if _check_vision_template(name):
+        return "vision"
+
     return "text"
 
 
@@ -100,25 +207,36 @@ def _pick_ollama_primary(models: list[str]) -> str:
     """从 Ollama 多模型中选择主力模型。
 
     优先级：text/reasoning > vision（视觉模型不适合做通用主力）。
-    同类型中选最后一个（通常是用户最新拉取的）。
+    同类型中按参数规模选最大（回退到原有最后匹配）。
     """
     if not models:
         return "llama3.2"
 
     classified = [(name, _classify_ollama_model(name)) for name in models]
     # 优先 text/reasoning
-    non_vision = [name for name, t in classified if t != "vision"]
+    non_vision = [(name, t) for name, t in classified if t != "vision"]
+
     if non_vision:
-        return non_vision[-1]  # 最后一个（通常最大/最新）
-    return models[-1]  # 全是视觉模型时取最后一个
+        # 同类型中选参数规模最大的
+        return max(non_vision, key=lambda x: _get_param_size(x[0]))[0]
+
+    # 全是视觉模型时选参数规模最大的
+    return max(models, key=_get_param_size)
 
 
 def _find_ollama_vision_model(models: list[str]) -> Optional[str]:
-    """找到 Ollama 中的视觉模型。有多个时取第一个。"""
-    for name in models:
-        if _classify_ollama_model(name) == "vision":
-            return name
-    return None
+    """找到 Ollama 中的视觉模型。有多个时选参数规模最大的。"""
+    visions = [
+        (name, _get_param_size(name)) for name in models
+        if _classify_ollama_model(name) == "vision"
+    ]
+
+    if not visions:
+        return None
+
+    # 按参数规模降序取最大
+    visions.sort(key=lambda x: x[1], reverse=True)
+    return visions[0][0]
 
 
 # ── 资源检测函数 ──
