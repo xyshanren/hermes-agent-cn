@@ -482,44 +482,92 @@ def _write_smart_routing(
                         "api_key": "",
                     }
 
-        # Phase 2: 自动生成 model_routing 配置（多模型时）
+        # Phase 2-3: 自动生成 model_routing 规则（多模型时）
         # 条件：Ollama 有 ≥2 个模型，且有视觉模型 + 文本模型
         if ollama_info and len(ollama_info.get("models", [])) >= 2:
             classified = ollama_info.get("classified_models", [])
             vision_models = [m for m in classified if m.get("type") == "vision"]
             text_models = [m for m in classified if m.get("type") != "vision"]
+            reasoning_models = [m for m in classified if m.get("type") == "reasoning"]
+            coding_models = [
+                m for m in classified
+                if any(kw in m.get("name", "").lower() for kw in ("coder", "code-"))
+            ]
 
-            if vision_models and text_models:
-                routing = cfg.get("model_routing", {})
-                if not isinstance(routing, dict):
-                    routing = {}
+            routing = cfg.get("model_routing", {})
+            if not isinstance(routing, dict):
+                routing = {}
 
-                # default：主力文本模型
-                if "default" not in routing:
-                    routing["default"] = {
-                        "model": primary_model,
-                    }
-
-                # vision：第一个视觉模型
-                if "vision" not in routing:
-                    routing["vision"] = {
-                        "model": vision_models[0]["name"],
-                    }
-
-                # reasoning：有推理模型时优先，否则用主力
-                reasoning_models = [m for m in classified if m.get("type") == "reasoning"]
-                if "reasoning" not in routing:
-                    routing["reasoning"] = {
-                        "model": reasoning_models[0]["name"] if reasoning_models else primary_model,
-                    }
-
+            # 已有 rules 格式 → 用户自定义，跳过自动生成
+            existing_rules = routing.get("rules")
+            if existing_rules and isinstance(existing_rules, list):
                 cfg["model_routing"] = routing
-                logger.info(
-                    "自动生成 model_routing 配置: default=%s, vision=%s, reasoning=%s",
-                    primary_model,
-                    vision_models[0]["name"],
-                    routing["reasoning"]["model"],
-                )
+                save_config(cfg)
+                return True
+
+            rules = []
+
+            # vision 规则
+            if vision_models:
+                rules.append({
+                    "name": "vision",
+                    "match": {"has_image": True},
+                    "model": vision_models[0]["name"],
+                })
+
+            # reasoning 规则
+            rules.append({
+                "name": "reasoning",
+                "match": {
+                    "keywords": ["分析", "推理", "思考", "证明"],
+                },
+                "model": reasoning_models[0]["name"] if reasoning_models else primary_model,
+            })
+
+            # coding 规则（阶段 2：有编码专用模型时自动生成）
+            if coding_models:
+                rules.append({
+                    "name": "coding",
+                    "match": {
+                        "keywords": [
+                            "写代码", "函数", "class", "debug",
+                            "实现一个", "编程", "refactor", "coding",
+                        ],
+                        "threshold": 1,
+                    },
+                    "model": coding_models[0]["name"],
+                })
+
+            # short_chat 规则（阶段 3：有小参数量模型时自动生成）
+            small_models = [
+                m for m in text_models
+                if _get_param_size(m["name"]) <= 8.0
+                and m["name"] != primary_model
+            ]
+            if small_models:
+                rules.append({
+                    "name": "short_chat",
+                    "match": {
+                        "max_length": 80,
+                        "exclude_keywords": ["bug", "报错", "crash", "fix", "error", "分析"],
+                    },
+                    "model": small_models[0]["name"],
+                })
+
+            # default 规则
+            rules.append({
+                "name": "default",
+                "model": primary_model,
+            })
+
+            routing["rules"] = rules
+            cfg["model_routing"] = routing
+            logger.info(
+                "自动生成 model_routing 规则: %d 条 (vision/reasoning%s%s/default)",
+                len(rules),
+                "/coding" if coding_models else "",
+                "/short_chat" if small_models else "",
+            )
 
         save_config(cfg)
 

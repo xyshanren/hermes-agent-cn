@@ -8809,26 +8809,76 @@ class AIAgent:
                     content[-1]["cache_control"] = {"type": "ephemeral"}
                 break
 
+    @staticmethod
+    def _match_rule(match: dict, has_image: bool, text_lower: str, text_length: int) -> bool:
+        """Check if a routing rule's match conditions are met.
+
+        Returns True when ALL specified conditions are satisfied.
+        """
+        # has_image condition
+        if "has_image" in match:
+            if bool(match["has_image"]) != has_image:
+                return False
+
+        # keywords condition (any keyword triggers by default)
+        keywords = match.get("keywords", [])
+        if keywords:
+            threshold = int(match.get("threshold", 1))
+            matched = sum(1 for kw in keywords if kw.lower() in text_lower)
+            if matched < threshold:
+                return False
+
+        # max_length condition (message length in chars)
+        max_len = match.get("max_length")
+        if max_len is not None:
+            if text_length > int(max_len):
+                return False
+
+        # exclude_keywords condition (any match disqualifies)
+        excl = match.get("exclude_keywords", [])
+        if excl and any(kw.lower() in text_lower for kw in excl):
+            return False
+
+        return True
+
     def _apply_model_routing(self, api_messages: list) -> None:
-        """根据 model_routing 配置，按消息内容选择模型（每 turn 只执行一次）。
+        """Apply model routing rules based on message content (once per turn).
 
-        任务检测策略（按优先级）：
-        1. 消息包含图片附件 → model_routing.vision
-        2. 消息包含视觉关键词 → model_routing.vision
-        3. 消息包含推理关键词 → model_routing.reasoning
-        4. 默认 → model_routing.default（沿用 self.model）
+        Supports two config formats — rule-based (new) and legacy (old):
 
-        配置示例 (config.yaml):
-            model_routing:
-              default:
-                provider: "ollama"
-                model: "qwen3:32b"
-              vision:
-                provider: "ollama"
-                model: "qwen3-vl:8b"
-              reasoning:
-                provider: "ollama"
-                model: "qwen3:32b"
+        1. Rule-based (model_routing.rules):
+               rules:
+                 - name: vision
+                   match:
+                     has_image: true
+                   model: "qwen3-vl:8b"
+                 - name: reasoning
+                   match:
+                     keywords: ["分析", "推理", "思考", "证明"]
+                   model: "deepseek-r1"
+                 - name: coding
+                   match:
+                     keywords: ["写代码", "函数", "class", "实现一个"]
+                     threshold: 2
+                   model: "deepseek-coder"
+                 - name: short_chat
+                   match:
+                     max_length: 80
+                     exclude_keywords: ["bug", "报错", "crash"]
+                   model: "qwen3:4b"
+                 - name: default
+                   model: "qwen3:32b"
+
+        2. Legacy (model_routing.vision / .reasoning / .default):
+               vision:
+                 model: "qwen3-vl:8b"
+               reasoning:
+                 model: "deepseek-r1"
+               default:
+                 model: "qwen3:32b"
+
+        Rules are checked in list order; first match wins.  A rule without
+        match conditions acts as the final default.
         """
         if getattr(self, "_routing_applied", False):
             return
@@ -8844,69 +8894,115 @@ class AIAgent:
         if not route_config:
             return
 
-        # 查找最后一条用户消息
+        # —— Extract user message and image flag ——
+        user_text = ""
+        has_image = False
         for msg in reversed(api_messages):
             if msg.get("role") != "user":
                 continue
 
             content = msg.get("content", "")
 
-            # 检测图片内容（multimodal content）
             if isinstance(content, list):
-                has_image = False
                 text_parts = []
                 for part in content:
                     if isinstance(part, dict) and "image_url" in part:
                         has_image = True
                     elif isinstance(part, dict) and part.get("type") == "text":
                         text_parts.append(part.get("text", ""))
-                if has_image:
-                    vision_cfg = route_config.get("vision", {})
-                    if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
-                        logger.debug(
-                            "model_routing: 检测到图片附件 → vision model: %s",
-                            vision_cfg["model"],
-                        )
-                        self.model = vision_cfg["model"]
-                        return
-                content = " ".join(text_parts)
-
-            text_lower = (content or "").lower()
-
-            # 视觉关键词检测（乐观匹配，只匹配明确信号）
-            _vision_kw = ["看图", "图片", "截图", "识别图中", "这张图"]
-            if any(kw in text_lower for kw in _vision_kw):
-                vision_cfg = route_config.get("vision", {})
-                if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
-                    logger.debug(
-                        "model_routing: 视觉关键词匹配 → vision model: %s",
-                        vision_cfg["model"],
-                    )
-                    self.model = vision_cfg["model"]
-                    return
-
-            # 推理关键词检测
-            _reasoning_kw = ["分析", "推理", "证明", "思考"]
-            if any(kw in text_lower for kw in _reasoning_kw):
-                reasoning_cfg = route_config.get("reasoning", {})
-                if isinstance(reasoning_cfg, dict) and reasoning_cfg.get("model"):
-                    logger.debug(
-                        "model_routing: 推理关键词匹配 → reasoning model: %s",
-                        reasoning_cfg["model"],
-                    )
-                    self.model = reasoning_cfg["model"]
-                    return
-
-            # 默认模型（从路由配置读取）
-            default_cfg = route_config.get("default", {})
-            if isinstance(default_cfg, dict) and default_cfg.get("model"):
-                logger.debug(
-                    "model_routing: 使用默认路由模型: %s",
-                    default_cfg["model"],
-                )
-                self.model = default_cfg["model"]
+                user_text = " ".join(text_parts)
+            else:
+                user_text = content
 
             break
+
+        text_lower = user_text.lower() if user_text else ""
+        text_length = len(user_text)
+
+        # —— Rule-based routing (new format) ——
+        rules = route_config.get("rules")
+        if rules and isinstance(rules, list):
+            for rule in rules:
+                if not isinstance(rule, dict):
+                    continue
+                model_name = rule.get("model", "")
+                if not model_name:
+                    continue
+
+                match = rule.get("match", {})
+                if not isinstance(match, dict) or not match:
+                    # No match conditions → default rule; handled below
+                    continue
+
+                if self._match_rule(match, has_image, text_lower, text_length):
+                    logger.debug(
+                        "model_routing: rule '%s' matched → %s",
+                        rule.get("name", "(unnamed)"), model_name,
+                    )
+                    self.model = model_name
+                    return
+
+            # No conditional rule matched — look for a default rule (no match)
+            for rule in rules:
+                if not isinstance(rule, dict):
+                    continue
+                model_name = rule.get("model", "")
+                if not model_name:
+                    continue
+                match = rule.get("match", {})
+                if not match or not isinstance(match, dict):
+                    logger.debug(
+                        "model_routing: default rule '%s' → %s",
+                        rule.get("name", "(unnamed)"), model_name,
+                    )
+                    self.model = model_name
+                    return
+
+            return
+
+        # —— Legacy format (vision / reasoning / default keys) ——
+        if has_image:
+            vision_cfg = route_config.get("vision", {})
+            if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
+                logger.debug(
+                    "model_routing: 检测到图片附件 → vision model: %s",
+                    vision_cfg["model"],
+                )
+                self.model = vision_cfg["model"]
+                return
+
+        # Vision keywords (legacy)
+        _vision_kw = ["看图", "图片", "截图", "识别图中", "这张图"]
+        if any(kw in text_lower for kw in _vision_kw):
+            vision_cfg = route_config.get("vision", {})
+            if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
+                logger.debug(
+                    "model_routing: 视觉关键词匹配 → vision model: %s",
+                    vision_cfg["model"],
+                )
+                self.model = vision_cfg["model"]
+                return
+
+        # Reasoning keywords (legacy)
+        _reasoning_kw = ["分析", "推理", "证明", "思考"]
+        if any(kw in text_lower for kw in _reasoning_kw):
+            reasoning_cfg = route_config.get("reasoning", {})
+            if isinstance(reasoning_cfg, dict) and reasoning_cfg.get("model"):
+                logger.debug(
+                    "model_routing: 推理关键词匹配 → reasoning model: %s",
+                    reasoning_cfg["model"],
+                )
+                self.model = reasoning_cfg["model"]
+                return
+
+        # Default (legacy)
+        default_cfg = route_config.get("default", {})
+        if isinstance(default_cfg, dict) and default_cfg.get("model"):
+            logger.debug(
+                "model_routing: 使用默认路由模型: %s",
+                default_cfg["model"],
+            )
+            self.model = default_cfg["model"]
 
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Build the keyword arguments dict for the active API mode."""
