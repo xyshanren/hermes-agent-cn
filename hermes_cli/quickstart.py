@@ -91,7 +91,7 @@ _VISION_FAMILIES = (
     "moondream", "llama-v", "llava-llama",
 )
 # 匹配家族但实际是编码专用模型的排除关键词
-_VISION_FAMILY_EXCLUSIONS = ("coder", "code-", "instruct-code")
+_VISION_FAMILY_EXCLUSIONS = ("coder", "code-", "instruct-code", "-deepseek")
 
 _OLLAMA_MODEL_INFO_CACHE = {}
 
@@ -179,7 +179,7 @@ def _classify_ollama_model(name: str) -> str:
         - Checks if chat template handles image content
 
     Returns:
-        "vision" | "reasoning" | "text"
+        "vision" | "reasoning" | "coding" | "text"
     """
     name_lower = name.lower().split(":")[0]  # 去掉标签（如 :8b）
 
@@ -188,6 +188,9 @@ def _classify_ollama_model(name: str) -> str:
         return "vision"
     if any(kw in name_lower for kw in _REASONING_KEYWORDS):
         return "reasoning"
+    # L1.5: 编码模型检测（名称含 coder/code-/instruct-code）
+    if any(kw in name_lower for kw in ("coder", "code-", "instruct-code")):
+        return "coding"
 
     # L2: 已知视觉家族检测（排除编码专用模型）
     for family in _VISION_FAMILIES:
@@ -213,12 +216,19 @@ def _pick_ollama_primary(models: list[str]) -> str:
         return "llama3.2"
 
     classified = [(name, _classify_ollama_model(name)) for name in models]
-    # 优先 text/reasoning
-    non_vision = [(name, t) for name, t in classified if t != "vision"]
+    # 优先 text/reasoning，排除 vision 和 coding（编码模型不作为通用主力）
+    non_vision_non_coding = [
+        (name, t) for name, t in classified if t not in ("vision", "coding")
+    ]
 
-    if non_vision:
+    if non_vision_non_coding:
         # 同类型中选参数规模最大的
-        return max(non_vision, key=lambda x: _get_param_size(x[0]))[0]
+        return max(non_vision_non_coding, key=lambda x: _get_param_size(x[0]))[0]
+
+    # 退而求其次：有 coding 但无 text/reasoning 时，选 coding 中最大的
+    coding_models = [(name, t) for name, t in classified if t == "coding"]
+    if coding_models:
+        return max(coding_models, key=lambda x: _get_param_size(x[0]))[0]
 
     # 全是视觉模型时选参数规模最大的
     return max(models, key=_get_param_size)
@@ -561,6 +571,10 @@ def _write_smart_routing(
             })
 
             routing["rules"] = rules
+            # 清除旧格式键，避免新旧共存导致配置混乱
+            routing.pop("default", None)
+            routing.pop("vision", None)
+            routing.pop("reasoning", None)
             cfg["model_routing"] = routing
             logger.info(
                 "自动生成 model_routing 规则: %d 条 (vision/reasoning%s%s/default)",
