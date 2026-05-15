@@ -46,6 +46,24 @@
 - 旧格式（`vision`/`reasoning`/`default`）无需修改
 - `rules` 格式优先，无 `rules` 时回退旧格式
 
+### 用户测试反馈修复
+
+#### ✅ quickstart 模型分类修正
+- `_VISION_FAMILY_EXCLUSIONS` 加 `-deepseek`：qwen3.5-9b-deepseek 是 DeepSeek 蒸馏推理模型，非视觉
+- `_classify_ollama_model()` 新增 `coding` 类型检测
+- `_pick_ollama_primary()` 主力选择排除 coding 类型
+- `_write_smart_routing()` 写入 rules 时清除旧格式键（避免新旧共存）
+
+#### ✅ fallback 链 + 规则刷新
+- `_build_fallback_chain()` 排除 coding 模型进入通用回退链
+- `_write_smart_routing()` 删除「已有 rules 就跳过」逻辑，每次 quickstart 都重新生成
+
+#### Commit
+```
+d3717ad0d fix(cn): quickstart 模型分类修复（4项）
+fe2a9d92f fix(cn): fallback链排除coding + rules始终重新生成
+```
+
 ---
 
 ## v0.12.0-cn.5 (2026-05-14)
