@@ -1,15 +1,89 @@
 # 多模型路由方案 — 设计文档
 
-> 状态：Phase 1 已实现 | 日期：2026-05-13
-> 场景：Ollama/LM Studio 部署多个模型时，按任务类型智能路由
+> 状态：Phase 0-3 已实现 | 日期：2026-05-15
+> 版本：v0.12.0-cn.6 | 场景：Ollama/LM Studio 部署多个模型时，按任务类型智能路由
 
 ## 实现进度
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
+| 0 | ✅ 已实现 | Ollama 三层模型分类 + 参数规模感知选型 |
 | 1 | ✅ 已实现 | Ollama 多模型自动检测 + auxiliary.vision 自动配置 |
-| 2 | ⏳ 待实现 | `model_routing` 配置 + 主对话模型选择（`run_agent.py`） |
-| 3 | ⏳ 待实现 | 运行时动态模型切换 + 上下文管理 |
+| 2 | ✅ 已实现 | `model_routing.rules` 规则引擎 + 消息级模型选择（`run_agent.py`） |
+| 3 | ❌ 已关闭 | 运行时动态模型切换：被 Phase 2 自动路由覆盖，无需手动切换 |
+
+### Phase 0 实现详情（v0.12.0-cn.6，commit `58cbe081b`）
+
+**改动文件**：
+- `hermes_cli/quickstart.py` — 三层分类、参数规模解析、智能选型
+
+**三层分类**（`_classify_ollama_model()`）：
+
+| 层级 | 方法 | 说明 |
+|------|------|------|
+| L1 | 名称关键词匹配（已有） | `vl`, `vision`, `llava`, `cogvlm`, `minicpm-v` |
+| L2 | 已知视觉家族检测（新增） | `qwen3`, `qwen3.5`, `yi-vl`, `internvl2` 等，零 API 调用 |
+| L3 | `/api/show` 模板探查（新增） | 检查 chat template 是否包含 `image_url`/`vision` 标记 |
+
+**新增函数**：
+- `_get_ollama_model_info(name)` — 调用 `/api/show`，内存缓存
+- `_get_param_size(name)` — 解析 `parameter_size` 为浮点数（如 `"7B"` → 7.0）
+- `_check_vision_template(name)` — L3 模板探查
+
+**关键行为**：
+- `qwen3.5:9b` → L2 家族匹配识别为 vision（解决漏识别问题）
+- `_find_ollama_vision_model()` / `_pick_ollama_primary()` 选参数规模最大
+- 编码专用模型（`coder`, `code-`）被 `_VISION_FAMILY_EXCLUSIONS` 排除
+
+### Phase 2 实现详情（v0.12.0-cn.6）
+
+**改动文件**：
+- `run_agent.py` — `_match_rule()` + 规则驱动的 `_apply_model_routing()`
+- `hermes_cli/quickstart.py` — `_write_smart_routing()` 生成 rules 格式
+
+**规则引擎**（`_match_rule()`）：
+
+| 匹配条件 | 说明 | 示例 |
+|----------|------|------|
+| `has_image` | 消息是否含图片附件 | `true` / `false` |
+| `keywords` | 关键词列表 + `threshold`（默认 1） | `["写代码", "debug"]` |
+| `max_length` | 最大消息长度（字符） | `80` |
+| `exclude_keywords` | 排除关键词（任一匹配即排除） | `["bug", "报错"]` |
+
+**自动路由规则生成**（`_write_smart_routing()`）：
+- vision: 有视觉模型时自动注入 `{has_image: true}` 规则
+- reasoning: 自动注入推理关键词规则
+- coding: 检测到 `coder`/`code-` 模型时自动注入（8 个关键词）
+- short_chat: 检测到 ≤8B 模型时自动注入（`max_length: 80` + 排除关键词）
+- 已有 `rules` 格式的配置跳过自动生成（用户自定义优先）
+
+**配置示例**（v0.12.0-cn.6 新格式）：
+```yaml
+model_routing:
+  rules:
+    - name: vision
+      match:
+        has_image: true
+      model: "qwen3-vl:8b"
+    - name: reasoning
+      match:
+        keywords: ["分析", "推理", "思考", "证明"]
+      model: "deepseek-r1"
+    - name: coding
+      match:
+        keywords: ["写代码", "函数", "class", "debug"]
+        threshold: 1
+      model: "deepseek-coder"
+    - name: short_chat
+      match:
+        max_length: 80
+        exclude_keywords: ["bug", "报错", "crash", "fix"]
+      model: "qwen3:4b"
+    - name: default
+      model: "qwen3:32b"
+```
+
+**向后兼容**：旧格式（`vision`/`reasoning`/`default` 键）无需修改，`rules` 不存在时自动回退。
 
 ### Phase 1 实现详情（commit TBD）
 

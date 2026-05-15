@@ -1,7 +1,7 @@
 # Hermes-Agent-CN 文档体系总览
 
-> 更新日期: 2026-05-13  
-> 当前版本: v0.12.0-cn.3
+> 更新日期: 2026-05-15  
+> 当前版本: v0.12.0-cn.6
 
 ---
 
@@ -85,7 +85,7 @@
 |------|------|------|
 | `NEXT_PLAN.md` | ✅ 已归档 | 下一阶段规划（上游合并后） |
 | `PROPOSAL-doctor-improvements.md` | ⏳ **待评估** | Doctor 输出优化（5 方向，P1-P3） |
-| `PROPOSAL-multi-model-routing.md` | ✅ **Phase 1 已实现** | 多模型路由方案（3 Phase） |
+| `PROPOSAL-multi-model-routing.md` | ✅ **Phase 0-3 已实现** | 多模型路由方案（4 Phase） |
 | `plans/*.md` | ✅ 已归档 | 历史设计方案 |
 
 ### 🔴 P4 — 归档/上游资料
@@ -110,7 +110,7 @@
 | `CHANGELOG_CN.md` | 版本记录详细，包含修改文件列表和验证方式 |
 | `TEST_SUMMARY.md` | 测试总结模板已创建，第一轮测试已填写 |
 | `SECURITY.md` | 上游维护，无需改动 |
-| `PROPOSAL-multi-model-routing.md` | Phase 1 已实现，文档结构完整 |
+| `PROPOSAL-multi-model-routing.md` | Phase 0-3 已实现 (v0.12.0-cn.6)，规则驱动路由框架 |
 
 ### ⚠️ 已处理
 
@@ -146,14 +146,16 @@
 
 ### 📄 PROPOSAL-multi-model-routing.md
 
-> **状态**: Phase 1+2 ✅ 已实现，Phase 3 ⏳ 待实现  
-> **三种方案**: A(推荐) / B(轻量) / C(最强)
+> **状态**: Phase 0-3 ✅ 已实现，Phase 4 ⏳ 预研  
+> **版本**: v0.12.0-cn.6
 
 | Phase | 内容 | 复杂度 | 状态 |
 |-------|------|--------|------|
-| 1 | quickstart 多模型自动检测 + auxiliary 配置 | 低 | ✅ 已实现 |
-| 2 | model_routing 配置 + 运行时模型选择 | 中 | ✅ 已实现（v0.12.0-cn.4） |
-| 3 | 运行时动态模型切换 + 上下文管理 | 高 | ⏳ 待实现 |
+| 0 | Ollama 三层模型分类 + 参数规模感知选型 | 中 | ✅ v0.12.0-cn.6 |
+| 1 | quickstart 多模型自动检测 + auxiliary 配置 | 低 | ✅ v0.12.0-cn.3 |
+| 2 | model_routing.rules 规则引擎 + 消息级模型选择 | 中 | ✅ v0.12.0-cn.6 |
+| 3 | 自动规则生成（coding/short_chat） + 用户自定义路由 | 中 | ✅ v0.12.0-cn.6 |
+| 4 | tool_call 中途模型切换（预研） | 高 | ⏳ 按需启动 |
 
 ---
 
@@ -180,6 +182,7 @@
 7. ✅ ~~评估实施 PROPOSAL-doctor-improvements.md~~（D3 已完成，D2 待实施）
 8. ✅ ~~规划 PROPOSAL-multi-model-routing.md Phase 2~~（v0.12.0-cn.4 已实现）
 9. ✅ 语义防火墙 — 5 层纵深防御（v0.12.0-cn.5 已实现）
+10. ✅ model_routing 规则驱动路由框架 + Ollama 三层分类（v0.12.0-cn.6 已实现）
 
 ---
 
