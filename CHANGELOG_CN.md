@@ -4,6 +4,50 @@
 
 ---
 
+## v0.12.0-cn.6 (2026-05-15)
+
+### Ollama 模型三层分类 + 参数规模感知选型（阶段 0）
+
+#### ✅ 三层分类
+
+| 层级 | 方法 | 说明 |
+|------|------|------|
+| L1 | 名称关键词匹配（已有） | `vl`, `vision`, `llava`, `cogvlm`, `minicpm-v` |
+| L2 | 已知视觉家族检测（新增） | `qwen3`, `qwen3.5`, `yi-vl`, `internvl2` 等，零 API 调用 |
+| L3 | `/api/show` 模板探查（新增） | 检查 chat template 是否包含 `image_url`/`vision` 标记 |
+
+- `_VISION_FAMILIES`: 已知视觉家族列表
+- `_VISION_FAMILY_EXCLUSIONS`: 编码专用模型排除
+- `_check_vision_template()`: L3 探查函数
+
+#### ✅ 参数规模感知选型
+
+- `_get_ollama_model_info()`: /api/show 查询，内存缓存
+- `_get_param_size()`: 解析 parameter_size，支持 tag 后缀回退
+- 选型逻辑：同类型取参数规模最大
+
+### model_routing 规则驱动路由框架（阶段 1-3）
+
+#### ✅ 阶段 1: 自定义路由框架
+
+- `_match_rule()`: has_image / keywords(+threshold) / max_length / exclude_keywords
+- `_apply_model_routing()`: 改为规则遍历，支持 rules 列表 + 旧格式兼容
+
+#### ✅ 阶段 2: coding 路由
+
+- quickstart 自动检测 coder 模型，注入 coding 规则
+
+#### ✅ 阶段 3: short_chat 路由
+
+- quickstart 自动检测 ≤8B 模型，注入 short_chat 规则
+
+#### ✅ 向后兼容
+
+- 旧格式（`vision`/`reasoning`/`default`）无需修改
+- `rules` 格式优先，无 `rules` 时回退旧格式
+
+---
+
 ## v0.12.0-cn.5 (2026-05-14)
 
 ### MemPalace + graphify 知识库集成
