@@ -79,6 +79,15 @@ fe2a9d92f fix(cn): fallback链排除coding + rules始终重新生成
 
 ---
 
+## v0.12.0-cn.10 (2026-05-16)
+
+### fallback 后 model_routing 深度修复 — disable_model_routing 参数
+
+- **Bug**: v0.12.0-cn.9 的 `_fallback_activated` guard 只在运行时 fallback 生效。CLI 初始化时 fallback 到 deepseek 后新建 Agent，`_fallback_activated` 为 False，`_apply_model_routing()` 仍会把 `self.model` 覆盖为 Ollama 模型名
+- **修复**: 新增 `disable_model_routing` 参数到 `AIAgent` 构造函数。CLI fallback 后设 `self._fallback_applied = True`，传给 Agent 的 `disable_model_routing`。`_apply_model_routing()` 双重 guard：`_disable_model_routing` 或 `_fallback_activated` 为 True 时跳过。commit `8a9f51913`
+
+---
+
 ## v0.12.0-cn.9 (2026-05-16)
 
 ### fallback 激活后 model_routing 覆盖模型名修复
