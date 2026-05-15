@@ -79,6 +79,15 @@ fe2a9d92f fix(cn): fallback链排除coding + rules始终重新生成
 
 ---
 
+## v0.12.0-cn.11 (2026-05-16)
+
+### quickstart Ollama base_url 恢复
+
+- **Bug**: quickstart 检测 Ollama + DeepSeek 后，`_update_config_for_provider` 把 `model.base_url` 覆写成了 DeepSeek 的 URL。`_write_smart_routing` 恢复 `model.provider=ollama` 后没有恢复 `base_url`，导致后续 `resolve_runtime_provider` 读取到错误 URL
+- **修复**: `_write_smart_routing()` 在设置 `model.provider=ollama` 后检查 `base_url`，若被云 Provider 覆写则恢复为 `http://localhost:11434/v1`。commit `fd1dfb13a`
+
+---
+
 ## v0.12.0-cn.10 (2026-05-16)
 
 ### fallback 后 model_routing 深度修复 — disable_model_routing 参数
