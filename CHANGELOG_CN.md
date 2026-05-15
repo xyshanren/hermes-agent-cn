@@ -1,10 +1,18 @@
-# Hermes Agent 中文版 变更记录
+﻿# Hermes Agent 中文版 变更记录
 
 本文档记录 Hermes Agent 中文版的更新历史。
 
 ---
 
-## v0.12.0-cn.6 (2026-05-15)
+---
+
+## v0.12.0-cn.7 (2026-05-15)
+
+### Bug 修复
+
+- **quickstart.py 语法错误**: 提取 `cname` 变量避免 f-string 嵌套括号 (`#946-948`)
+- **hermes chat 空 API key 报错**: 对 `resolved_provider=="custom"` 特殊处理，从 config 补读 `base_url` (`cli.py:3774-3787`)
+
 
 ### Ollama 模型三层分类 + 参数规模感知选型（阶段 0）
 
