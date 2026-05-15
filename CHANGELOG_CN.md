@@ -79,6 +79,15 @@ fe2a9d92f fix(cn): fallback链排除coding + rules始终重新生成
 
 ---
 
+## v0.12.0-cn.9 (2026-05-16)
+
+### fallback 激活后 model_routing 覆盖模型名修复
+
+- **Bug**: cli fallback 到 deepseek 后，`_apply_model_routing()` 仍用 `model_routing` 里的 Ollama 模型名覆盖 `self.model`，导致 DeepSeek API 收到 `qwen3.5-9b-deepseek:q4` 报 400
+- **修复**: `_apply_model_routing()` 检测 `_fallback_activated`，fallback 激活时跳过路由，保留 fallback provider 的模型名。commit `bae3e9f54`
+
+---
+
 ## v0.12.0-cn.8 (2026-05-16)
 
 ### Ollama 上下文窗口检测修复
