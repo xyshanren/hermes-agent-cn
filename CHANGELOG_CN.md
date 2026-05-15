@@ -79,6 +79,37 @@ fe2a9d92f fix(cn): fallback链排除coding + rules始终重新生成
 
 ---
 
+## v0.12.0-cn.8 (2026-05-16)
+
+### Ollama 上下文窗口检测修复
+
+- **Bug**: Ollama 模型 `num_ctx=262144` 被误检为 8,192，低于 MINIMUM_CONTEXT_LENGTH(64,000)，导致 agent 初始化失败
+- **根因**: `get_model_context_length()` 中 `is_local_endpoint()` 检查嵌套在 `_is_custom_endpoint() && !_is_known_provider_base_url()` 条件内，当 Ollama 的 `localhost:11434` 被识别为已知 provider 时，整个本地查询块被跳过
+- **修复**: 将本地端点查询提升为独立 Step 2，优先于自定义端点检测（Step 3）。commit `22e3decf8`
+
+---
+
+## v0.12.0-cn.7 (2026-05-15)
+
+### runtime_provider custom provider 空 API key 修复
+
+- **Bug**: `hermes chat` 使用 ollama→custom 映射时报 "Provider resolver returned an empty API key"
+- **根因**: `resolve_runtime_provider()` 对 `provider="custom"` 无处理分支，落入 OpenRouter fallback 要求 API key
+- **修复**: 在 `_resolve_openrouter_runtime()` 前插入 custom provider 处理块，从 `config.yaml` 读取 `model.base_url`，返回 `api_key="no-key-required"`。commit `aa0ee72fb`
+
+### quickstart 语法错误修复
+
+- **Bug**: `quickstart.py:948` f-string 嵌套 `['name']` 导致 SyntaxError
+- **修复**: 提取变量再打印。commit `aa0ee72fb`
+
+### UTF-8 BOM 清理
+
+- 修复所有修改文件（cli.py, quickstart.py, runtime_provider.py）的 BOM 头
+
+- 提交: `aa0ee72fb`, `f00382409` (CHANGELOG)
+
+---
+
 ## v0.12.0-cn.5 (2026-05-14)
 
 ### MemPalace + graphify 知识库集成
