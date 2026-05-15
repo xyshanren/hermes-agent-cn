@@ -8884,6 +8884,12 @@ class AIAgent:
             return
         self._routing_applied = True
 
+        # Skip routing when fallback is active — routing rules use primary
+        # provider model names that may not be valid for the current
+        # fallback provider (e.g. Ollama model names sent to DeepSeek API).
+        if getattr(self, "_fallback_activated", False):
+            return
+
         try:
             from hermes_cli.config import load_config
             config = load_config()
