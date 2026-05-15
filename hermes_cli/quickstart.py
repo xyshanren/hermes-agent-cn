@@ -425,7 +425,8 @@ def _build_fallback_chain(
         # Ollama 是主力但有多个模型 — 将非 vision 非主力模型加入 fallback
         primary_model = ollama_info["default_model"]
         for m in ollama_info.get("models", []):
-            if m != primary_model and _classify_ollama_model(m) != "vision":
+            m_type = _classify_ollama_model(m)
+            if m != primary_model and m_type not in ("vision", "coding"):
                 chain.append({
                     "provider": "ollama",
                     "model": m,
@@ -508,12 +509,10 @@ def _write_smart_routing(
             if not isinstance(routing, dict):
                 routing = {}
 
-            # 已有 rules 格式 → 用户自定义，跳过自动生成
-            existing_rules = routing.get("rules")
-            if existing_rules and isinstance(existing_rules, list):
-                cfg["model_routing"] = routing
-                save_config(cfg)
-                return True
+            # 清除旧格式键（每次 quickstart 都重置，避免残留）
+            routing.pop("default", None)
+            routing.pop("vision", None)
+            routing.pop("reasoning", None)
 
             rules = []
 
