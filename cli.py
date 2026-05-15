@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Hermes Agent CLI - Interactive Terminal Interface
 
@@ -3771,6 +3771,19 @@ class HermesCLI:
                     "using placeholder — local servers typically ignore auth",
                     base_url, _source,
                 )
+            elif resolved_provider == "custom":
+                api_key = "no-key-required"
+                if not base_url:
+                    try:
+                        from hermes_cli.config import load_config
+                        cfg = load_config()
+                        model_cfg = cfg.get("model", {})
+                        if isinstance(model_cfg, dict):
+                            base_url = model_cfg.get("base_url", "")
+                            if base_url:
+                                runtime["base_url"] = base_url
+                    except Exception:
+                        pass
             else:
                 print("\n⚠️  Provider resolver returned an empty API key. "
                       "Set OPENROUTER_API_KEY or run: hermes setup")

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Hermes-Agent-CN 快捷启动 — 智能路由配置。
 
 快速检测所有可用资源（API Key + Ollama + 本地离线模型），
@@ -945,8 +945,8 @@ def cmd_quickstart(args) -> int:
     # coding 模型显示
     coding_models = [m for m in (ollama_info or {}).get("classified_models", []) if m.get("type") == "coding"]
     if coding_models:
-        print(f"  💻 代码编程: Ollama（本地） — {coding_models[0]['name']} (coding)"
-
+        cname = coding_models[0]["name"]
+        print(f"  💻 代码编程: Ollama（本地） — {cname} (coding)")
     # fallback 链
     if fallback_chain:
         print(f"  📋 回退路由:")
