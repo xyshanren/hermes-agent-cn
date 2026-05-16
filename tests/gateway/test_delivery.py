@@ -124,3 +124,83 @@ class TestPlatformNameCaseInsensitivity:
 
 
 
+@pytest.mark.asyncio
+async def test_explicit_telegram_private_thread_requires_reply_anchor(tmp_path, monkeypatch):
+    monkeypatch.setattr("gateway.delivery.get_hermes_home", lambda: tmp_path)
+    adapter = RecordingAdapter()
+    router = DeliveryRouter(GatewayConfig(), adapters={Platform.TELEGRAM: adapter})
+    target = DeliveryTarget.parse("telegram:722341991:32344")
+
+    with pytest.raises(RuntimeError, match="requires telegram_reply_to_message_id"):
+        await router._deliver_to_platform(target, "hello", metadata=None)
+
+    assert adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_telegram_private_thread_uses_reply_fallback_with_anchor(tmp_path, monkeypatch):
+    monkeypatch.setattr("gateway.delivery.get_hermes_home", lambda: tmp_path)
+    adapter = RecordingAdapter()
+    router = DeliveryRouter(GatewayConfig(), adapters={Platform.TELEGRAM: adapter})
+    target = DeliveryTarget.parse("telegram:722341991:32344")
+
+    await router._deliver_to_platform(
+        target,
+        "hello",
+        metadata={"telegram_reply_to_message_id": "9001"},
+    )
+
+    assert adapter.calls == [
+        {
+            "chat_id": "722341991",
+            "content": "hello",
+            "metadata": {
+                "telegram_reply_to_message_id": "9001",
+                "thread_id": "32344",
+                "telegram_dm_topic_reply_fallback": True,
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_explicit_telegram_direct_messages_topic_metadata_is_respected(tmp_path, monkeypatch):
+    monkeypatch.setattr("gateway.delivery.get_hermes_home", lambda: tmp_path)
+    adapter = RecordingAdapter()
+    router = DeliveryRouter(GatewayConfig(), adapters={Platform.TELEGRAM: adapter})
+    target = DeliveryTarget.parse("telegram:722341991:32344")
+
+    await router._deliver_to_platform(
+        target,
+        "hello",
+        metadata={"telegram_direct_messages_topic_id": "32344"},
+    )
+
+    assert adapter.calls[0]["metadata"] == {"telegram_direct_messages_topic_id": "32344"}
+
+
+@pytest.mark.asyncio
+async def test_explicit_telegram_group_thread_does_not_mark_dm_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr("gateway.delivery.get_hermes_home", lambda: tmp_path)
+    adapter = RecordingAdapter()
+    router = DeliveryRouter(GatewayConfig(), adapters={Platform.TELEGRAM: adapter})
+    target = DeliveryTarget.parse("telegram:-100123:42")
+
+    await router._deliver_to_platform(target, "hello", metadata=None)
+
+    assert adapter.calls[0]["metadata"] == {"thread_id": "42"}
+
+
+class FailingAdapter:
+    async def send(self, chat_id, content, metadata=None):
+        return SendResult(success=False, error="route failed", retryable=False)
+
+
+@pytest.mark.asyncio
+async def test_platform_send_failure_raises_for_delivery_result(tmp_path, monkeypatch):
+    monkeypatch.setattr("gateway.delivery.get_hermes_home", lambda: tmp_path)
+    router = DeliveryRouter(GatewayConfig(), adapters={Platform.TELEGRAM: FailingAdapter()})
+    target = DeliveryTarget.parse("telegram:722341991:32344")
+
+    with pytest.raises(RuntimeError, match="route failed"):
+        await router._deliver_to_platform(target, "hello", metadata={"telegram_reply_to_message_id": "9001"})
