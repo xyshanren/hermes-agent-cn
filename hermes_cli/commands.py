@@ -249,6 +249,39 @@ GATEWAY_KNOWN_COMMANDS: frozenset[str] = frozenset(
 )
 
 
+def is_gateway_known_command(name: str | None) -> bool:
+    """Return True when *name* is a known gateway slash command.
+
+    Checks built-in commands (via *GATEWAY_KNOWN_COMMANDS*) and
+    plugin-registered commands.  Returns ``False`` for ``None`` and
+    empty strings.  Degrades gracefully when the plugin system is
+    unavailable.
+    """
+    if not name:
+        return False
+    if name in GATEWAY_KNOWN_COMMANDS:
+        return True
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+        return name in get_plugin_commands()
+    except Exception:
+        return False
+
+
+def _iter_plugin_command_entries():
+    """Yield ``(name, description, args_hint)`` for plugin-registered commands.
+
+    Reads plugin commands via ``get_plugin_commands()`` and yields
+    each entry.  Degrades gracefully (yields nothing) on any error.
+    """
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+        for name, cmd in get_plugin_commands().items():
+            yield name, cmd.get("description", ""), cmd.get("args_hint", "")
+    except Exception:
+        return
+
+
 def _resolve_config_gates() -> set[str]:
     """Return canonical names of commands whose ``gateway_config_gate`` is truthy.
 
@@ -1227,3 +1260,38 @@ def _file_size_label(path: str) -> str:
     if size < 1024 * 1024 * 1024:
         return f"{size / (1024 * 1024):.1f}M"
     return f"{size / (1024 * 1024 * 1024):.1f}G"
+
+# Commands with explicit Level-2 running-agent handlers in gateway/run.py.
+# Listed here for introspection / tests; semantically a subset of
+# "all resolvable commands" — which is the real bypass set (see
+# should_bypass_active_session below).
+ACTIVE_SESSION_BYPASS_COMMANDS: frozenset[str] = frozenset(
+    {
+        "agents",
+        "approve",
+        "background",
+        "commands",
+        "deny",
+        "help",
+        "new",
+        "profile",
+        "queue",
+        "restart",
+        "status",
+        "steer",
+        "stop",
+        "update",
+    }
+)
+
+
+def should_bypass_active_session(command_name: str | None) -> bool:
+    """Return True for any resolvable slash command.
+
+    Rationale: every gateway-registered slash command either has a
+    specific Level-2 handler in gateway/run.py (/stop, /new, /model,
+    /approve, etc.) or reaches the running-agent catch-all that returns
+    a "busy — wait or /stop first" response. In both paths the command
+    is dispatched, not queued.
+    """
+    return resolve_command(command_name) is not None if command_name else False
