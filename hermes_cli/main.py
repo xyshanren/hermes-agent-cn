@@ -1838,6 +1838,156 @@ def _is_profile_api_key_provider(provider_id: str) -> bool:
         return False
 
 
+def _model_flow_api_key_provider(config, provider_id, current_model=""):
+    """Generic flow for API-key providers (deepseek, z.ai, kimi, etc.).
+
+    CN branch: simplified from upstream — gemini/open- code blocks removed.
+    """
+    from hermes_cli.auth import (
+        PROVIDER_REGISTRY,
+        _prompt_model_selection,
+        _save_model_choice,
+        deactivate_provider,
+    )
+    from hermes_cli.config import (
+        get_env_value,
+        save_env_value,
+        load_config,
+        save_config,
+    )
+    from hermes_cli.models import _PROVIDER_MODELS, fetch_api_models
+
+    if provider_id not in PROVIDER_REGISTRY:
+        print(f"Unknown provider: {provider_id}")
+        return
+
+    pconfig = PROVIDER_REGISTRY[provider_id]
+    key_env = pconfig.api_key_env_vars[0] if pconfig.api_key_env_vars else ""
+    base_url_env = pconfig.base_url_env_var or ""
+
+    # Check / prompt for API key
+    existing_key = ""
+    for ev in pconfig.api_key_env_vars:
+        existing_key = get_env_value(ev) or os.getenv(ev, "")
+        if existing_key:
+            break
+
+    if not existing_key:
+        print(f"No {pconfig.name} API key configured.")
+        if key_env:
+            try:
+                import getpass
+
+                new_key = getpass.getpass(f"{key_env} (or Enter to cancel): ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return
+            if not new_key:
+                print("Cancelled.")
+                return
+            save_env_value(key_env, new_key)
+            existing_key = new_key
+            print("API key saved.")
+            print()
+    else:
+        print(f"  {pconfig.name} API key: {existing_key[:8]}... \u2713")
+        print()
+
+    # Optional base URL override
+    current_base = ""
+    if base_url_env:
+        current_base = get_env_value(base_url_env) or os.getenv(base_url_env, "")
+    effective_base = current_base or pconfig.inference_base_url
+
+    try:
+        override = input(f"Base URL [{effective_base}]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        override = ""
+    if override and base_url_env:
+        if not override.startswith(("http://", "https://")):
+            print(
+                "  Invalid URL — must start with http:// or https://. Keeping current value."
+            )
+        else:
+            save_env_value(base_url_env, override)
+            effective_base = override
+
+    # Model selection — resolution order:
+    #   1. models.dev registry (cached, filtered for agentic/tool-capable models)
+    #   2. Curated static fallback list (offline insurance)
+    #   3. Live /models endpoint probe (small providers without models.dev data)
+    curated = _PROVIDER_MODELS.get(provider_id, [])
+
+    # Try models.dev first
+    mdev_models: list = []
+    try:
+        from agent.models_dev import list_agentic_models
+
+        mdev_models = list_agentic_models(provider_id)
+    except Exception:
+        pass
+
+    if mdev_models:
+        if curated:
+            seen = {m.lower() for m in mdev_models}
+            merged = list(mdev_models)
+            for m in curated:
+                if m.lower() not in seen:
+                    merged.append(m)
+                    seen.add(m.lower())
+            model_list = merged
+        else:
+            model_list = mdev_models
+        print(f"  Found {len(model_list)} model(s) from models.dev registry")
+    elif curated and len(curated) >= 8:
+        model_list = curated
+        print(
+            f'  Showing {len(model_list)} curated models — '
+            f'use "Enter custom model name" for others.'
+        )
+    else:
+        api_key_for_probe = existing_key or (get_env_value(key_env) if key_env else "")
+        live_models = fetch_api_models(api_key_for_probe, effective_base)
+        if live_models and len(live_models) >= len(curated):
+            model_list = live_models
+            print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
+        else:
+            model_list = curated
+            if model_list:
+                print(
+                    f'  Showing {len(model_list)} curated models — '
+                    f'use "Enter custom model name" for others.'
+                )
+
+    if model_list:
+        selected = _prompt_model_selection(model_list, current_model=current_model)
+    else:
+        try:
+            selected = input("Model name: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            selected = None
+
+    if selected:
+        _save_model_choice(selected)
+
+        # Update config with provider, base URL
+        cfg = load_config()
+        model = cfg.get("model")
+        if not isinstance(model, dict):
+            model = {"default": model} if model else {}
+            cfg["model"] = model
+        model["provider"] = provider_id
+        model["base_url"] = effective_base
+        model.pop("api_mode", None)
+        save_config(cfg)
+        deactivate_provider()
+
+        print(f"Default model set to: {selected} (via {pconfig.name})")
+    else:
+        print("No change.")
+
+
 def select_provider_and_model(args=None):
     """Core provider selection + model picking logic.
 
@@ -4882,7 +5032,7 @@ def _auto_configure_local_fallback(config: dict, new_provider_id: str) -> None:
         ollama_entry = {
             "provider": "ollama",
             "model": ollama_info.get("default_model", "llama3.2"),
-            "base_url": "http://localhost:11434",
+            "base_url": "http://localhost:11434/v1",
         }
         # 去重
         existing_providers = {f.get("provider") for f in existing_fb}
@@ -4919,7 +5069,7 @@ def _auto_configure_local_fallback(config: dict, new_provider_id: str) -> None:
             aux["vision"] = {
                 "provider": "ollama",
                 "model": vision_model,
-                "base_url": "http://localhost:11434",
+                "base_url": "http://localhost:11434/v1",
                 "api_key": "",
             }
 

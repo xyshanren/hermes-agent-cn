@@ -346,7 +346,7 @@ def _configure_ollama(ollama_info: dict) -> bool:
 
         _update_config_for_provider(
             "ollama",
-            "http://localhost:11434",
+            "http://localhost:11434/v1",
             default_model=default_model,
         )
         from hermes_cli.config import load_config, save_config
@@ -419,7 +419,7 @@ def _build_fallback_chain(
         chain.append({
             "provider": "ollama",
             "model": ollama_info["default_model"],
-            "base_url": "http://localhost:11434",
+            "base_url": "http://localhost:11434/v1",
         })
     elif ollama_info and primary_provider_id == "ollama":
         # Ollama 是主力但有多个模型 — 将非 vision 非主力模型加入 fallback
@@ -430,7 +430,7 @@ def _build_fallback_chain(
                 chain.append({
                     "provider": "ollama",
                     "model": m,
-                    "base_url": "http://localhost:11434",
+                    "base_url": "http://localhost:11434/v1",
                 })
                 break  # 只加一个 Ollama fallback
 
@@ -468,7 +468,7 @@ def _write_smart_routing(
         model_cfg["provider"] = primary_provider_id
         # 恢复 Ollama 的 base_url — 云 Provider 配置（如 deepseek）
         # 会覆写 model.base_url，导致后续 provider=custom 时读取到错误 URL
-        if primary_provider_id == "ollama" and not model_cfg.get("base_url", "").startswith("http://localhost"):
+        if primary_provider_id == "ollama":
             model_cfg["base_url"] = "http://localhost:11434/v1"
         cfg["model"] = model_cfg
 
@@ -493,7 +493,7 @@ def _write_smart_routing(
                     aux["vision"] = {
                         "provider": "ollama",
                         "model": vision_model,
-                        "base_url": "http://localhost:11434",
+                        "base_url": "http://localhost:11434/v1",
                         "api_key": "",
                     }
 
