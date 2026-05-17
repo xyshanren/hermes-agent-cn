@@ -304,6 +304,195 @@ def _has_embedded_models() -> bool:
         return False
 
 
+# ── 本地 OpenAI 兼容服务器检测（LM Studio / llama.cpp server）──
+
+_LOCAL_SERVER_CONFIGS = [
+    {
+        "id": "lm_studio",
+        "name": "LM Studio",
+        "base_url": "http://localhost:1234/v1",
+        "display_name": "LM Studio（本地）",
+        "default_model": "qwen2.5-7b-instruct",
+    },
+    {
+        "id": "llama_cpp",
+        "name": "llama.cpp",
+        "base_url": "http://localhost:8080/v1",
+        "display_name": "llama.cpp（本地）",
+        "default_model": "llama-3.2-3b-instruct",
+    },
+]
+
+
+def _classify_local_model(name: str) -> str:
+    """Two-layer classification for non-Ollama local models.
+
+    L1: Name keyword matching (fast, no API)
+        - Vision: vl, vision, llava, cogvlm, minicpm-v
+        - Reasoning: r1, reasoning, think, qwq
+    L2: Known family matching (fast, no API)
+        - Vision families: qwen3, qwen3.5, yi-vl, internvl2, etc.
+        - Excludes coding-specialized models (e.g. qwen3-coder)
+
+    Unlike _classify_ollama_model, does NOT call /api/show (not available
+    on LM Studio/llama.cpp).  Falls back to "text" after L2.
+
+    Returns:
+        "vision" | "reasoning" | "coding" | "text"
+    """
+    # Normalize model name: strip common suffixes and separators
+    # LM Studio / llama.cpp model names may use hyphens or colons
+    name_lower = name.lower().split(":")[0]  # Ollama-style tag
+    name_lower = name_lower.replace("-", " ")  # Normalize hyphens
+
+    # Remove size suffixes like "8b", "70b" etc.
+    import re
+
+    name_lower = re.sub(r"\s+\d+\s*b", "", name_lower).strip()
+
+    # L1: 关键词匹配
+    if any(kw in name_lower for kw in _VISION_KEYWORDS):
+        return "vision"
+    if any(kw in name_lower for kw in _REASONING_KEYWORDS):
+        return "reasoning"
+    # L1.5: 编码模型检测
+    if any(kw in name_lower for kw in ("coder", "code-", "instruct-code")):
+        return "coding"
+
+    # L2: 已知视觉家族检测（排除编码专用模型）
+    for family in _VISION_FAMILIES:
+        # Also check with hyphens replaced by spaces
+        family_normalized = family.replace("-", " ")
+        if family_normalized in name_lower or family in name_lower:
+            if not any(excl in name_lower for excl in _VISION_FAMILY_EXCLUSIONS):
+                return "vision"
+
+    return "text"
+
+
+def _get_local_model_param_size(name: str) -> float:
+    """Extract parameter size from local model name.
+
+    Handles formats like:
+      - "qwen2.5-7b-instruct" → 7.0
+      - "llama-3.2-3b" → 3.0
+      - "mistral-7b-instruct-v0.3" → 7.0
+      - "qwen3:8b" → 8.0 (Ollama-like)
+    """
+    import re
+
+    match = re.search(r"(\d+\.?\d*)\s*[bB](?:\s*-|\s+|$)", name)
+    if match:
+        return float(match.group(1))
+    return 0.0
+
+
+def _detect_local_server(server_config: dict) -> Optional[dict]:
+    """检测本地 OpenAI 兼容服务是否运行。
+
+    Calls GET {base_url}/models to list available models.
+    Works with LM Studio (port 1234), llama.cpp server (port 8080),
+    or any other OpenAI-compatible local server.
+    """
+    try:
+        import urllib.request
+
+        models_url = server_config["base_url"].rstrip("/") + "/models"
+        req = urllib.request.Request(
+            models_url,
+            method="GET",
+            headers={"Accept": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=3)
+        if resp.status == 200:
+            data = json.loads(resp.read().decode())
+            models = data.get("data", data.get("models", []))
+            if models:
+                # OpenAI format: [{id: "model-name", ...}]
+                # Extract model IDs
+                model_names = [
+                    m.get("id", m.get("name", ""))
+                    for m in models
+                    if m.get("id") or m.get("name")
+                ]
+                if model_names:
+                    classified = [
+                        {"name": n, "type": _classify_local_model(n)}
+                        for n in model_names
+                    ]
+                    return {
+                        "available": True,
+                        "provider_id": server_config["id"],
+                        "name": server_config["name"],
+                        "display_name": server_config["display_name"],
+                        "base_url": server_config["base_url"],
+                        "models": model_names,
+                        "classified_models": classified,
+                        "default_model": _pick_local_primary(model_names, _classify_local_model),
+                        "vision_model": _find_local_vision_model(model_names, _classify_local_model),
+                    }
+            # Running but no models loaded
+            return {
+                "available": True,
+                "provider_id": server_config["id"],
+                "name": server_config["name"],
+                "display_name": server_config["display_name"],
+                "base_url": server_config["base_url"],
+                "models": [],
+                "default_model": server_config["default_model"],
+            }
+    except Exception:
+        pass
+    return None
+
+
+def _pick_local_primary(
+    models: list[str],
+    classify_fn,
+) -> str:
+    """从本地模型列表中选择主力模型（通用版）。
+
+    优先级：text/reasoning > coding > vision（视觉模型不适合做通用主力）。
+    同类型中按参数规模选最大。
+    """
+    if not models:
+        return ""
+
+    classified = [(name, classify_fn(name)) for name in models]
+
+    # 优先 text/reasoning，排除 vision 和 coding
+    non_vision_non_coding = [
+        (name, t) for name, t in classified if t not in ("vision", "coding")
+    ]
+
+    if non_vision_non_coding:
+        return max(non_vision_non_coding, key=lambda x: _get_local_model_param_size(x[0]))[0]
+
+    # coding 中选最大的
+    coding_models = [(name, t) for name, t in classified if t == "coding"]
+    if coding_models:
+        return max(coding_models, key=lambda x: _get_local_model_param_size(x[0]))[0]
+
+    # 全是视觉模型
+    return max(models, key=_get_local_model_param_size)
+
+
+def _find_local_vision_model(
+    models: list[str],
+    classify_fn,
+) -> Optional[str]:
+    """找到本地模型列表中的视觉模型，多选时取参数规模最大的。"""
+    visions = [
+        (name, _get_local_model_param_size(name))
+        for name in models
+        if classify_fn(name) == "vision"
+    ]
+    if not visions:
+        return None
+    visions.sort(key=lambda x: x[1], reverse=True)
+    return visions[0][0]
+
+
 # ── 配置写入函数 ──
 
 def _configure_provider(provider: dict) -> bool:
@@ -388,6 +577,38 @@ def _configure_embedded() -> bool:
         return False
 
 
+def _configure_local_server(local_info: dict) -> bool:
+    """将 LM Studio / llama.cpp 配置写入 config.yaml。
+
+    使用 provider="custom" + base_url，兼容任何 OpenAI 兼容的本地服务。
+    """
+    default_model = local_info.get("default_model", "")
+    base_url = local_info.get("base_url", "")
+    provider_id = local_info.get("provider_id", "custom")
+    try:
+        from hermes_cli.auth import _update_config_for_provider
+
+        _update_config_for_provider(
+            "custom",
+            base_url,
+            default_model=default_model,
+        )
+        from hermes_cli.config import load_config, save_config
+
+        cfg = load_config()
+        model = cfg.get("model", {})
+        if isinstance(model, dict):
+            model["default"] = default_model
+            model["provider"] = "custom"
+            model["base_url"] = base_url
+            cfg["model"] = model
+            save_config(cfg)
+        return True
+    except Exception as e:
+        logger.warning("配置 %s 失败: %s", provider_id, e)
+        return False
+
+
 # ── 智能路由配置 ──
 
 def _build_fallback_chain(
@@ -395,16 +616,19 @@ def _build_fallback_chain(
     ollama_info: Optional[dict],
     has_embedded: bool,
     primary_provider_id: str,
+    local_server_infos: Optional[list[dict]] = None,
 ) -> list[dict]:
     """构建 fallback_model 链。
 
     规则：
     - 已作为主力的 provider + 模型不放 fallback
     - 云端 API 作为第一 fallback
-    - Ollama 非 vision 模型作为第二 fallback（如果 Ollama 有多个模型且是主力）
+    - Ollama 非 vision 模型作为 fallback（如果 Ollama 有多个模型且是主力）
+    - LM Studio / llama.cpp 作为本地 fallback
     - 嵌入式模型始终放最后（断网兜底）
     """
     chain: list[dict] = []
+    local_server_infos = local_server_infos or []
 
     # 云端 API providers（排除主力）
     for p in api_providers:
@@ -434,6 +658,16 @@ def _build_fallback_chain(
                 })
                 break  # 只加一个 Ollama fallback
 
+    # LM Studio / llama.cpp 本地服务 fallback
+    for local_info in local_server_infos:
+        local_id = local_info.get("provider_id", "")
+        if local_id != primary_provider_id and local_info.get("models"):
+            chain.append({
+                "provider": "custom",
+                "model": local_info["default_model"],
+                "base_url": local_info.get("base_url", ""),
+            })
+
     # 嵌入式模型 — 断网兜底（始终放最后）
     if has_embedded and primary_provider_id != "embedded":
         chain.append({
@@ -450,6 +684,7 @@ def _write_smart_routing(
     fallback_chain: list[dict],
     api_providers: list[dict],
     ollama_info: Optional[dict] = None,
+    local_server_infos: Optional[list[dict]] = None,
 ) -> bool:
     """将智能路由配置写入 config.yaml。
 
@@ -459,6 +694,14 @@ def _write_smart_routing(
         from hermes_cli.config import load_config, save_config, save_env_value
 
         cfg = load_config()
+        local_server_infos = local_server_infos or []
+
+        # 查找主力对应的本地服务信息（如果主力是 LM Studio / llama.cpp）
+        primary_local_info = None
+        for li in local_server_infos:
+            if li.get("provider_id") == primary_provider_id:
+                primary_local_info = li
+                break
 
         # 写入主力模型
         model_cfg = cfg.get("model", {})
@@ -470,6 +713,10 @@ def _write_smart_routing(
         # 会覆写 model.base_url，导致后续 provider=custom 时读取到错误 URL
         if primary_provider_id == "ollama":
             model_cfg["base_url"] = "http://localhost:11434/v1"
+        elif primary_local_info:
+            # LM Studio / llama.cpp 使用 custom provider + base_url
+            model_cfg["provider"] = "custom"
+            model_cfg["base_url"] = primary_local_info.get("base_url", "")
         cfg["model"] = model_cfg
 
         # 写入 fallback 链
@@ -478,29 +725,51 @@ def _write_smart_routing(
         else:
             cfg.pop("fallback_model", None)
 
-        # 自动配置 auxiliary.vision（如果 Ollama 有视觉模型）
+        # 自动配置 auxiliary.vision
+        # 先检查 Ollama，再检查本地服务（LM Studio / llama.cpp）
+        vision_model = None
+        vision_provider = None
+        vision_base_url = None
+
         if ollama_info:
             vision_model = ollama_info.get("vision_model")
             if vision_model:
-                aux = cfg.setdefault("auxiliary", {})
-                if not isinstance(aux, dict):
-                    aux = {}
-                    cfg["auxiliary"] = aux
-                vision_cfg = aux.get("vision", {})
-                # 仅在当前未配置或为 auto 时自动设置
-                current_provider = str(vision_cfg.get("provider", "auto")).strip()
-                if current_provider in ("auto", "", "ollama"):
-                    aux["vision"] = {
-                        "provider": "ollama",
-                        "model": vision_model,
-                        "base_url": "http://localhost:11434/v1",
-                        "api_key": "",
-                    }
+                vision_provider = "ollama"
+                vision_base_url = "http://localhost:11434/v1"
 
-        # Phase 2-3: 自动生成 model_routing 规则（多模型时）
-        # 条件：Ollama 有 ≥2 个模型，且有视觉模型 + 文本模型
-        if ollama_info and len(ollama_info.get("models", [])) >= 2:
-            classified = ollama_info.get("classified_models", [])
+        if not vision_model and local_server_infos:
+            for li in local_server_infos:
+                vm = li.get("vision_model")
+                if vm:
+                    vision_model = vm
+                    vision_provider = "custom"
+                    vision_base_url = li.get("base_url", "")
+                    break
+
+        if vision_model and vision_provider:
+            aux = cfg.setdefault("auxiliary", {})
+            if not isinstance(aux, dict):
+                aux = {}
+                cfg["auxiliary"] = aux
+            vision_cfg = aux.get("vision", {})
+            # 仅在当前未配置或为 auto 时自动设置
+            current_provider = str(vision_cfg.get("provider", "auto")).strip()
+            if current_provider in ("auto", "", "ollama", "custom"):
+                aux["vision"] = {
+                    "provider": vision_provider,
+                    "model": vision_model,
+                    "base_url": vision_base_url,
+                    "api_key": "",
+                }
+
+        # Phase 2-3: 自动生成 model_routing 规则
+        # 优先使用 Ollama 模型，其次使用其他本地服务模型
+        routing_source = ollama_info
+        if not routing_source and local_server_infos:
+            routing_source = local_server_infos[0]
+
+        if routing_source and len(routing_source.get("models", [])) >= 2:
+            classified = routing_source.get("classified_models", [])
             vision_models = [m for m in classified if m.get("type") == "vision"]
             text_models = [m for m in classified if m.get("type") != "vision"]
             reasoning_models = [m for m in classified if m.get("type") == "reasoning"]
@@ -554,7 +823,7 @@ def _write_smart_routing(
             # short_chat 规则（阶段 3：有小参数量模型时自动生成）
             small_models = [
                 m for m in text_models
-                if _get_param_size(m["name"]) <= 8.0
+                if _get_local_model_param_size(m["name"]) <= 8.0
                 and m["name"] != primary_model
             ]
             if small_models:
@@ -760,8 +1029,8 @@ def _configure_mempalace_mcp() -> bool:
 def cmd_quickstart(args) -> int:
     """一键快速配置 Hermes-Agent-CN 智能路由。
 
-    检测所有可用资源后自动配置三层路由：
-      Ollama（主力） → 云端 API（降级） → 嵌入式（断网兜底）
+    检测所有可用资源后自动配置多层路由：
+      Ollama / LM Studio / llama.cpp（主力） → 云端 API（降级） → 嵌入式（断网兜底）
     """
     from hermes_cli.colors import Colors, color
 
@@ -779,9 +1048,21 @@ def cmd_quickstart(args) -> int:
     has_embedded = _has_embedded_models()
     mempalace_info = _detect_mempalace()
 
-    resource_count = len(api_providers) + (1 if ollama_info else 0) + (1 if has_embedded else 0)
+    # 检测 LM Studio 和 llama.cpp
+    local_server_infos = []
+    for srv in _LOCAL_SERVER_CONFIGS:
+        info = _detect_local_server(srv)
+        if info:
+            local_server_infos.append(info)
 
-    # 显示检测结果
+    resource_count = (
+        len(api_providers)
+        + (1 if ollama_info else 0)
+        + len(local_server_infos)
+        + (1 if has_embedded else 0)
+    )
+
+    # ── 显示检测结果 ──
     if api_providers:
         print(f"  {color('✓', Colors.GREEN)} 云端 API Key ({len(api_providers)} 个):")
         for p in api_providers:
@@ -796,7 +1077,6 @@ def cmd_quickstart(args) -> int:
         if models and len(models) == 1:
             print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中 ({models[0]})")
         elif models and len(models) > 1:
-            # 多模型：按类型分组显示
             print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中 ({len(models)} 个模型)")
             primary = ollama_info.get("default_model", "")
             vision = ollama_info.get("vision_model")
@@ -814,6 +1094,27 @@ def cmd_quickstart(args) -> int:
             print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中（暂无模型）")
     else:
         print(f"  {color('⚠', Colors.YELLOW)} Ollama 本地推理: 未运行")
+
+    # 显示 LM Studio / llama.cpp 检测结果
+    for li in local_server_infos:
+        models = li.get("models", [])
+        if models:
+            display = li.get("display_name", li.get("name", ""))
+            default = li.get("default_model", "")
+            vision = li.get("vision_model")
+            if len(models) == 1:
+                print(f"  {color('✓', Colors.GREEN)} {display}: 运行中 ({default})")
+            else:
+                details = []
+                if default:
+                    details.append(f"主力: {default}")
+                if vision:
+                    details.append(f"视觉: {vision}")
+                extra = f" ({', '.join(details)})" if details else ""
+                print(f"  {color('✓', Colors.GREEN)} {display}: 运行中 ({len(models)} 个模型){extra}")
+        else:
+            display = li.get("display_name", li.get("name", ""))
+            print(f"  {color('✓', Colors.GREEN)} {display}: 运行中（暂无模型）")
 
     if has_embedded:
         print(f"  {color('✓', Colors.GREEN)} 离线兜底模型: 已安装")
@@ -854,13 +1155,18 @@ def cmd_quickstart(args) -> int:
         )
         print()
 
-    # 确定主力提供商：Ollama 优先 > 云端 API > 嵌入式
+    # 确定主力提供商：Ollama > LM Studio > llama.cpp > 云端 API > 嵌入式
     primary_id = ""
     primary_model = ""
+    primary_local_info = None
 
     if ollama_info:
         primary_id = "ollama"
         primary_model = ollama_info["default_model"]
+    elif local_server_infos:
+        primary_local_info = local_server_infos[0]
+        primary_id = primary_local_info["provider_id"]
+        primary_model = primary_local_info["default_model"]
     elif api_providers:
         primary_id = api_providers[0]["id"]
         primary_model = api_providers[0]["default_model"]
@@ -875,6 +1181,7 @@ def cmd_quickstart(args) -> int:
     # ── Step 3: 构建路由链并写入 ──
     fallback_chain = _build_fallback_chain(
         api_providers, ollama_info, has_embedded, primary_id,
+        local_server_infos=local_server_infos,
     )
 
     # 如果用户选择降级旧配置，将旧配置插入 fallback 链
@@ -897,20 +1204,25 @@ def cmd_quickstart(args) -> int:
             pass
 
     # 写入配置
-    # 先调用 _update_config_for_provider 设置 auth.json
     if primary_id == "ollama":
         _configure_ollama(ollama_info)
     elif primary_id == "embedded":
         _configure_embedded()
+    elif primary_local_info:
+        _configure_local_server(primary_local_info)
     else:
-        # 找到对应的 provider dict
+        # 找到对应的 cloud provider dict
         for p in api_providers:
             if p["id"] == primary_id:
                 _configure_provider(p)
                 break
 
     # 然后写入完整的智能路由（覆盖上面写入的 model 配置）
-    _write_smart_routing(primary_id, primary_model, fallback_chain, api_providers, ollama_info)
+    _write_smart_routing(
+        primary_id, primary_model, fallback_chain,
+        api_providers, ollama_info,
+        local_server_infos=local_server_infos,
+    )
 
     # MemPalace MCP 自动配置（如果已安装且未配置）
     if mempalace_info and mempalace_info.get("installed"):
@@ -930,6 +1242,8 @@ def cmd_quickstart(args) -> int:
     # 主力
     _provider_names = {p["id"]: p["name"] for p in _PROVIDER_CHECKS}
     _provider_names["ollama"] = "Ollama（本地）"
+    _provider_names["lm_studio"] = "LM Studio（本地）"
+    _provider_names["llama_cpp"] = "llama.cpp（本地）"
     _provider_names["embedded"] = "Qwen2.5-0.5B（离线）"
 
     primary_name = _provider_names.get(primary_id, primary_id)
@@ -943,8 +1257,11 @@ def cmd_quickstart(args) -> int:
 
     # auxiliary.vision 显示
     vision_model = (ollama_info or {}).get("vision_model")
+    if not vision_model and local_server_infos:
+        vision_model = local_server_infos[0].get("vision_model")
     if vision_model:
-        print(f"  👁 视觉分析: Ollama（本地） — {vision_model} (auxiliary)")
+        vision_label = "Ollama（本地）" if ollama_info and ollama_info.get("vision_model") else "本地服务"
+        print(f"  👁 视觉分析: {vision_label} — {vision_model} (auxiliary)")
 
     # coding 模型显示
     coding_models = [m for m in (ollama_info or {}).get("classified_models", []) if m.get("type") == "coding"]
