@@ -91,7 +91,10 @@ _VISION_FAMILIES = (
     "moondream", "llama-v", "llava-llama",
 )
 # 匹配家族但实际是编码专用模型的排除关键词
-_VISION_FAMILY_EXCLUSIONS = ("coder", "code-", "instruct-code", "-deepseek")
+# 注: 模型名会被 replace('-', ' ') 归一化，所以排除词也需考虑空格形式
+_VISION_FAMILY_EXCLUSIONS = (
+    "coder", "code ", "instruct-code", "deepseek", "yi-lightning",
+)
 
 _OLLAMA_MODEL_INFO_CACHE = {}
 
@@ -356,7 +359,11 @@ def _classify_local_model(name: str) -> str:
     if any(kw in name_lower for kw in _REASONING_KEYWORDS):
         return "reasoning"
     # L1.5: 编码模型检测
-    if any(kw in name_lower for kw in ("coder", "code-", "instruct-code")):
+    # 注意: name_lower 已做过 replace('-', ' ')，所以 'coder' 匹配 qwen3 coder，
+    # 但 'code-' 不再匹配。用单词边界检查替代。
+    if "coder" in name_lower or "code " in name_lower:
+        return "coding"
+    if re.search(r"\bcode\b", name_lower):
         return "coding"
 
     # L2: 已知视觉家族检测（排除编码专用模型）
@@ -854,6 +861,12 @@ def _write_smart_routing(
                 "/coding" if coding_models else "",
                 "/short_chat" if small_models else "",
             )
+        else:
+            # 单模型或无模型场景: 清除旧 model_routing 防止残留
+            # 例如用户从 Ollama 多模型切换到 llama.cpp 单模型时,
+            # 旧规则仍引用 Ollama 模型名, 会被 _apply_model_routing 激活
+            cfg.pop("model_routing", None)
+            logger.info("无 model_routing 规则 (单模型场景), 已清除旧规则")
 
         save_config(cfg)
 

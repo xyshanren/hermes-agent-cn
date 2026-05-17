@@ -257,6 +257,60 @@ class SmartRouter:
         self._set_cache("cloud_available", False)
         return False
 
+    def check_local_servers(self) -> Dict[str, Any]:
+        """检测本地 OpenAI 兼容服务（LM Studio、llama.cpp 等）。
+
+        通过检查 model 配置中的 base_url 判断是否为本地服务，
+        并尝试 GET {base_url}/models 验证可用性。
+        """
+        result: Dict[str, Any] = {
+            "online": False,
+            "provider": "",
+            "base_url": "",
+            "models": [],
+        }
+        
+        model_cfg = self.config.get("model", {})
+        if not isinstance(model_cfg, dict):
+            return result
+        
+        base_url = (model_cfg.get("base_url") or "").strip()
+        if not base_url:
+            return result
+        
+        # 是否为本地 URL（localhost / 127.0.0.1）
+        is_local = (
+            "localhost" in base_url.lower()
+            or base_url.startswith("http://127.")
+            or base_url.startswith("https://127.")
+        )
+        if not is_local:
+            return result
+        
+        try:
+            import json, urllib.request
+            models_url = base_url.rstrip("/") + "/models"
+            req = urllib.request.Request(
+                models_url, method="GET",
+                headers={"Accept": "application/json"},
+            )
+            resp = urllib.request.urlopen(req, timeout=3)
+            if resp.status == 200:
+                data = json.loads(resp.read().decode())
+                models = data.get("data", data.get("models", []))
+                model_names = [
+                    m.get("id", m.get("name", ""))
+                    for m in models
+                    if m.get("id") or m.get("name")
+                ]
+                result["online"] = True
+                result["base_url"] = base_url
+                result["models"] = model_names
+        except Exception:
+            pass
+        
+        return result
+
     def check_embedded(self) -> bool:
         """检查嵌入式推理是否可用。"""
         cached = self._get_cached("embedded_available")
@@ -461,11 +515,17 @@ class SmartRouter:
 
     def status_report(self) -> Dict[str, Any]:
         """生成当前路由状态报告（中文）。"""
+        local_servers = self.check_local_servers()
         return {
             "ollama": {
                 "online": self.check_ollama(),
                 "host": self.ollama_config.get("host", OLLAMA_DEFAULT_HOST),
                 "port": self.ollama_config.get("port", OLLAMA_DEFAULT_PORT),
+            },
+            "local_servers": {
+                "online": local_servers["online"],
+                "base_url": local_servers["base_url"],
+                "models": local_servers["models"],
             },
             "cloud": {
                 "available": self.check_cloud(),
@@ -482,6 +542,20 @@ class SmartRouter:
         lines = ["=== 路由引擎状态 ==="]
         lines.append(f"模式: {status['routing_mode']}")
         lines.append(f"Ollama: {'✅ 在线' if status['ollama']['online'] else '❌ 离线'}")
+        
+        # 本地服务（LM Studio / llama.cpp）
+        local = status["local_servers"]
+        if local["base_url"]:
+            if local["online"]:
+                model_list = ", ".join(local["models"][:3])
+                if len(local["models"]) > 3:
+                    model_list += f", ... (+{len(local['models']) - 3})"
+                lines.append(f"本地服务: ✅ 在线 ({local['base_url']}) — {model_list}")
+            else:
+                lines.append(f"本地服务: ❌ 离线 ({local['base_url']})")
+        else:
+            lines.append(f"本地服务: ❌ 未配置")
+        
         lines.append(f"云端 API: {'✅ 可用' if status['cloud']['available'] else '❌ 未配置'}")
         lines.append(f"嵌入式模型: {'✅ 可用' if status['embedded']['available'] else '❌ 未安装'}")
         return "\n".join(lines)
