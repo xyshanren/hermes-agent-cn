@@ -343,9 +343,11 @@ def _classify_local_model(name: str) -> str:
     Returns:
         "vision" | "reasoning" | "coding" | "text"
     """
-    # Normalize model name: strip common suffixes and separators
-    # LM Studio / llama.cpp model names may use hyphens or colons
-    name_lower = name.lower().split(":")[0]  # Ollama-style tag
+    name_lower = name.lower()
+    # llama.cpp uses "model:" prefix (e.g. "model:qwen2.5-vl:7b") — strip it first
+    if name_lower.startswith("model:"):
+        name_lower = name_lower[6:]
+    name_lower = name_lower.split(":")[0]  # Ollama-style tag
     name_lower = name_lower.replace("-", " ")  # Normalize hyphens
 
     # Remove size suffixes like "8b", "70b" etc.
@@ -415,12 +417,12 @@ def _detect_local_server(server_config: dict) -> Optional[dict]:
             data = json.loads(resp.read().decode())
             models = data.get("data", data.get("models", []))
             if models:
-                # OpenAI format: [{id: "model-name", ...}]
-                # Extract model IDs
+                # Filter out non-model entries like "global" (preset without model file)
                 model_names = [
                     m.get("id", m.get("name", ""))
                     for m in models
-                    if m.get("id") or m.get("name")
+                    if (m.get("id") or m.get("name"))
+                    and m.get("id") != "global"
                 ]
                 if model_names:
                     classified = [
@@ -1206,12 +1208,33 @@ def cmd_quickstart(args) -> int:
             if isinstance(old_model_cfg, dict):
                 old_provider = old_model_cfg.get("provider", "")
                 old_default = old_model_cfg.get("default", "")
-                if old_provider and old_default and old_provider != primary_id:
-                    # 插入到链头（作为第一 fallback）
+                old_base_url = old_model_cfg.get("base_url", "").rstrip("/")
+                
+                # 获取新主力的 base_url
+                new_base_url = ""
+                if primary_local_info:
+                    new_base_url = primary_local_info.get("base_url", "").rstrip("/")
+                
+                # 同 base_url = 同一服务，不重复加
+                same_service = bool(
+                    old_base_url and new_base_url
+                    and old_base_url == new_base_url
+                )
+                
+                if (
+                    old_provider and old_default
+                    and old_provider != primary_id
+                    and not same_service
+                ):
                     old_entry = {"provider": old_provider, "model": old_default}
-                    # 去重
-                    existing_providers = {f.get("provider") for f in fallback_chain}
-                    if old_provider not in existing_providers:
+                    if old_base_url:
+                        old_entry["base_url"] = old_base_url
+                    # 去重（provider+model）
+                    existing_entries = {
+                        (f.get("provider"), f.get("model"))
+                        for f in fallback_chain
+                    }
+                    if (old_provider, old_default) not in existing_entries:
                         fallback_chain.insert(0, old_entry)
         except Exception:
             pass
