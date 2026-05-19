@@ -2370,7 +2370,7 @@ def systemd_start(system: bool = False):
         _preflight_user_systemd()
     _require_service_installed("start", system=system)
     refresh_systemd_unit_if_needed(system=system)
-    _run_systemctl(["start", get_service_name()], system=system, check=True, timeout=30)
+    _run_systemctl(["start", get_service_name()], system=system, check=True, timeout=90)
     print(f"✓ {_service_scope_label(system).capitalize()} service started")
 
 
