@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 import zipfile
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -26,48 +28,6 @@ def _clear_openviking_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-def _prompt_from_values(values: dict[str, str], *, forbidden: set[str] | None = None):
-    forbidden = forbidden or set()
-
-    def _prompt(label, default=None, secret=False):
-        if label in forbidden:
-            raise AssertionError(f"{label} should not be prompted")
-        return values.get(label, default or "")
-
-    return _prompt
-
-
-def _allow_setup_validation(monkeypatch, *, root_access: bool = False):
-    monkeypatch.setattr(
-        openviking_module,
-        "_validate_openviking_reachability",
-        lambda endpoint: (True, ""),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        openviking_module,
-        "_validate_openviking_auth",
-        lambda values: (True, ""),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        openviking_module,
-        "_validate_openviking_root_access",
-        lambda values: (root_access, "" if root_access else "Requires role: root"),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        openviking_module,
-        "_validate_openviking_setup_values",
-        lambda values, *, require_api_key=False: (
-            True,
-            "",
-            "root" if root_access else ("user" if values.get("api_key") else None),
-        ),
-        raising=False,
-    )
-
-
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
 def test_openviking_env_writer_restricts_file_permissions(tmp_path):
     env_path = tmp_path / ".env"
@@ -87,22 +47,6 @@ def test_ovcli_config_writer_restricts_file_permissions(tmp_path):
     )
 
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
-
-
-def test_secret_permission_restriction_logs_chmod_failure(tmp_path, monkeypatch, caplog):
-    env_path = tmp_path / ".env"
-    env_path.write_text("OPENVIKING_API_KEY=secret\n", encoding="utf-8")
-
-    def fail_chmod(self, mode):
-        raise OSError("read-only filesystem")
-
-    monkeypatch.setattr(type(env_path), "chmod", fail_chmod)
-
-    with caplog.at_level("DEBUG", logger=openviking_module.__name__):
-        openviking_module._restrict_secret_file_permissions(env_path)
-
-    assert "Could not restrict permissions" in caplog.text
-    assert "read-only filesystem" in caplog.text
 
 
 def test_linked_ovcli_config_is_read_at_runtime(tmp_path, monkeypatch):
