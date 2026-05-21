@@ -10608,6 +10608,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
         )
         current_branch = result.stdout.strip()
 
+        # Determine the target branch. Default is "main" (the long-standing
+        # CLI behavior); --branch overrides for callers that want to update
+        # against a non-default channel.
+        branch = _resolve_update_branch(args)
+
         # If user is on a different branch than the update target, switch
         # to the target. When the target is "main" this is the historical
         # "always update against main" behavior; for any other target it's
