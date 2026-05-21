@@ -8136,83 +8136,37 @@ def _ws_request_is_allowed(ws: "WebSocket") -> bool:
     return _ws_host_origin_is_allowed(ws) and _ws_client_is_allowed(ws)
 
 
-def _ws_auth_mode() -> str:
-    """Short label for the active WS auth mode — logged on every connection."""
-    if getattr(app.state, "auth_required", False):
-        return "gated"
-    bound_host = (getattr(app.state, "bound_host", "") or "").strip().lower()
-    if bound_host and bound_host not in _LOOPBACK_HOSTS:
-        return "insecure"
-    return "loopback"
-
-
-def _ws_auth_reason(ws: "WebSocket") -> tuple[Optional[str], str]:
-    """Validate WS-upgrade auth; return ``(reason, credential)``.
-
-    ``reason`` is None when the credential is accepted, else a short
-    machine-parseable token explaining the rejection (``no_credential``,
-    ``token_mismatch``, ``ticket_invalid``, ``internal_invalid``).
-    ``credential`` names which credential type was presented (``ticket``,
-    ``internal``, ``token``, or ``none``) so the accepted path can log *how*
-    a peer authed, not just that it did.
+def _ws_auth_ok(ws: "WebSocket") -> bool:
+    """Validate WS-upgrade auth in either loopback or gated mode.
 
     Loopback / ``--insecure``: legacy ``?token=<_SESSION_TOKEN>`` query
     parameter, constant-time compared.
 
-    Gated (public bind, no ``--insecure``): one of two credentials —
+    Gated (public bind, no ``--insecure``): ``?ticket=<single-use>`` query
+    parameter consumed against the dashboard-auth ticket store. The legacy
+    token path is unconditionally rejected in this mode (the SPA bundle
+    isn't carrying the token any longer).
 
-    * ``?ticket=<single-use>`` — a browser-minted, single-use, 30s-TTL ticket
-      consumed against the dashboard-auth ticket store. This is what the SPA
-      (and native clients) use.
-    * ``?internal=<process-credential>`` — the process-lifetime internal
-      credential, used only by WS clients the server spawns itself (the
-      embedded-TUI PTY child attaching to ``/api/ws`` and ``/api/pub``). It
-      is multi-use and never expires so the child can reconnect, and is never
-      injected into the SPA — see ``dashboard_auth.ws_tickets`` for the
-      threat model.
-
-    The legacy ``?token=`` path is unconditionally rejected in gated mode
-    (the SPA bundle isn't carrying the token any longer, and a leaked
-    ``_SESSION_TOKEN`` must not grant WS access once the gate is engaged).
-
-    Audit-logs the rejection so operators can debug "WS keeps closing"
-    issues from the log.
+    Returns True if the WS should be accepted; callers close with the
+    appropriate WS code (4401) on False. Audit-logs the rejection so
+    operators can debug "WS keeps closing" issues from the log.
     """
     auth_required = bool(getattr(app.state, "auth_required", False))
     if auth_required:
+        ticket = ws.query_params.get("ticket", "")
+        if not ticket:
+            return False
         # Lazy import — keeps this function importable in test harnesses
         # that don't bring in the dashboard_auth layer.
         from hermes_cli.dashboard_auth.audit import AuditEvent, audit_log
         from hermes_cli.dashboard_auth.ws_tickets import (
             TicketInvalid,
-            consume_internal_credential,
             consume_ticket,
         )
 
-        # Server-spawned children (PTY child → /api/ws, /api/pub) present the
-        # multi-use internal credential rather than a single-use ticket, so
-        # they survive reconnects and slow cold boots.
-        internal = ws.query_params.get("internal", "")
-        if internal:
-            try:
-                consume_internal_credential(internal)
-                return None, "internal"
-            except TicketInvalid as exc:
-                audit_log(
-                    AuditEvent.WS_TICKET_REJECTED,
-                    reason=f"internal: {exc}",
-                    ip=(ws.client.host if ws.client else ""),
-                    path=ws.url.path,
-                )
-                return "internal_invalid", "internal"
-
-        ticket = ws.query_params.get("ticket", "")
-        if not ticket:
-            return "no_credential", "none"
-
         try:
             consume_ticket(ticket)
-            return None, "ticket"
+            return True
         except TicketInvalid as exc:
             audit_log(
                 AuditEvent.WS_TICKET_REJECTED,
@@ -8220,19 +8174,10 @@ def _ws_auth_reason(ws: "WebSocket") -> tuple[Optional[str], str]:
                 ip=(ws.client.host if ws.client else ""),
                 path=ws.url.path,
             )
-            return "ticket_invalid", "ticket"
+            return False
 
     token = ws.query_params.get("token", "")
-    if not token:
-        return "no_credential", "none"
-    if hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode()):
-        return None, "token"
-    return "token_mismatch", "token"
-
-
-def _ws_auth_ok(ws: "WebSocket") -> bool:
-    """True when the WS-upgrade credential is accepted. See _ws_auth_reason."""
-    return _ws_auth_reason(ws)[0] is None
+    return hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())
 
 # Per-channel subscriber registry used by /api/pub (PTY-side gateway → dashboard)
 # and /api/events (dashboard → browser sidebar).  Keyed by an opaque channel id
@@ -8336,14 +8281,16 @@ def _build_sidecar_url(channel: str) -> Optional[str]:
 
     Loopback / ``--insecure``: uses ``?token=<_SESSION_TOKEN>``.
 
-    Gated mode: authenticates with the process-lifetime internal credential
-    (``?internal=``), the same one ``_build_gateway_ws_url`` uses. The PTY
-    child is a server-spawned process we trust; the credential is multi-use
-    and never expires, so the child can reconnect ``/api/pub`` without a new
-    URL. (This previously minted a single-use 30s ticket, which meant the
-    child could not reconnect and could miss the window on a slow cold boot.)
-    Connections authenticated this way are recorded under the
-    ``server-internal`` identity in the audit log.
+    Gated mode: mints a single-use ticket via the dashboard-auth ticket
+    store (server-side mint, no HTTP round trip — the PTY child is a
+    server-spawned process and we trust it). The ticket binds to the
+    pseudo-user ``"pty-sidecar"`` so audit logs can distinguish these from
+    browser-initiated tickets.
+
+    The single-use lifetime means the PTY child cannot reconnect without a
+    new sidecar URL. PTY children open ``/api/pub`` once at startup; if
+    reconnect semantics ever become important, this should be upgraded to
+    a long-lived process-scoped token.
     """
     host = getattr(app.state, "bound_host", None)
     port = getattr(app.state, "bound_port", None)
@@ -8354,13 +8301,11 @@ def _build_sidecar_url(channel: str) -> Optional[str]:
     netloc = f"[{host}]:{port}" if ":" in host and not host.startswith("[") else f"{host}:{port}"
 
     if getattr(app.state, "auth_required", False):
-        # Gated mode — use the internal credential so the WS upgrade survives
-        # _ws_auth_ok and the child can reconnect.
-        from hermes_cli.dashboard_auth.ws_tickets import internal_ws_credential
+        # Gated mode — mint a ticket so the WS upgrade survives _ws_auth_ok.
+        from hermes_cli.dashboard_auth.ws_tickets import mint_ticket
 
-        qs = urllib.parse.urlencode(
-            {"internal": internal_ws_credential(), "channel": channel}
-        )
+        ticket = mint_ticket(user_id="pty-sidecar", provider="server-internal")
+        qs = urllib.parse.urlencode({"ticket": ticket, "channel": channel})
     else:
         qs = urllib.parse.urlencode({"token": _SESSION_TOKEN, "channel": channel})
 
@@ -8411,20 +8356,9 @@ async def pty_ws(ws: WebSocket) -> None:
         await ws.close(code=4404, reason="embedded chat disabled")
         return
 
-    # --- auth + host/origin/peer check (before accept so we can close
-    #     cleanly AND tell the client WHY via the close code + reason).
-    #     Each gate maps to a distinct close code so the log and the
-    #     browser banner agree on the cause:
-    #       4401 bad credential   4403 host/origin mismatch
-    #       4408 peer not allowed  4404 chat disabled
-    auth_reason, cred = _ws_auth_reason(ws)
-    mode = _ws_auth_mode()
-    if auth_reason is not None:
-        _log.warning(
-            "pty auth rejected reason=%s mode=%s cred=%s peer=%s",
-            auth_reason, mode, cred, peer,
-        )
-        await ws.close(code=4401, reason=_ws_close_reason(f"auth: {auth_reason}"))
+    # --- auth + loopback check (before accept so we can close cleanly) ---
+    if not _ws_auth_ok(ws):
+        await ws.close(code=4401)
         return
 
     host_origin_reason = _ws_host_origin_reason(ws)
