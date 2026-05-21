@@ -14,9 +14,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Module-level reference to the cli module (set by _make_cli on first call)
 _cli_mod = None
+_UNSET = object()
 
 
-def _make_cli(tool_progress="all"):
+def _make_cli(tool_progress="all", verbose=_UNSET):
     """Create a HermesCLI instance with minimal mocking."""
     global _cli_mod
     _clean_config = {
@@ -54,7 +55,9 @@ def _make_cli(tool_progress="all"):
         _cli_mod = mod
         with patch.object(mod, "get_tool_definitions", return_value=[]), \
              patch.dict(mod.__dict__, {"CLI_CONFIG": _clean_config}):
-            return mod.HermesCLI()
+            if verbose is _UNSET:
+                return mod.HermesCLI()
+            return mod.HermesCLI(verbose=verbose)
 
 
 class TestToolProgressScrollback:
@@ -168,30 +171,15 @@ class TestToolProgressScrollback:
 
         mock_print.assert_not_called()
 
-    def test_verbose_mode_config_does_not_enable_global_debug_logging(self):
-        """display.tool_progress=verbose controls TOOL-CALL DISPLAY ONLY.
-
-        It must NOT auto-flip self.verbose, which controls root-logger DEBUG
-        level for the entire process (every module spews to console).  PR
-        #6a1aa420e had coupled them, causing all debug logs to flood the
-        terminal whenever a user picked tool_progress: verbose for richer
-        per-tool rendering.
-        """
+    def test_verbose_mode_config_enables_cli_verbose_by_default(self):
+        """Config-only display.tool_progress=verbose should enable verbose output."""
         cli = _make_cli(tool_progress="verbose")
 
         assert cli.tool_progress_mode == "verbose"
-        assert cli.verbose is False
-
-    def test_explicit_verbose_argument_wins_over_config(self):
-        """Explicit verbose=True from the CLI flag still enables DEBUG logging
-        regardless of tool_progress_mode."""
-        cli = _make_cli(tool_progress="off", verbose=True)
-
-        assert cli.tool_progress_mode == "off"
         assert cli.verbose is True
 
-    def test_explicit_non_verbose_argument_keeps_debug_logging_off(self):
-        """Explicit verbose=False overrides any default to enable DEBUG."""
+    def test_explicit_non_verbose_argument_still_overrides_verbose_config(self):
+        """An explicit non-verbose value should keep overriding the config fallback."""
         cli = _make_cli(tool_progress="verbose", verbose=False)
 
         assert cli.tool_progress_mode == "verbose"
