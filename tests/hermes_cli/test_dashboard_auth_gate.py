@@ -69,3 +69,154 @@ def test_loopback_host_header_validation_still_enforced(client_loopback):
     """DNS-rebinding protection: a foreign Host header is rejected."""
     r = client_loopback.get("/api/status", headers={"Host": "evil.test"})
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# should_require_auth predicate (Task 0.2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("host,allow_public,expected", [
+    ("127.0.0.1", False, False),
+    ("127.0.0.1", True,  False),
+    ("localhost", False, False),
+    ("::1",       False, False),
+    ("0.0.0.0",   True,  False),    # --insecure escape hatch
+    ("0.0.0.0",   False, True),
+    ("192.168.1.5", False, True),
+    ("10.0.0.1",  True,  False),
+    ("100.64.0.1", False, True),    # Tailscale CGNAT — treated as public
+    ("hermes-agent-prod-abc.fly.dev", False, True),
+])
+def test_should_require_auth_truth_table(host, allow_public, expected):
+    from hermes_cli.web_server import should_require_auth
+    assert should_require_auth(host, allow_public) is expected
+
+
+# ---------------------------------------------------------------------------
+# start_server stashes auth_required on app.state (Task 0.3)
+# ---------------------------------------------------------------------------
+
+
+def _stub_uvicorn_run(monkeypatch):
+    """Replace uvicorn.run with a no-op recorder so start_server returns
+    immediately (rather than blocking on the event loop).  Returns the dict
+    that will capture the keyword args."""
+    import uvicorn
+    captured: dict = {}
+
+    def _fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(uvicorn, "run", _fake_run)
+    return captured
+
+
+def test_start_server_loopback_sets_auth_required_false(monkeypatch):
+    """Loopback bind: app.state.auth_required is False after start_server."""
+    _stub_uvicorn_run(monkeypatch)
+    # Force a fresh state to detect that start_server actually set it.
+    web_server.app.state.auth_required = None
+    web_server.start_server(
+        host="127.0.0.1", port=9119,
+        open_browser=False, allow_public=False,
+    )
+    assert web_server.app.state.auth_required is False
+
+
+def test_start_server_insecure_public_sets_auth_required_false(monkeypatch):
+    """``--insecure`` (allow_public=True) on a public host: gate stays OFF."""
+    _stub_uvicorn_run(monkeypatch)
+    web_server.app.state.auth_required = None
+    web_server.start_server(
+        host="0.0.0.0", port=9119,
+        open_browser=False, allow_public=True,
+    )
+    assert web_server.app.state.auth_required is False
+
+
+def test_start_server_public_without_insecure_records_auth_required(monkeypatch):
+    """Public bind without --insecure: the gate engages and auth_required=True.
+
+    With no providers registered, this fails closed with SystemExit. The
+    flag-stashing happens BEFORE the exit so the rest of the system can
+    branch on it. (See task 3.5 tests below for the with-provider path.)
+    """
+    from hermes_cli.dashboard_auth import clear_providers
+    clear_providers()
+    _stub_uvicorn_run(monkeypatch)
+    web_server.app.state.auth_required = None
+    with pytest.raises(SystemExit):
+        web_server.start_server(
+            host="0.0.0.0", port=9119,
+            open_browser=False, allow_public=False,
+        )
+    assert web_server.app.state.auth_required is True
+
+
+# ---------------------------------------------------------------------------
+# Task 3.5: start_server fail-closed + proxy_headers + index-token suppression
+# ---------------------------------------------------------------------------
+
+
+def test_start_server_gate_with_provider_proceeds_and_sets_proxy_headers(monkeypatch):
+    """With at least one provider, public bind + no --insecure starts the server.
+
+    The SystemExit-refusing-to-bind guard is REPLACED in gated mode by
+    "the gate engages", so as long as a provider is registered the bind
+    succeeds.  uvicorn is called with proxy_headers=True so X-Forwarded-Proto
+    from Fly's TLS terminator is honoured for cookie Secure-flag decisions.
+    """
+    from hermes_cli.dashboard_auth import clear_providers, register_provider
+    from tests.hermes_cli.conftest_dashboard_auth import StubAuthProvider
+
+    clear_providers()
+    register_provider(StubAuthProvider())
+    captured = _stub_uvicorn_run(monkeypatch)
+    try:
+        web_server.app.state.auth_required = None
+        web_server.start_server(
+            host="0.0.0.0", port=9119,
+            open_browser=False, allow_public=False,
+        )
+        assert web_server.app.state.auth_required is True
+        assert captured["kwargs"].get("host") == "0.0.0.0"
+        assert captured["kwargs"].get("proxy_headers") is True
+    finally:
+        clear_providers()
+
+
+def test_start_server_gate_without_provider_fails_closed(monkeypatch):
+    """No providers + gate would activate → SystemExit with a clear message."""
+    from hermes_cli.dashboard_auth import clear_providers
+
+    clear_providers()
+    _stub_uvicorn_run(monkeypatch)
+    web_server.app.state.auth_required = None
+    with pytest.raises(SystemExit, match=r"no auth providers"):
+        web_server.start_server(
+            host="0.0.0.0", port=9119,
+            open_browser=False, allow_public=False,
+        )
+
+
+def test_start_server_loopback_keeps_proxy_headers_off(monkeypatch):
+    """Loopback bind: proxy_headers stays False (no TLS terminator in front)."""
+    captured = _stub_uvicorn_run(monkeypatch)
+    web_server.start_server(
+        host="127.0.0.1", port=9119,
+        open_browser=False, allow_public=False,
+    )
+    assert captured["kwargs"].get("proxy_headers") is False
+
+
+def test_start_server_insecure_keeps_proxy_headers_off(monkeypatch):
+    """--insecure: gate stays off, proxy_headers stays off."""
+    captured = _stub_uvicorn_run(monkeypatch)
+    web_server.start_server(
+        host="0.0.0.0", port=9119,
+        open_browser=False, allow_public=True,
+    )
+    assert web_server.app.state.auth_required is False
+    assert captured["kwargs"].get("proxy_headers") is False
