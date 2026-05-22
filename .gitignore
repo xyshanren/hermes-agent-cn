@@ -4,7 +4,6 @@
 *.pyc*
 __pycache__/
 .venv/
-hermes-venv/
 .vscode/
 .env
 .env.local
@@ -19,13 +18,13 @@ __pycache__/web_tools.cpython-310.pyc
 logs/
 data/
 .pytest_cache/
+.pytest-cache/
 tmp/
 temp_vision_images/
 hermes-*/*
 examples/
 tests/quick_test_dataset.jsonl
 tests/sample_dataset.jsonl
-tests/image
 run_datagen_kimik2-thinking.sh
 run_datagen_megascience_glm4-6.sh
 run_datagen_sonnet.sh
@@ -72,12 +71,6 @@ mini-swe-agent/
 result
 website/static/api/skills-index.json
 models-dev-upstream/
-
-# WorkBuddy working memory (local session context)
-.workbuddy/
-
-# MemPalace + graphify generated files (knowledge base artifacts)
-graphify-out/
-entities.json
-KNOWLEDGE_UPDATE.md
-mempalace-status.json
+hermes_cli/tui_dist/*
+hermes_cli/scripts/
+docs/superpowers/*

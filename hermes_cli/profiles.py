@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import List, Optional
 
+from agent.skill_utils import is_excluded_skill_path
+
 _PROFILE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 # Directories bootstrapped inside every new profile
@@ -64,12 +66,38 @@ _CLONE_SUBDIR_FILES = [
     "memories/USER.md",
 ]
 
-# Runtime files stripped after --clone-all (shouldn't carry over)
-_CLONE_ALL_STRIP = [
+# Runtime files stripped after --clone-all (shouldn't carry over).
+# Kept as a post-copy step rather than in the ignore filter because they
+# are created dynamically during normal use and may be absent at copy time.
+_CLONE_ALL_STRIP: list[str] = [
     "gateway.pid",
     "gateway_state.json",
     "processes.json",
 ]
+
+# Infrastructure artifacts excluded from --clone-all when the source is the
+# default profile (``~/.hermes``).  Named profiles never contain these
+# directories at root, so the exclusion is gated to avoid silently dropping
+# user data from a named-profile source.
+#
+# Rationale per item:
+#   hermes-agent  — git repo checkout (~84 MB source + ~3 GB venv)
+#   .worktrees    — git worktrees
+#   profiles      — sibling named profiles (recursive copy never intended)
+#   bin           — installed binaries (tirith etc., ~10 MB) shared per-host
+#   node_modules  — npm packages (hundreds of MB)
+#
+# See ``_DEFAULT_EXPORT_EXCLUDE_ROOT`` below for the broader export-side
+# exclusion list (export drops state.db / logs / caches too because the
+# archive is a portable snapshot; clone-all keeps those because the cloned
+# profile is meant to keep working immediately).
+_CLONE_ALL_DEFAULT_EXCLUDE_ROOT: frozenset[str] = frozenset({
+    "hermes-agent",
+    ".worktrees",
+    "profiles",
+    "bin",
+    "node_modules",
+})
 
 # Marker file written by `hermes profile create --no-skills`.  When present in
 # a profile's root, callers of seed_profile_skills() (fresh-create, `hermes
@@ -89,23 +117,48 @@ def has_bundled_skills_opt_out(profile_dir: Path) -> bool:
 
 
 def _clone_all_copytree_ignore(source_dir: Path):
-    """Ignore ``profiles/`` at the root of *source_dir* only.
+    """Exclude infrastructure artifacts when cloning a profile via --clone-all.
 
-    ``~/.hermes`` contains ``profiles/<name>/`` for sibling named profiles.
-    ``shutil.copytree`` would otherwise duplicate that entire tree inside the
-    new profile (recursive ``.../profiles/.../profiles/...``). Export already
-    excludes ``profiles`` via ``_DEFAULT_EXPORT_EXCLUDE_ROOT`` — match that
-    behavior for ``--clone-all``.
+    Two categories:
+      1. Root-level entries in ``_CLONE_ALL_DEFAULT_EXCLUDE_ROOT`` — known
+         Hermes infrastructure directories that only the default profile
+         (``~/.hermes``) ever contains.  Gated on ``source_dir`` actually
+         being the default profile so a named-profile source never has its
+         own data silently dropped.
+      2. Universal exclusions at any depth — Python bytecode caches that
+         are stale or regenerable (``__pycache__``, ``*.pyc``, ``*.pyo``)
+         and runtime sockets / temp files (``*.sock``, ``*.tmp``).
+
+    The export-side ignore (``_default_export_ignore``) uses the same
+    two-tier pattern with the broader ``_DEFAULT_EXPORT_EXCLUDE_ROOT`` set
+    because the export archive is a portable snapshot rather than a live
+    clone.
     """
     source_resolved = source_dir.resolve()
+    is_default_source = source_resolved == _get_default_hermes_home().resolve()
 
     def _ignore(directory: str, names: List[str]) -> List[str]:
-        try:
-            if Path(directory).resolve() == source_resolved:
-                return [n for n in names if n == "profiles"]
-        except (OSError, ValueError):
-            pass
-        return []
+        ignored: list[str] = []
+        for entry in names:
+            # Universal exclusions at any depth.
+            if (
+                entry == "__pycache__"
+                or entry.endswith((".pyc", ".pyo", ".sock", ".tmp"))
+            ):
+                ignored.append(entry)
+                continue
+            # Root-level exclusions only apply when cloning the default profile.
+            if is_default_source:
+                try:
+                    if Path(directory).resolve() == source_resolved:
+                        if entry in _CLONE_ALL_DEFAULT_EXCLUDE_ROOT:
+                            ignored.append(entry)
+                except (OSError, ValueError):
+                    # ``resolve()`` can fail on unusual FS layouts (broken
+                    # symlinks, missing parents).  Fail open — better to
+                    # over-copy than silently drop user data.
+                    pass
+        return ignored
 
     return _ignore
 
@@ -361,6 +414,17 @@ class ProfileInfo:
     distribution_name: Optional[str] = None
     distribution_version: Optional[str] = None
     distribution_source: Optional[str] = None
+    # Free-form description (1-2 sentences) of what this profile is good
+    # at. Persisted in ``<profile_dir>/profile.yaml``. Empty when the
+    # user has not described the profile (legacy profiles, fresh
+    # installs). Surfaced to the kanban decomposer so it can route work
+    # to the right profile based on role rather than name alone.
+    description: str = ""
+    # When True, ``description`` was auto-generated by the LLM
+    # describer and has not been confirmed by the user. The dashboard
+    # surfaces a "review" badge in this case so the user can edit or
+    # accept.
+    description_auto: bool = False
 
 
 def _read_distribution_meta(profile_dir: Path) -> tuple:
@@ -423,9 +487,86 @@ def _count_skills(profile_dir: Path) -> int:
         return 0
     count = 0
     for md in skills_dir.rglob("SKILL.md"):
-        if "/.hub/" not in str(md) and "/.git/" not in str(md):
-            count += 1
+        if is_excluded_skill_path(md):
+            continue
+        count += 1
     return count
+
+
+# ---------------------------------------------------------------------------
+# profile.yaml — per-profile metadata (description, role, etc.)
+# ---------------------------------------------------------------------------
+#
+# We keep this file deliberately tiny and separate from the profile's
+# ``config.yaml``. ``config.yaml`` is the user-facing Hermes config
+# (~5000 lines of defaults); ``profile.yaml`` is metadata ABOUT the
+# profile itself (its role, who described it). Mixing them makes both
+# harder to read.
+#
+# Missing file -> empty defaults; never an error. The kanban decomposer
+# tolerates empty descriptions and just falls back to the profile name.
+
+
+def _profile_yaml_path(profile_dir: Path) -> Path:
+    return profile_dir / "profile.yaml"
+
+
+def read_profile_meta(profile_dir: Path) -> dict:
+    """Read ``<profile_dir>/profile.yaml`` and return a dict.
+
+    Returns ``{"description": "", "description_auto": False}`` when the
+    file is missing or unreadable. Never raises — a corrupt
+    profile.yaml on an unrelated profile must not break
+    ``hermes profile list``.
+    """
+    path = _profile_yaml_path(profile_dir)
+    if not path.is_file():
+        return {"description": "", "description_auto": False}
+    try:
+        import yaml
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        return {"description": "", "description_auto": False}
+    if not isinstance(data, dict):
+        return {"description": "", "description_auto": False}
+    return {
+        "description": str(data.get("description") or "").strip(),
+        "description_auto": bool(data.get("description_auto", False)),
+    }
+
+
+def write_profile_meta(
+    profile_dir: Path,
+    *,
+    description: Optional[str] = None,
+    description_auto: Optional[bool] = None,
+) -> None:
+    """Update ``<profile_dir>/profile.yaml`` in place.
+
+    Only the explicitly passed fields are overwritten; unspecified
+    fields preserve existing values. Creates the file if missing.
+    Profile directory itself must exist.
+    """
+    if not profile_dir.is_dir():
+        raise FileNotFoundError(f"profile directory does not exist: {profile_dir}")
+    import yaml
+    path = _profile_yaml_path(profile_dir)
+    existing: dict = {}
+    if path.is_file():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = yaml.safe_load(f) or {}
+            if isinstance(loaded, dict):
+                existing = loaded
+        except Exception:
+            existing = {}
+    if description is not None:
+        existing["description"] = description.strip()
+    if description_auto is not None:
+        existing["description_auto"] = bool(description_auto)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(existing, f, sort_keys=False, default_flow_style=False)
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +583,7 @@ def list_profiles() -> List[ProfileInfo]:
     if default_home.is_dir():
         model, provider = _read_config_model(default_home)
         dist_name, dist_version, dist_source = _read_distribution_meta(default_home)
+        meta = read_profile_meta(default_home)
         profiles.append(ProfileInfo(
             name="default",
             path=default_home,
@@ -454,6 +596,8 @@ def list_profiles() -> List[ProfileInfo]:
             distribution_name=dist_name,
             distribution_version=dist_version,
             distribution_source=dist_source,
+            description=meta.get("description", ""),
+            description_auto=meta.get("description_auto", False),
         ))
 
     # Named profiles
@@ -468,6 +612,7 @@ def list_profiles() -> List[ProfileInfo]:
             model, provider = _read_config_model(entry)
             alias_path = wrapper_dir / name
             dist_name, dist_version, dist_source = _read_distribution_meta(entry)
+            meta = read_profile_meta(entry)
             profiles.append(ProfileInfo(
                 name=name,
                 path=entry,
@@ -481,6 +626,8 @@ def list_profiles() -> List[ProfileInfo]:
                 distribution_name=dist_name,
                 distribution_version=dist_version,
                 distribution_source=dist_source,
+                description=meta.get("description", ""),
+                description_auto=meta.get("description_auto", False),
             ))
 
     return profiles
@@ -493,6 +640,7 @@ def create_profile(
     clone_config: bool = False,
     no_alias: bool = False,
     no_skills: bool = False,
+    description: Optional[str] = None,
 ) -> Path:
     """Create a new profile directory.
 
@@ -615,6 +763,19 @@ def create_profile(
             )
         except OSError:
             pass  # best-effort — the feature still works via the empty skills/ dir
+
+    # Persist description if the caller provided one. Done last so a
+    # partial-create failure doesn't strand a description file in an
+    # incomplete profile.
+    if description and description.strip():
+        try:
+            write_profile_meta(
+                profile_dir,
+                description=description.strip(),
+                description_auto=False,
+            )
+        except Exception:
+            pass  # non-fatal — user can describe later with `hermes profile describe`
 
     return profile_dir
 
@@ -744,7 +905,49 @@ def delete_profile(name: str, yes: bool = False) -> Path:
 
     # 4. Remove profile directory
     try:
-        shutil.rmtree(profile_dir)
+        def _make_writable(func, path, exc):
+            """onexc/onerror handler: add +w on PermissionError so rmtree can proceed.
+
+            Handles two cases on NixOS (and other systems with read-only
+            copies from immutable stores):
+            1. The path itself isn't writable (e.g. a file with mode 0444)
+            2. The *parent* directory isn't writable (e.g. mode 0555)
+
+            Compatible with both the ``onexc`` API (3.12+, receives an
+            exception instance) and the ``onerror`` API (3.11-, receives
+            ``sys.exc_info()`` tuple).
+            """
+            import stat as _stat
+            import sys as _sys
+
+            # Normalise the two callback signatures:
+            #   onexc(func, path, exc_instance)   — 3.12+
+            #   onerror(func, path, exc_info_tuple) — 3.11
+            if isinstance(exc, tuple):
+                exc = exc[1]  # exc_info → actual exception object
+
+            if isinstance(exc, PermissionError):
+                # Make the path writable
+                try:
+                    os.chmod(path, os.stat(path).st_mode | _stat.S_IWUSR)
+                except OSError:
+                    pass
+                # Also make the parent writable (needed for unlink/rmdir)
+                parent = os.path.dirname(path)
+                if parent:
+                    try:
+                        os.chmod(parent, os.stat(parent).st_mode | _stat.S_IWUSR)
+                    except OSError:
+                        pass
+                func(path)
+            else:
+                raise
+
+        # ``onexc`` was added in 3.12; fall back to ``onerror`` on 3.11.
+        try:
+            shutil.rmtree(profile_dir, onexc=_make_writable)
+        except TypeError:
+            shutil.rmtree(profile_dir, onerror=_make_writable)
         print(f"✓ Removed {profile_dir}")
     except Exception as e:
         print(f"⚠ Could not remove {profile_dir}: {e}")
@@ -938,7 +1141,7 @@ def _default_export_ignore(root_dir: Path):
             if entry == "__pycache__" or entry.endswith((".sock", ".tmp")):
                 ignored.add(entry)
             # npm lockfiles can appear at root
-            elif entry in ("package.json", "package-lock.json"):
+            elif entry in {"package.json", "package-lock.json"}:
                 ignored.add(entry)
         # Root-level exclusions
         if Path(directory) == root_dir:
@@ -1006,7 +1209,7 @@ def _normalize_profile_archive_parts(member_name: str) -> List[str]:
     ):
         raise ValueError(f"Unsafe archive member path: {member_name}")
 
-    parts = [part for part in posix_path.parts if part not in ("", ".")]
+    parts = [part for part in posix_path.parts if part not in {"", "."}]
     if not parts or any(part == ".." for part in parts):
         raise ValueError(f"Unsafe archive member path: {member_name}")
     return parts
@@ -1242,91 +1445,6 @@ def rename_profile(old_name: str, new_name: str) -> Path:
         pass
 
     return new_dir
-
-
-# ---------------------------------------------------------------------------
-# Tab completion
-# ---------------------------------------------------------------------------
-
-def generate_bash_completion() -> str:
-    """Generate a bash completion script for hermes profile names."""
-    return '''# Hermes Agent profile completion
-# Add to ~/.bashrc: eval "$(hermes completion bash)"
-
-_hermes_profiles() {
-    local profiles_dir="$HOME/.hermes/profiles"
-    local profiles="default"
-    if [ -d "$profiles_dir" ]; then
-        profiles="$profiles $(ls "$profiles_dir" 2>/dev/null)"
-    fi
-    echo "$profiles"
-}
-
-_hermes_completion() {
-    local cur prev
-    cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
-
-    # Complete profile names after -p / --profile
-    if [[ "$prev" == "-p" || "$prev" == "--profile" ]]; then
-        COMPREPLY=($(compgen -W "$(_hermes_profiles)" -- "$cur"))
-        return
-    fi
-
-    # Complete profile subcommands
-    if [[ "${COMP_WORDS[1]}" == "profile" ]]; then
-        case "$prev" in
-            profile)
-                COMPREPLY=($(compgen -W "list use create delete show alias rename export import" -- "$cur"))
-                return
-                ;;
-            use|delete|show|alias|rename|export)
-                COMPREPLY=($(compgen -W "$(_hermes_profiles)" -- "$cur"))
-                return
-                ;;
-        esac
-    fi
-
-    # Top-level subcommands
-    if [[ "$COMP_CWORD" == 1 ]]; then
-        local commands="chat model gateway setup status cron doctor dump config skills tools mcp sessions profile update version"
-        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
-    fi
-}
-
-complete -F _hermes_completion hermes
-'''
-
-
-def generate_zsh_completion() -> str:
-    """Generate a zsh completion script for hermes profile names."""
-    return '''#compdef hermes
-# Hermes Agent profile completion
-# Add to ~/.zshrc: eval "$(hermes completion zsh)"
-
-_hermes() {
-    local -a profiles
-    profiles=(default)
-    if [[ -d "$HOME/.hermes/profiles" ]]; then
-        profiles+=("${(@f)$(ls $HOME/.hermes/profiles 2>/dev/null)}")
-    fi
-
-    _arguments \\
-        '-p[Profile name]:profile:($profiles)' \\
-        '--profile[Profile name]:profile:($profiles)' \\
-        '1:command:(chat model gateway setup status cron doctor dump config skills tools mcp sessions profile update version)' \\
-        '*::arg:->args'
-
-    case $words[1] in
-        profile)
-            _arguments '1:action:(list use create delete show alias rename export import)' \\
-                        '2:profile:($profiles)'
-            ;;
-    esac
-}
-
-_hermes "$@"
-'''
 
 
 # ---------------------------------------------------------------------------
