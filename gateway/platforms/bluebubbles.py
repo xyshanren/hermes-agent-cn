@@ -141,6 +141,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         self._private_api_enabled: Optional[bool] = None
         self._helper_connected: bool = False
         self._guid_cache: OrderedDict[str, str] = OrderedDict()
+        self._GUID_CACHE_MAX = 500
 
     # ------------------------------------------------------------------
     # API helpers
@@ -446,13 +447,15 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 if identifier == target:
                     if guid:
                         self._guid_cache[target] = guid
-                        while len(self._guid_cache) > _GUID_CACHE_SIZE:
+                        self._guid_cache.move_to_end(target)
+                        if len(self._guid_cache) > self._GUID_CACHE_MAX:
                             self._guid_cache.popitem(last=False)
                     return guid
                 for part in chat.get("participants", []) or []:
                     if (part.get("address") or "").strip() == target and guid:
                         self._guid_cache[target] = guid
-                        while len(self._guid_cache) > _GUID_CACHE_SIZE:
+                        self._guid_cache.move_to_end(target)
+                        if len(self._guid_cache) > self._GUID_CACHE_MAX:
                             self._guid_cache.popitem(last=False)
                         return guid
         except Exception:
