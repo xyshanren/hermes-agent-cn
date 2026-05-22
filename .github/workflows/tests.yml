@@ -23,7 +23,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        slice: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -65,12 +69,7 @@ jobs:
         # `uv venv` step is needed.
         run: uv sync --locked --python 3.11 --extra all --extra dev
 
-      - name: Minimize uv cache
-        # Optimized for CI: prunes pre-built wheels that are cheap to
-        # re-download, keeping the persisted cache small and fast to restore.
-        run: uv cache prune --ci
-
-      - name: Run tests
+      - name: Run tests (slice ${{ matrix.slice }}/6)
         # Per-file isolation via scripts/run_tests_parallel.py: discovers
         # every test_*.py file under tests/ (excluding integration/ + e2e/),
         # then runs `python -m pytest <file>` in a freshly-spawned subprocess
@@ -88,9 +87,15 @@ jobs:
         # state across files, which is exactly the leakage we wanted to
         # fix. ThreadPoolExecutor + subprocess.run is ~60 lines and does
         # the job with cleaner semantics.
+        #
+        # Matrix slicing (--slice I/N): files are distributed across 6
+        # jobs by cached duration (LPT algorithm) so each job gets
+        # roughly equal wall time. Without a cache, files default to 2s
+        # estimate and get split roughly evenly by count — still correct,
+        # just not perfectly balanced.
         run: |
           source .venv/bin/activate
-          python scripts/run_tests_parallel.py
+          python scripts/run_tests_parallel.py --slice ${{ matrix.slice }}/6
         env:
           # Ensure tests don't accidentally call real APIs
           OPENROUTER_API_KEY: ""
@@ -108,7 +113,7 @@ jobs:
   # (including PRs) get balanced slicing.
   save-durations:
     needs: test
-    if: always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ethie/slice-test-'))
+    if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Download all slice durations
