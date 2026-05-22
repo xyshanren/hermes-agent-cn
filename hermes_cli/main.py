@@ -65,79 +65,6 @@ import os
 import sys
 
 
-def _set_process_title() -> None:
-    """Set the process title to 'hermes' so tools like 'ps', 'top', and
-    'htop' show the app name instead of 'python3.xx'.
-
-    Purely cosmetic — non-fatal on any platform.
-
-    Strategy (try in order):
-      1. ``setproctitle`` (opt-in dep — installed via ``hermes tools`` or
-         ``pip install setproctitle``, or bundled in a future release).
-      2. ctypes ``prctl(PR_SET_NAME)`` (Linux only, 15-char limit).
-      3. ctypes ``pthread_setname_np`` (macOS only, kernel thread name —
-         changes lldb/top but not ``ps aux``).
-      4. No-op on Windows (the .exe name is already ``hermes.exe``).
-    """
-    # Strategy 1: setproctitle (best — works on macOS, Linux, BSD)
-    try:
-        import setproctitle  # type: ignore[import-untyped]
-
-        setproctitle.setproctitle("hermes")
-        return
-    except ImportError:
-        pass
-
-    # Strategy 2/3: platform-specific ctypes fallback
-    import ctypes
-    import platform
-
-    try:
-        system = platform.system()
-        if system == "Linux":
-            libc = ctypes.CDLL("libc.so.6", use_errno=True)
-            libc.prctl(15, b"hermes", 0, 0, 0)  # PR_SET_NAME = 15
-        elif system == "Darwin":
-            libc = ctypes.CDLL("libc.dylib", use_errno=True)
-            libc.pthread_setname_np(b"hermes")
-        # Windows: the .exe name is already ``hermes.exe`` — nothing to do.
-    except Exception:
-        pass
-
-
-# Mouse-tracking residue suppression — runs BEFORE every other import on the
-# TUI hot path so the terminal stops emitting SGR/X10 mouse reports while the
-# Python launcher is still doing imports (≈100–300ms in cooked + echo mode,
-# before the Node TUI takes stdin into raw mode). During that window any
-# incoming bytes are echoed straight back to the user's shell scrollback as
-# ``^[[<…M`` text. The TUI itself runs `resetTerminalModes()` again in
-# `entry.tsx`; this is just the earlier cousin. ``HERMES_TUI_NO_EARLY_DISABLE``
-# escapes the behaviour for diagnostics.
-def _suppress_mouse_residue_early() -> None:
-    if os.environ.get("HERMES_TUI_NO_EARLY_DISABLE") == "1":
-        return
-    if not _wants_tui_early():
-        return
-    try:
-        # Skip when stdout is redirected (`hermes --tui … >log`, CI capture):
-        # the bytes can't reach the terminal anyway and would just pollute
-        # the log with raw CSI.
-        if not os.isatty(1):
-            return
-        # Disable every mouse-tracking variant we know about. Idempotent and
-        # safe to send even when no tracking is currently asserted.
-        os.write(
-            1,
-            b"\x1b[?1003l\x1b[?1002l\x1b[?1001l\x1b[?1000l\x1b[?9l"
-            b"\x1b[?1006l\x1b[?1005l\x1b[?1015l\x1b[?1016l\x1b[?2029l",
-        )
-    except OSError:
-        pass
-
-
-_suppress_mouse_residue_early()
-
-
 def _is_termux_startup_environment_fast() -> bool:
     """Tiny Termux check for pre-import startup shortcuts."""
     prefix = os.environ.get("PREFIX", "")
@@ -201,10 +128,8 @@ if _try_termux_ultrafast_version():
     raise SystemExit(0)
 
 import argparse
-import hashlib
 import json
 import shutil
-import stat
 import subprocess
 from pathlib import Path
 from typing import Optional
