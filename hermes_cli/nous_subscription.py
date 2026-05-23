@@ -83,7 +83,7 @@ class NousSubscriptionFeatures:
         return self.features["modal"]
 
     def items(self) -> Iterable[NousFeatureState]:
-        ordered = ("web", "image_gen", "video_gen", "tts", "browser", "modal")
+        ordered = ("web", "image_gen", "tts", "stt", "browser", "modal")
         for key in ordered:
             yield self.features[key]
 
@@ -749,7 +749,7 @@ _GATEWAY_DIRECT_LABELS = {
     "browser": "Browser Use/Browserbase key",
 }
 
-_ALL_GATEWAY_KEYS = ("web", "image_gen", "video_gen", "tts", "browser")
+_ALL_GATEWAY_KEYS = ("web", "image_gen", "tts", "stt", "browser")
 
 
 def get_gateway_eligible_tools(
