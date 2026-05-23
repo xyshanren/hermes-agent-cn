@@ -1121,9 +1121,9 @@ def _backup_corrupt_db(path: Path) -> Optional[Path]:
     Returns the backup path of the main DB file, or ``None`` if the copy
     itself failed (the caller still raises loudly in that case).
 
-    Writes are confined to the original DB's parent directory. The backup
-    basename is derived purely from ``path.name`` and a content hash, never
-    from caller-supplied directory segments — no traversal is possible.
+    Writes are confined to the original DB's parent directory. The
+    backup basename is derived purely from ``path.name``, never from
+    caller-supplied directory segments — no traversal is possible.
     """
     # Resolve once and pin the parent so subsequent path operations cannot
     # escape it. ``Path.resolve()`` collapses any ``..`` segments and
@@ -1131,11 +1131,22 @@ def _backup_corrupt_db(path: Path) -> Optional[Path]:
     resolved = path.resolve()
     parent = resolved.parent
     base_name = resolved.name  # basename only
-    digest = hashlib.sha256()
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = parent / f"{base_name}.corrupt.{stamp}.bak"
+    # Defensive: candidate must still be inside parent after construction.
+    # f-string interpolation of ``base_name`` cannot escape ``parent``
+    # because ``base_name`` is itself a resolved basename, but assert it
+    # anyway so static analyzers can see the containment guarantee.
+    if candidate.parent != parent:
+        return None
+    counter = 0
+    while candidate.exists():
+        counter += 1
+        candidate = parent / f"{base_name}.corrupt.{stamp}.{counter}.bak"
+        if candidate.parent != parent:
+            return None
     try:
-        with resolved.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
+        shutil.copy2(resolved, candidate)
     except OSError:
         return None
     token = digest.hexdigest()[:16]
@@ -1152,10 +1163,10 @@ def _backup_corrupt_db(path: Path) -> Optional[Path]:
         sidecar = parent / (base_name + suffix)
         if sidecar.parent != parent or not sidecar.exists():
             continue
-        sidecar_backup = parent / (candidate.name + suffix)
-        if sidecar_backup.parent != parent or sidecar_backup.exists():
-            continue
         try:
+            sidecar_backup = parent / (candidate.name + suffix)
+            if sidecar_backup.parent != parent:
+                continue
             shutil.copy2(sidecar, sidecar_backup)
         except OSError:
             pass
@@ -1202,7 +1213,7 @@ def _guard_existing_db_is_healthy(path: Path) -> None:
         return
     reason: Optional[str] = None
     try:
-        probe = _sqlite_connect(resolved)
+        probe = sqlite3.connect(str(resolved), timeout=5, isolation_level=None)
         try:
             row = probe.execute("PRAGMA integrity_check").fetchone()
         finally:
