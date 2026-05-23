@@ -85,6 +85,50 @@ function Harness({ expose, items }: { expose: React.MutableRefObject<Exposed | n
 }
 
 describe('useVirtualHistory offset cache reuse', () => {
+  it('includes viewport height in the external-store snapshot key', () => {
+    const base = {
+      getPendingDelta: () => 0,
+      getScrollTop: () => 20,
+      isSticky: () => false
+    }
+
+    const short = virtualHistorySnapshotKey({
+      ...base,
+      getViewportHeight: () => 5
+    } as ScrollBoxHandle)
+
+    const tall = virtualHistorySnapshotKey({
+      ...base,
+      getViewportHeight: () => 25
+    } as ScrollBoxHandle)
+
+    expect(short).not.toBe(tall)
+  })
+
+  it('remounts enough tail rows after the scroll viewport grows', async () => {
+    const items = Array.from({ length: 100 }, (_, index) => ({ height: 1, key: `item-${index}` }))
+    const expose = { current: null as Exposed | null }
+    const streams = makeStreams()
+
+    const instance = renderSync(React.createElement(Harness, { expose, height: 4, items, maxMounted: 80 }), {
+      patchConsole: false,
+      stderr: streams.stderr as NodeJS.WriteStream,
+      stdin: streams.stdin as NodeJS.ReadStream,
+      stdout: streams.stdout as NodeJS.WriteStream
+    })
+
+    try {
+      await delay(20)
+      instance.rerender(React.createElement(Harness, { expose, height: 9, items, maxMounted: 80 }))
+      await delay(80)
+
+      expect(viewportIsMounted(items, expose.current!.virtualHistory, expose.current!.scroll!)).toBe(true)
+    } finally {
+      instance.unmount()
+      instance.cleanup()
+    }
+  })
+
   it('recomputes offsets after a mounted row height changes', async () => {
     const tall = [
       { height: 6, key: 'a' },
