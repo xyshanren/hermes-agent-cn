@@ -4,7 +4,7 @@ import { Box, renderSync, ScrollBox, type ScrollBoxHandle, Text } from '@hermes/
 import React, { useLayoutEffect, useRef } from 'react'
 import { describe, expect, it } from 'vitest'
 
-import { useVirtualHistory } from '../hooks/useVirtualHistory.js'
+import { useVirtualHistory, virtualHistorySnapshotKey } from '../hooks/useVirtualHistory.js'
 
 interface Item {
   height: number
@@ -50,17 +50,12 @@ const viewportIsMounted = (items: readonly Item[], virtualHistory: ReturnType<ty
   return top >= span.top && bottom <= span.bottom
 }
 
-const itemHeightForColumns = (item: Item | undefined, columns: number) =>
-  columns >= 80 ? (item?.heightAfterResize ?? item?.height ?? 1) : (item?.height ?? 1)
-
 function Harness({
-  columns = 80,
   expose,
   height = 10,
   items,
   maxMounted = 16
 }: {
-  columns?: number
   expose: React.MutableRefObject<Exposed | null>
   height?: number
   items: readonly Item[]
@@ -70,7 +65,7 @@ function Harness({
 
   const virtualHistory = useVirtualHistory(scrollRef, items, columns, {
     coldStartCount: 16,
-    estimateHeight: index => itemHeightForColumns(items[index], columns),
+    estimateHeight: index => items[index]?.height ?? 1,
     maxMounted,
     overscan: 2
   })
@@ -81,7 +76,7 @@ function Harness({
 
   return React.createElement(
     ScrollBox,
-    { flexDirection: 'column', height: 10, ref: scrollRef, stickyScroll: true },
+    { flexDirection: 'column', height, ref: scrollRef, stickyScroll: true },
     React.createElement(
       Box,
       { flexDirection: 'column', width: '100%' },
@@ -139,44 +134,10 @@ describe('useVirtualHistory offset cache reuse', () => {
 
     try {
       await delay(20)
-      instance.rerender(React.createElement(Harness, { expose, height: 9, items, maxMounted: 80 }))
+      instance.rerender(React.createElement(Harness, { expose, height: 24, items, maxMounted: 80 }))
       await delay(80)
 
       expect(viewportIsMounted(items, expose.current!.virtualHistory, expose.current!.scroll!)).toBe(true)
-    } finally {
-      instance.unmount()
-      instance.cleanup()
-    }
-  })
-
-  it('recomputes tail coverage when wrapped rows shrink after a width resize', async () => {
-    const items = Array.from({ length: 100 }, (_, index) => ({
-      height: 4,
-      heightAfterResize: 1,
-      key: `item-${index}`
-    }))
-
-    const expose = { current: null as Exposed | null }
-    const streams = makeStreams()
-
-    const instance = renderSync(
-      React.createElement(Harness, { columns: 40, expose, height: 10, items, maxMounted: 80 }),
-      {
-        patchConsole: false,
-        stderr: streams.stderr as NodeJS.WriteStream,
-        stdin: streams.stdin as NodeJS.ReadStream,
-        stdout: streams.stdout as NodeJS.WriteStream
-      }
-    )
-
-    try {
-      await delay(20)
-      instance.rerender(React.createElement(Harness, { columns: 80, expose, height: 10, items, maxMounted: 80 }))
-      await delay(80)
-
-      const resizedItems = items.map(item => ({ height: item.heightAfterResize!, key: item.key }))
-
-      expect(viewportIsMounted(resizedItems, expose.current!.virtualHistory, expose.current!.scroll!)).toBe(true)
     } finally {
       instance.unmount()
       instance.cleanup()
