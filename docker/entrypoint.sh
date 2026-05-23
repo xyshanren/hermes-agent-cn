@@ -109,52 +109,24 @@ fi
 
 # Optionally start `hermes dashboard` as a side-process.
 #
-# Toggled by HERMES_DASHBOARD=1 (also accepts "true"/"yes", case-insensitive).
-# Host/port/TUI can be overridden via:
-#   HERMES_DASHBOARD_HOST  (default 0.0.0.0 — exposed outside the container)
-#   HERMES_DASHBOARD_PORT  (default 9119, matches `hermes dashboard` default)
-#   HERMES_DASHBOARD_TUI   (already honored by `hermes dashboard` itself)
+# When called directly (e.g. by an old wrapper script that hard-coded
+# docker/entrypoint.sh as the container ENTRYPOINT, or by an external
+# orchestration script that invokes it inside the container), forward to
+# the stage2 hook for parity with the pre-s6 entrypoint behavior. The
+# stage2 hook only handles cont-init bootstrap (UID remap, chown, config
+# seed, skills sync); it does NOT exec the CMD. Callers that depended
+# on the pre-s6 contract "entrypoint.sh sets up state then execs hermes"
+# will see the bootstrap happen but the CMD will not run from this shim.
 #
-# The dashboard is a long-lived server.  We background it *before* the final
-# `exec hermes "$@"` so the user's chosen foreground command (chat, gateway,
-# sleep infinity, …) remains PID-of-interest for the container runtime.  When
-# the container stops the whole process tree is torn down, so no explicit
-# cleanup is needed.
-case "${HERMES_DASHBOARD:-}" in
-    1|true|TRUE|True|yes|YES|Yes)
-        dash_host="${HERMES_DASHBOARD_HOST:-0.0.0.0}"
-        dash_port="${HERMES_DASHBOARD_PORT:-9119}"
-        dash_args=(--host "$dash_host" --port "$dash_port" --no-open)
-        # Binding to anything other than localhost requires --insecure — the
-        # dashboard refuses otherwise because it exposes API keys.  Inside a
-        # container this is the expected deployment (host reaches it via
-        # published port), so opt in automatically.
-        if [ "$dash_host" != "127.0.0.1" ] && [ "$dash_host" != "localhost" ]; then
-            dash_args+=(--insecure)
-        fi
-        echo "Starting hermes dashboard on ${dash_host}:${dash_port} (background)"
-        # Prefix dashboard output so it's distinguishable from the main
-        # process in `docker logs`.  stdbuf keeps the pipe line-buffered.
-        (
-            stdbuf -oL -eL hermes dashboard "${dash_args[@]}" 2>&1 \
-                | sed -u 's/^/[dashboard] /'
-        ) &
-        ;;
-esac
-
-# Final exec: two supported invocation patterns.
-#
-#   docker run <image>                 -> exec `hermes` with no args (legacy default)
-#   docker run <image> chat -q "..."   -> exec `hermes chat -q "..."` (legacy wrap)
-#   docker run <image> sleep infinity  -> exec `sleep infinity` directly
-#   docker run <image> bash            -> exec `bash` directly
-#
-# If the first positional arg resolves to an executable on PATH, we assume the
-# caller wants to run it directly (needed by the launcher which runs long-lived
-# `sleep infinity` sandbox containers — see tools/environments/docker.py).
-# Otherwise we treat the args as a hermes subcommand and wrap with `hermes`,
-# preserving the documented `docker run <image> <subcommand>` behavior.
-if [ $# -gt 0 ] && command -v "$1" >/dev/null 2>&1; then
-    exec "$@"
-fi
-exec hermes "$@"
+# Deprecation: this shim is preserved for one release cycle to give
+# downstream users time to migrate their wrappers to the image's real
+# ENTRYPOINT (`/init`). It will be removed in a future major release.
+# Surface a warning to stderr so anyone still invoking this path
+# sees the migration notice in their logs.
+echo "[hermes] WARNING: docker/entrypoint.sh is a deprecated shim under " \
+    "s6-overlay. The container's real ENTRYPOINT is /init + " \
+    "main-wrapper.sh; this script only runs the stage2 cont-init hook " \
+    "and does NOT exec the CMD. If you hard-coded docker/entrypoint.sh " \
+    "as your ENTRYPOINT, drop the override — docker will use the image's " \
+    "default ENTRYPOINT (/init), which handles bootstrap AND CMD." >&2
+exec /opt/hermes/docker/stage2-hook.sh "$@"
