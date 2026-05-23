@@ -58,9 +58,13 @@ class CommandDef:
 
 COMMAND_REGISTRY: list[CommandDef] = [
     # Session
-    CommandDef("new", "开启新对话（全新会话 ID + 历史记录）", "会话",
-               aliases=("reset",)),
-    CommandDef("clear", "清屏并开启新会话", "会话",
+    CommandDef("start", "Acknowledge platform start pings without a reply", "Session",
+               gateway_only=True),
+    CommandDef("new", "Start a new session (fresh session ID + history)", "Session",
+               aliases=("reset",), args_hint="[name]"),
+    CommandDef("topic", "Enable or inspect Telegram DM topic sessions", "Session",
+               gateway_only=True, args_hint="[off|help|session-id]"),
+    CommandDef("clear", "Clear screen and start a new session", "Session",
                cli_only=True),
     CommandDef("history", "显示对话历史", "会话",
                cli_only=True),
