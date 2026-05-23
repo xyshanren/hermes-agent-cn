@@ -244,6 +244,43 @@ def show_status(args):
         print(f"    Error:      {xai_oauth_status.get('error')}")
 
     # =========================================================================
+    # Nous Subscription Features
+    # =========================================================================
+    if managed_nous_tools_enabled():
+        features = get_nous_subscription_features(config)
+        print()
+        print(color("◆ Nous Tool Gateway", Colors.CYAN, Colors.BOLD))
+        if not features.nous_auth_present:
+            print("  Nous Portal   ✗ not logged in")
+        else:
+            print("  Nous Portal   ✓ managed tools available")
+        for feature in features.items():
+            if feature.managed_by_nous:
+                state = "active via Nous subscription"
+            elif feature.active:
+                current = feature.current_provider or "configured provider"
+                state = f"active via {current}"
+            elif feature.included_by_default and features.nous_auth_present:
+                state = "included by subscription, not currently selected"
+            elif feature.key == "modal" and features.nous_auth_present:
+                state = "available via subscription (optional)"
+            else:
+                state = "not configured"
+            print(f"  {feature.label:<15} {check_mark(feature.available or feature.active or feature.managed_by_nous)} {state}")
+    elif nous_logged_in:
+        # Logged into Nous but on the free tier — show upgrade nudge
+        print()
+        print(color("◆ Nous Tool Gateway", Colors.CYAN, Colors.BOLD))
+        print("  Your free-tier Nous account does not include Tool Gateway access.")
+        print("  Upgrade your subscription to unlock managed web, image, TTS, STT, and browser tools.")
+        try:
+            portal_url = nous_status.get("portal_base_url", "").rstrip("/")
+            if portal_url:
+                print(f"  Upgrade: {portal_url}")
+        except Exception:
+            pass
+
+    # =========================================================================
     # API-Key Providers
     # =========================================================================
     print()

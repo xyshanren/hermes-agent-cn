@@ -4062,6 +4062,12 @@ class GatewayRunner:
         
         # Warn if no user allowlists are configured and open access is not opted in
         _builtin_allowed_vars = (
+            "TELEGRAM_ALLOWED_USERS", "DISCORD_ALLOWED_USERS",
+            "WHATSAPP_ALLOWED_USERS", "WHATSAPP_CLOUD_ALLOWED_USERS",
+            "SLACK_ALLOWED_USERS",
+            "SIGNAL_ALLOWED_USERS", "SIGNAL_GROUP_ALLOWED_USERS",
+            "TELEGRAM_GROUP_ALLOWED_USERS",
+            "TELEGRAM_GROUP_ALLOWED_CHATS",
             "EMAIL_ALLOWED_USERS",
             "DINGTALK_ALLOWED_USERS",
             "FEISHU_ALLOWED_USERS",
@@ -4073,8 +4079,12 @@ class GatewayRunner:
             "GATEWAY_ALLOWED_USERS",
         )
         _builtin_allow_all_vars = (
-            "EMAIL_ALLOW_ALL_USERS",
-            "DINGTALK_ALLOW_ALL_USERS",
+            "TELEGRAM_ALLOW_ALL_USERS", "DISCORD_ALLOW_ALL_USERS",
+            "WHATSAPP_ALLOW_ALL_USERS", "WHATSAPP_CLOUD_ALLOW_ALL_USERS",
+            "SLACK_ALLOW_ALL_USERS",
+            "SIGNAL_ALLOW_ALL_USERS", "EMAIL_ALLOW_ALL_USERS",
+            "SMS_ALLOW_ALL_USERS", "MATTERMOST_ALLOW_ALL_USERS",
+            "MATRIX_ALLOW_ALL_USERS", "DINGTALK_ALLOW_ALL_USERS",
             "FEISHU_ALLOW_ALL_USERS",
             "WECOM_ALLOW_ALL_USERS",
             "WECOM_CALLBACK_ALLOW_ALL_USERS",
@@ -6355,7 +6365,85 @@ class GatewayRunner:
             logger.debug("Platform registry lookup for '%s' failed: %s", platform.value, e)
         # Fall through to built-in adapters below
 
-        if platform == Platform.EMAIL:
+        if platform == Platform.TELEGRAM:
+            from gateway.platforms.telegram import TelegramAdapter, check_telegram_requirements
+            if not check_telegram_requirements():
+                logger.warning("Telegram: python-telegram-bot not installed")
+                return None
+            adapter = TelegramAdapter(config)
+            # Apply Telegram notification mode from config.  Controls whether
+            # intermediate messages (tool progress, streaming, status) trigger
+            # push notifications.  Supports ENV override for quick testing.
+            _notify_mode = os.getenv("HERMES_TELEGRAM_NOTIFICATIONS", "")
+            if not _notify_mode:
+                try:
+                    _gw_cfg = _load_gateway_config()
+                    _raw = cfg_get(_gw_cfg, "display", "platforms", "telegram", "notifications")
+                    if _raw not in {None, ""}:
+                        _notify_mode = str(_raw).strip().lower()
+                except Exception:
+                    pass
+            _notify_mode = _notify_mode or "important"
+            if _notify_mode not in {"all", "important"}:
+                logger.warning(
+                    "Unknown telegram notifications mode '%s', "
+                    "defaulting to 'important' (valid: all, important)",
+                    _notify_mode,
+                )
+                _notify_mode = "important"
+            adapter._notifications_mode = _notify_mode
+            return adapter
+        
+        elif platform == Platform.DISCORD:
+            from gateway.platforms.discord import DiscordAdapter, check_discord_requirements
+            if not check_discord_requirements():
+                logger.warning("Discord: discord.py not installed")
+                return None
+            adapter = DiscordAdapter(config)
+            adapter.gateway_runner = self  # For cross-platform admin alerts on unauthorized slash
+            return adapter
+        
+        elif platform == Platform.WHATSAPP:
+            from gateway.platforms.whatsapp import WhatsAppAdapter, check_whatsapp_requirements
+            if not check_whatsapp_requirements():
+                logger.warning("WhatsApp: Node.js not installed or bridge not configured")
+                return None
+            return WhatsAppAdapter(config)
+
+        elif platform == Platform.WHATSAPP_CLOUD:
+            from gateway.platforms.whatsapp_cloud import (
+                WhatsAppCloudAdapter,
+                check_whatsapp_cloud_requirements,
+            )
+            if not check_whatsapp_cloud_requirements():
+                logger.warning(
+                    "WhatsApp Cloud: aiohttp/httpx missing — reinstall hermes-agent"
+                )
+                return None
+            return WhatsAppCloudAdapter(config)
+        
+        elif platform == Platform.SLACK:
+            from gateway.platforms.slack import SlackAdapter, check_slack_requirements
+            if not check_slack_requirements():
+                logger.warning("Slack: slack-bolt not installed. Run: pip install 'hermes-agent[slack]'")
+                return None
+            return SlackAdapter(config)
+
+        elif platform == Platform.SIGNAL:
+            from gateway.platforms.signal import SignalAdapter, check_signal_requirements
+            if not check_signal_requirements():
+                logger.warning("Signal: SIGNAL_HTTP_URL or SIGNAL_ACCOUNT not configured")
+                return None
+            return SignalAdapter(config)
+
+        elif platform == Platform.HOMEASSISTANT:
+            from gateway.platforms.homeassistant import HomeAssistantAdapter, check_ha_requirements
+            if not check_ha_requirements():
+                logger.warning("HomeAssistant: aiohttp not installed or HASS_TOKEN not set")
+                return None
+            return HomeAssistantAdapter(config)
+
+        elif platform == Platform.EMAIL:
             from gateway.platforms.email import EmailAdapter, check_email_requirements
             if not check_email_requirements():
                 logger.warning("Email: EMAIL_ADDRESS, EMAIL_PASSWORD, EMAIL_IMAP_HOST, or EMAIL_SMTP_HOST not set")
@@ -6505,6 +6593,12 @@ class GatewayRunner:
             return False
 
         platform_env_map = {
+            Platform.TELEGRAM: "TELEGRAM_ALLOWED_USERS",
+            Platform.DISCORD: "DISCORD_ALLOWED_USERS",
+            Platform.WHATSAPP: "WHATSAPP_ALLOWED_USERS",
+            Platform.WHATSAPP_CLOUD: "WHATSAPP_CLOUD_ALLOWED_USERS",
+            Platform.SLACK: "SLACK_ALLOWED_USERS",
+            Platform.SIGNAL: "SIGNAL_ALLOWED_USERS",
             Platform.EMAIL: "EMAIL_ALLOWED_USERS",
             Platform.DINGTALK: "DINGTALK_ALLOWED_USERS",
             Platform.FEISHU: "FEISHU_ALLOWED_USERS",
@@ -6518,6 +6612,12 @@ class GatewayRunner:
             Platform.QQBOT: "QQ_GROUP_ALLOWED_USERS",
         }
         platform_allow_all_map = {
+            Platform.TELEGRAM: "TELEGRAM_ALLOW_ALL_USERS",
+            Platform.DISCORD: "DISCORD_ALLOW_ALL_USERS",
+            Platform.WHATSAPP: "WHATSAPP_ALLOW_ALL_USERS",
+            Platform.WHATSAPP_CLOUD: "WHATSAPP_CLOUD_ALLOW_ALL_USERS",
+            Platform.SLACK: "SLACK_ALLOW_ALL_USERS",
+            Platform.SIGNAL: "SIGNAL_ALLOW_ALL_USERS",
             Platform.EMAIL: "EMAIL_ALLOW_ALL_USERS",
             Platform.DINGTALK: "DINGTALK_ALLOW_ALL_USERS",
             Platform.FEISHU: "FEISHU_ALLOW_ALL_USERS",
