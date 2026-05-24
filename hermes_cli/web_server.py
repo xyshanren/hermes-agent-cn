@@ -168,9 +168,14 @@ app.add_middleware(
 # Keep the upstream list minimal — only truly non-sensitive, read-only
 # endpoints belong there.
 # ---------------------------------------------------------------------------
-from hermes_cli.dashboard_auth.public_paths import (
-    PUBLIC_API_PATHS as _PUBLIC_API_PATHS,
-)
+_PUBLIC_API_PATHS: frozenset = frozenset({
+    "/api/status",
+    "/api/config/defaults",
+    "/api/config/schema",
+    "/api/model/info",
+    "/api/dashboard/themes",
+    "/api/dashboard/plugins",
+})
 
 
 def _has_valid_session_token(request: Request) -> bool:
