@@ -168,6 +168,35 @@ class TestToolProgressScrollback:
 
         mock_print.assert_not_called()
 
+    def test_verbose_mode_config_does_not_enable_global_debug_logging(self):
+        """display.tool_progress=verbose controls TOOL-CALL DISPLAY ONLY.
+
+        It must NOT auto-flip self.verbose, which controls root-logger DEBUG
+        level for the entire process (every module spews to console).  PR
+        #6a1aa420e had coupled them, causing all debug logs to flood the
+        terminal whenever a user picked tool_progress: verbose for richer
+        per-tool rendering.
+        """
+        cli = _make_cli(tool_progress="verbose")
+
+        assert cli.tool_progress_mode == "verbose"
+        assert cli.verbose is False
+
+    def test_explicit_verbose_argument_wins_over_config(self):
+        """Explicit verbose=True from the CLI flag still enables DEBUG logging
+        regardless of tool_progress_mode."""
+        cli = _make_cli(tool_progress="off", verbose=True)
+
+        assert cli.tool_progress_mode == "off"
+        assert cli.verbose is True
+
+    def test_explicit_non_verbose_argument_keeps_debug_logging_off(self):
+        """Explicit verbose=False overrides any default to enable DEBUG."""
+        cli = _make_cli(tool_progress="verbose", verbose=False)
+
+        assert cli.tool_progress_mode == "verbose"
+        assert cli.verbose is False
+
     def test_pending_info_stores_on_started(self):
         """tool.started stores args for later use by tool.completed."""
         cli = _make_cli(tool_progress="all")
