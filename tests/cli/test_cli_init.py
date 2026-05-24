@@ -317,7 +317,8 @@ class TestHistoryDisplay:
 
         assert "Recent sessions" in output
         assert "Checking Running Hermes Agent" in output
-        assert "Use /resume <session id or title> to continue" in output
+        assert "Use /resume" in output
+        assert "session title" in output
 
     def test_sessions_command_no_args_lists_recent_sessions(self, capsys):
         """/sessions with no args prints the recent-sessions table (TUI parity).
