@@ -200,6 +200,8 @@ ALIASES: Dict[str, str] = {
 _LABEL_OVERRIDES: Dict[str, str] = {
     "local": "本地端点",
     "bedrock": "AWS Bedrock",
+    "ollama-cloud": "Ollama Cloud",
+    "xai-oauth": "xAI Grok OAuth (SuperGrok Subscription)",
 }
 
 
