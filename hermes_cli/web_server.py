@@ -7966,62 +7966,11 @@ _VALID_CHANNEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 
 
-def _ws_client_reason(ws: "WebSocket") -> Optional[str]:
-    """Return a rejection reason for the client IP, or None when allowed.
-
-    Reasons are short machine-parseable tokens logged on the rejection path
-    so a "WS keeps closing" report can be diagnosed from agent.log without a
-    repro. ``None`` means the peer IP passed this gate.
-
-    See :func:`_ws_client_is_allowed` for the full policy rationale.
-    """
-    if getattr(app.state, "auth_required", False):
-        return None
-    bound_host = (getattr(app.state, "bound_host", "") or "").strip().lower()
-    if bound_host and bound_host not in _LOOPBACK_HOSTS:
-        return None
-    client_host = ws.client.host if ws.client else ""
-    if not client_host:
-        return None
-    if client_host in _LOOPBACK_HOSTS:
-        return None
-    return f"peer_not_loopback peer={client_host} bound={bound_host or '?'}"
-
-
 def _ws_client_is_allowed(ws: "WebSocket") -> bool:
     """Check if the WebSocket client IP is acceptable.
 
-    Loopback bind: only loopback clients allowed — the legacy
-    ``?token=<_SESSION_TOKEN>`` path is the only auth we have, so we
-    don't want LAN hosts guessing tokens.
-
-    Explicit non-loopback bind (``--host 0.0.0.0``, ``--host ::``, or a
-    specific address such as a Tailscale/LAN IP, always with
-    ``--insecure``): allow any peer. The operator explicitly opted into
-    non-loopback exposure, so the loopback-only peer restriction does not
-    apply. DNS-rebinding is still blocked by the Host/Origin guard in
-    :func:`_ws_host_origin_is_allowed`, which mirrors the HTTP layer and
-    requires the Host header to match the bound interface — the same
-    defence ``_is_accepted_host`` applies to non-loopback HTTP requests.
-
-    Gated mode: any peer is allowed — uvicorn's ``proxy_headers=True``
-    (enabled when the OAuth gate is active so cookies can pick up
-    ``X-Forwarded-Proto``) rewrites ``ws.client.host`` to the
-    X-Forwarded-For value, which is the real internet client IP. The
-    OAuth gate + single-use ``?ticket=`` is the auth at that point; the
-    Host/Origin guard in :func:`_ws_host_origin_is_allowed` is what
-    blocks DNS-rebinding here, not the peer IP.
+    Allows loopback clients only.
     """
-    if getattr(app.state, "auth_required", False):
-        return True
-    # Any explicit non-loopback bind (0.0.0.0, ::, or a specific LAN /
-    # Tailscale address) means the operator opted into non-loopback
-    # access via --insecure.  The loopback-only peer gate only applies to
-    # an actual loopback bind; otherwise the WS handshake is rejected even
-    # though same-bind HTTP requests pass _is_accepted_host.
-    bound_host = (getattr(app.state, "bound_host", "") or "").strip().lower()
-    if bound_host and bound_host not in _LOOPBACK_HOSTS:
-        return True
     client_host = ws.client.host if ws.client else ""
     if not client_host:
         return True
