@@ -1316,7 +1316,6 @@ AUTHOR_MAP = {
     "OYLFLMH@users.noreply.github.com": "OYLFLMH",  # PR #48312 salvage (cli_refresh_interval config, #48309)
     "zhangsamuel12@gmail.com": "SamuelZ12",  # PR #7480 (show recap after in-session resume)
     "490408354@qq.com": "daizhonggeng",  # PR #9020 (numbered /resume selection)
-    "claw@openclaw.ai": "wanwan2qq",  # PR #10215 (strip brackets/quotes from /resume; gateway session-ID lookup)
 }
 
 
