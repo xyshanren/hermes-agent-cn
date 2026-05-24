@@ -182,29 +182,13 @@ class TestAnthropicMcpPrefixStrip:
         assert len(result.tool_calls) == 1
         # Both exist — the condition `get_entry(stripped) and not get_entry(name)`
         # is False because get_entry(name) IS truthy, so we keep the full name.
-        assert result.tool_calls[0].name == "mcp__foo"
-
-    def test_legacy_single_underscore_native_mcp_not_stripped(self):
-        """Legacy mcp_ (single underscore) native MCP tools are NOT stripped.
-
-        They don't start with mcp__ so the strip path is never entered.
-        """
-        transport = self._get_transport()
-        block = _make_tool_use_block("mcp_github_create_issue")
-        response = _make_response(block)
-
-        registry = _FakeRegistry({"mcp_github_create_issue"})
-        with patch("tools.registry.registry", registry):
-            result = transport.normalize_response(response, strip_tool_prefix=True)
-
-        assert len(result.tool_calls) == 1
-        assert result.tool_calls[0].name == "mcp_github_create_issue"
+        assert result.tool_calls[0].name == "mcp_foo"
 
 
 class TestAnthropicOAuthOutgoingPrefix:
     """Verify the outgoing-side companion fix: build_anthropic_kwargs must not
-    double-prefix tool names that already start with ``mcp_`` or ``mcp__``
-    (native MCP server tools registered as ``mcp_<server>_<tool>``). GH-25255."""
+    double-prefix tool names that already start with ``mcp_`` (native MCP server
+    tools registered as ``mcp_<server>_<tool>``). GH-25255."""
 
     def _build(self, tools, is_oauth=True):
         from agent.anthropic_adapter import build_anthropic_kwargs
@@ -218,13 +202,13 @@ class TestAnthropicOAuthOutgoingPrefix:
         )
 
     def test_oauth_adds_prefix_to_bare_tool_name(self):
-        """OAuth + bare name → mcp__ prefix added (Claude Code convention)."""
+        """OAuth + bare name → prefix added (existing Claude Code convention)."""
         kwargs = self._build([{
             "type": "function",
             "function": {"name": "read_file", "description": "x", "parameters": {}},
         }])
         names = [t["name"] for t in kwargs["tools"]]
-        assert names == ["mcp__read_file"]
+        assert names == ["mcp_read_file"]
 
     def test_oauth_does_not_double_prefix_native_mcp_tool(self):
         """OAuth + already-prefixed native MCP name → left alone."""
@@ -237,12 +221,12 @@ class TestAnthropicOAuthOutgoingPrefix:
             },
         }])
         names = [t["name"] for t in kwargs["tools"]]
-        # Must NOT become "mcp__mcp_composio_..." — that breaks the round-trip
-        # because normalize_response only strips ONE mcp__ prefix.
+        # Must NOT become "mcp_mcp_composio_..." — that breaks the round-trip
+        # because normalize_response only strips ONE mcp_ prefix.
         assert names == ["mcp_composio_COMPOSIO_SEARCH_TOOLS"]
 
     def test_oauth_mixed_native_and_bare_tools(self):
-        """Mixed: native MCP preserved, bare names prefixed with mcp__."""
+        """Mixed: native MCP preserved, bare names prefixed."""
         kwargs = self._build([
             {"type": "function", "function": {"name": "read_file",
                                                "description": "x", "parameters": {}}},
@@ -252,7 +236,7 @@ class TestAnthropicOAuthOutgoingPrefix:
                                                "description": "z", "parameters": {}}},
         ])
         names = sorted(t["name"] for t in kwargs["tools"])
-        assert names == ["mcp__read_file", "mcp__terminal", "mcp_composio_SEARCH"]
+        assert names == ["mcp_composio_SEARCH", "mcp_read_file", "mcp_terminal"]
 
     def test_non_oauth_path_untouched(self):
         """Non-OAuth requests never get the prefix — schemas pass through as-is."""
