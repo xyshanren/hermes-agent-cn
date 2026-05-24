@@ -1518,8 +1518,10 @@ class FeishuAdapter(BasePlatformAdapter):
             connection_mode=str(
                 extra.get("connection_mode") or os.getenv("FEISHU_CONNECTION_MODE", "websocket")
             ).strip().lower(),
-            encrypt_key=os.getenv("FEISHU_ENCRYPT_KEY", "").strip(),
-            verification_token=os.getenv("FEISHU_VERIFICATION_TOKEN", "").strip(),
+            encrypt_key=str(extra.get("encrypt_key") or os.getenv("FEISHU_ENCRYPT_KEY", "")).strip(),
+            verification_token=str(
+                extra.get("verification_token") or os.getenv("FEISHU_VERIFICATION_TOKEN", "")
+            ).strip(),
             group_policy=os.getenv("FEISHU_GROUP_POLICY", "allowlist").strip().lower(),
             allowed_group_users=frozenset(
                 item.strip()
@@ -1648,6 +1650,11 @@ class FeishuAdapter(BasePlatformAdapter):
             logger.error(
                 "[Feishu] Unsupported FEISHU_CONNECTION_MODE=%s. Supported modes: websocket, webhook.",
                 self._connection_mode,
+            )
+            return False
+        if self._connection_mode == "webhook" and not (self._verification_token or self._encrypt_key):
+            logger.error(
+                "[Feishu] Webhook mode requires FEISHU_VERIFICATION_TOKEN or FEISHU_ENCRYPT_KEY."
             )
             return False
 
