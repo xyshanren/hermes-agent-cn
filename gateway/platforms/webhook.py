@@ -370,7 +370,16 @@ class WebhookAdapter(BasePlatformAdapter):
 
         # Validate HMAC signature FIRST (skip for INSECURE_NO_AUTH testing mode)
         secret = route_config.get("secret", self._global_secret)
-        if secret and secret != _INSECURE_NO_AUTH:
+        if not secret:
+            logger.error(
+                "[webhook] Route %s has no HMAC secret; refusing request",
+                route_name,
+            )
+            return web.json_response(
+                {"error": "Webhook route is missing an HMAC secret"},
+                status=403,
+            )
+        if secret != _INSECURE_NO_AUTH:
             if not self._validate_signature(request, raw_body, secret):
                 logger.warning(
                     "[webhook] Invalid signature for route %s", route_name
