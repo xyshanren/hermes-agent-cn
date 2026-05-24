@@ -966,7 +966,6 @@ class TransformedStreamAgent:
         }
 
 
-@pytest.mark.skip(reason="v0.15.0+cn.5 暂未 cherry-pick transform_llm_output hook 实现，v0.15.0+cn.6 修复")
 @pytest.mark.asyncio
 async def test_transformed_response_edits_streamed_message_in_place(monkeypatch, tmp_path):
     """When a transform_llm_output hook modifies the response after streaming,
