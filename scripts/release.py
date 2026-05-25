@@ -96,8 +96,6 @@ AUTHOR_MAP = {
     "32869278+dusterbloom@users.noreply.github.com": "dusterbloom",
     "189737461+basilalshukaili@users.noreply.github.com": "basilalshukaili",
     "liuhao1024@users.noreply.github.com": "liuhao1024",
-    "kylekahraman@users.noreply.github.com": "kylekahraman",
-    "130975919+kylekahraman@users.noreply.github.com": "kylekahraman",
     "dsr-restyn@users.noreply.github.com": "dsr-restyn",
     "210765158+WuKongAI-CMU@users.noreply.github.com": "WuKongAI-CMU",
     "lichriszhang@gmail.com": "codeblackhole1024",
