@@ -4923,7 +4923,6 @@ class HermesCLI:
                         f"[bold {_accent_hex()}]{_escape(title_part)}[/] "
                         f"({msg_count} user message{'s' if msg_count != 1 else ''}, {len(restored)} total messages)"
                     )
-                self._restore_session_cwd(session_meta, quiet=_quiet_mode)
             else:
                 if _quiet_mode:
                     print(
