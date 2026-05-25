@@ -45,21 +45,7 @@ ACP_REGISTRY_MANIFEST = REPO_ROOT / "acp_registry" / "agent.json"
 
 # Auto-extracted from noreply emails + manual overrides
 AUTHOR_MAP = {
-    "metalclaudbot@gmail.com": "HashClawAI",
-    "tonybear55665566@gmail.com": "TonyPepeBear",
-    "kaspersniels@gmail.com": "nielskaspers",
-    "kurobaryo@gmail.com": "kurobaryo",
-    "155192176+alelpoan@users.noreply.github.com": "alelpoan",
-    "aman@abacus.ai": "Aman113114-IITD",
-    "octavio.turra@gmail.com": "octavioturra",
-    "524706+Twanislas@users.noreply.github.com": "Twanislas",
     "9592417+adam91holt@users.noreply.github.com": "adam91holt",
-    "kchuang1015@users.noreply.github.com": "kchuang1015",
-    "maheshthedev@gmail.com": "MaheshtheDev",
-    "kyssta-exe@users.noreply.github.com": "kyssta-exe",
-    "shriganesh.patel@gmail.com": "ashishpatel26",
-    "45688690+fujinice@users.noreply.github.com": "fujinice",
-    "276689385+carltonawong@users.noreply.github.com": "carltonawong",
     # teknium (multiple emails)
     "teknium1@gmail.com": "teknium1",
     "cipherframe@users.noreply.github.com": "CipherFrame",
