@@ -7,7 +7,6 @@ import os
 import sqlite3
 import sys
 import time
-import types
 import unittest.mock
 from pathlib import Path
 
@@ -3623,4 +3622,164 @@ def test_pragmas_not_accidentally_disabled_by_migrate_path(tmp_path):
         assert conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
         assert conn.execute("PRAGMA cell_size_check").fetchone()[0] == 1
         assert conn.execute("PRAGMA synchronous").fetchone()[0] == 2
+
+# write_txn — rollback handler must not mask the original exception
+# ---------------------------------------------------------------------------
+
+
+def test_write_txn_preserves_original_exception_when_rollback_fails(kanban_home):
+    """When a write inside write_txn raises an OperationalError that SQLite
+    has already auto-rolled-back (e.g. ``disk I/O error``,
+    ``database is locked``, ``database disk image is malformed``), the
+    explicit ROLLBACK in ``write_txn.__exit__`` itself raises
+    ``cannot rollback - no transaction is active``. The original cause
+    must NOT be masked by the secondary rollback failure — operators rely
+    on the original cause to diagnose the underlying issue.
+    """
+
+    class FailingConnWrapper:
+        """Delegate to a real connection, simulating an EIO during an INSERT
+        that SQLite has already auto-rolled-back."""
+
+        def __init__(self, real):
+            self._real = real
+            self._fail_armed = True
+
+        def execute(self, sql, *args, **kwargs):
+            if (
+                self._fail_armed
+                and sql.lstrip().upper().startswith("INSERT")
+                and "task_events" in sql.lower()
+            ):
+                self._fail_armed = False  # one-shot
+                # Simulate SQLite auto-rolling back the transaction by
+                # issuing a real ROLLBACK now. After this, BEGIN IMMEDIATE
+                # is no longer active and an explicit ROLLBACK would error.
+                try:
+                    self._real.execute("ROLLBACK")
+                except sqlite3.OperationalError:
+                    pass
+                raise sqlite3.OperationalError("disk I/O error")
+            return self._real.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    with kb.connect() as conn:
+        wrapper = FailingConnWrapper(conn)
+        with pytest.raises(sqlite3.OperationalError) as excinfo:
+            with kb.write_txn(wrapper):
+                kb._append_event(wrapper, "t_bogus", "promoted", None)
+
+    msg = str(excinfo.value)
+    assert "disk I/O error" in msg, (
+        f"write_txn masked the original exception with rollback failure; "
+        f"got {msg!r} (expected to contain 'disk I/O error')"
+    )
+    assert "cannot rollback" not in msg, (
+        f"write_txn surfaced the rollback failure instead of the original "
+        f"OperationalError; got {msg!r}"
+    )
+def test_write_txn_healthy_commit_no_exception(tmp_path):
+    """Normal commit does not trigger the torn-extend check."""
+    from hermes_cli.kanban_db import connect, write_txn, create_task
+    db = tmp_path / "test.db"
+    conn = connect(db_path=db)
+    # Should not raise
+    with write_txn(conn) as c:
+        c.execute(
+            "INSERT INTO tasks (id, title, assignee, status, priority, created_at) "
+            "VALUES ('t_test01', 'test task', 'tester', 'todo', 0, 1234567890)"
+        )
+    row = conn.execute("SELECT title FROM tasks WHERE id='t_test01'").fetchone()
+    assert row["title"] == "test task"
+    conn.close()
+
+
+def test_write_txn_raises_on_truncated_file(tmp_path):
+    """A mocked smaller file size triggers the torn-extend check."""
+    from hermes_cli.kanban_db import connect, write_txn
+    import hermes_cli.kanban_db as kanban_db_module
+    db = tmp_path / "test.db"
+    conn = connect(db_path=db)
+    # Get actual page size so we can fake a smaller file
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    original_getsize = os.path.getsize
+
+    def fake_getsize(path):
+        # Return a size that implies at least 1 fewer page than header claims
+        real_size = original_getsize(path)
+        return max(0, real_size - page_size)
+
+    with pytest.raises(sqlite3.DatabaseError, match="torn-extend|page count mismatch"):
+        with unittest.mock.patch("hermes_cli.kanban_db.os.path.getsize", side_effect=fake_getsize):
+            with write_txn(conn) as c:
+                c.execute(
+                    "INSERT INTO tasks (id, title, assignee, status, priority, created_at) "
+                    "VALUES ('t_test02', 'test task 2', 'tester', 'todo', 0, 1234567890)"
+                )
+    conn.close()
+
+
+def test_write_txn_post_commit_check_fires_every_call(tmp_path):
+    """The invariant check runs on every write_txn call."""
+    from hermes_cli.kanban_db import connect, write_txn
+    import hermes_cli.kanban_db as kanban_db_module
+    db = tmp_path / "test.db"
+    conn = connect(db_path=db)
+    call_count = 0
+    real_check = kanban_db_module._check_file_length_invariant
+
+    def counting_check(c):
+        nonlocal call_count
+        call_count += 1
+        real_check(c)
+
+    with unittest.mock.patch.object(kanban_db_module, "_check_file_length_invariant", counting_check):
+        for i in range(3):
+            with write_txn(conn) as c:
+                c.execute(
+                    f"INSERT INTO tasks (id, title, assignee, status, priority, created_at) "
+                    f"VALUES ('t_fire{i:02d}', 'task {i}', 'tester', 'todo', 0, 1234567890)"
+                )
+    assert call_count == 3
+    conn.close()
+
+
+def test_connect_sets_wal_autocheckpoint_100(tmp_path):
+    """connect() sets wal_autocheckpoint to 100."""
+    from hermes_cli.kanban_db import connect
+    db = tmp_path / "test.db"
+    conn = connect(db_path=db)
+    val = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+    assert val == 100
+    conn.close()
+
+
+def test_write_txn_check_reads_correct_header_fields(tmp_path):
+    """Synthetic DB file with mismatched header page_count triggers the check."""
+    import struct
+    from hermes_cli.kanban_db import connect, write_txn, _check_file_length_invariant
+    db = tmp_path / "synthetic.db"
+    conn = connect(db_path=db)
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    conn.close()
+    # Now corrupt the file: claim N pages but truncate to N-1 pages
+    with open(db, "rb") as f:
+        data = bytearray(f.read())
+    # Read current page_count from header bytes 28-31
+    real_page_count = struct.unpack(">I", data[28:32])[0]
+    if real_page_count < 2:
+        # Need at least 2 pages to fake a truncation
+        pytest.skip("DB too small for synthetic truncation test")
+    # Truncate to N-1 pages
+    truncated = bytes(data[: (real_page_count - 1) * page_size])
+    with open(db, "wb") as f:
+        f.write(truncated)
+    # Now open and check — should raise
+    # We can't use connect() because _validate_sqlite_header may block; use a raw connection
+    raw_conn = sqlite3.connect(str(db), isolation_level=None)
+    with pytest.raises(sqlite3.DatabaseError, match="torn-extend|page count mismatch"):
+        _check_file_length_invariant(raw_conn)
+    raw_conn.close()
 
