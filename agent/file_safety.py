@@ -145,7 +145,73 @@ def get_read_block_error(path: str) -> Optional[str]:
     ]
     for blocked in blocked_dirs:
         try:
-            resolved.relative_to(blocked)
+            real = base.resolve()
+            if real not in hermes_dirs:
+                hermes_dirs.append(real)
+        except Exception:
+            continue
+
+    # Skills .hub: prompt-injection carriers.
+    for hd in hermes_dirs:
+        blocked_dirs = [
+            hd / "skills" / ".hub" / "index-cache",
+            hd / "skills" / ".hub",
+        ]
+        for blocked in blocked_dirs:
+            try:
+                resolved.relative_to(blocked)
+            except ValueError:
+                continue
+            return (
+                f"Access denied: {path} is an internal Hermes cache file "
+                "and cannot be read directly to prevent prompt injection. "
+                "Use the skills_list or skill_view tools instead."
+            )
+
+    # Credential / secret stores. Exact-file matches under either
+    # HERMES_HOME or <root>.
+    credential_file_names = (
+        "auth.json",
+        "auth.lock",
+        ".anthropic_oauth.json",
+        ".env",
+        "webhook_subscriptions.json",
+        os.path.join("auth", "google_oauth.json"),
+        # Bitwarden Secrets Manager disk cache: stores plaintext secret values
+        # to avoid re-fetching across back-to-back CLI invocations. The file
+        # was introduced by #31968 but not added to this guard.
+        os.path.join("cache", "bws_cache.json"),
+    )
+    for hd in hermes_dirs:
+        for name in credential_file_names:
+            try:
+                blocked = (hd / name).resolve()
+            except Exception:
+                continue
+            if resolved == blocked:
+                return (
+                    f"Access denied: {path} is a Hermes credential store "
+                    "and cannot be read directly. Provider tools consume "
+                    "these credentials through internal channels. "
+                    "(Defense-in-depth — not a security boundary; the "
+                    "terminal tool can still bypass.)"
+                )
+
+    # mcp-tokens/: directory prefix match — anything inside is OAuth
+    # token material.
+    for hd in hermes_dirs:
+        try:
+            mcp_tokens = (hd / "mcp-tokens").resolve()
+        except Exception:
+            continue
+        if resolved == mcp_tokens:
+            return (
+                f"Access denied: {path} is the Hermes MCP token directory "
+                "and cannot be read directly. (Defense-in-depth — not a "
+                "security boundary; the terminal tool can still bypass.)"
+            )
+        try:
+            resolved.relative_to(mcp_tokens)
         except ValueError:
             continue
         return (
