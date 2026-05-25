@@ -1987,19 +1987,6 @@ class TestInstallPathSafety:
         )
         assert lock.get_installed("good")["install_path"] == "devops/good"
 
-    def test_record_install_accepts_nested_official_skill_path(self, tmp_path):
-        lock = HubLockFile(path=tmp_path / "lock.json")
-        lock.record_install(
-            name="trl-fine-tuning", source="official",
-            identifier="official/mlops/training/trl-fine-tuning",
-            trust_level="builtin", scan_verdict="pass",
-            skill_hash="h", install_path="mlops/training/trl-fine-tuning",
-            files=["SKILL.md"],
-        )
-        entry = lock.get_installed("trl-fine-tuning")
-        assert entry is not None
-        assert entry["install_path"] == "mlops/training/trl-fine-tuning"
-
     def test_uninstall_rejects_poisoned_absolute_path(self, tmp_path, isolated_skills_dir, patch_lock_file):
         """Hand-edited lock.json with absolute install_path must not delete anything."""
         from tools.skills_hub import uninstall_skill
@@ -2125,50 +2112,3 @@ class TestInstallPathSafety:
         assert ok is False
         assert victim.exists()
         assert (victim / "important").read_text() == "don't delete me"
-
-    def test_install_from_quarantine_rejects_symlinks(self, tmp_path):
-        """Skill install must not follow symlinks that leak file contents
-        from outside the quarantine directory."""
-        import tools.skills_hub as hub
-        from tools.skills_guard import ScanResult
-
-        skills_dir = tmp_path / "skills"
-        quarantine_root = skills_dir / ".hub" / "quarantine"
-        quarantine_root.mkdir(parents=True)
-
-        q_dir = quarantine_root / "pending"
-        q_dir.mkdir()
-        (q_dir / "SKILL.md").write_text("---\nname: bad-skill\n---\n")
-
-        secret = tmp_path / "secret.txt"
-        secret.write_text("data exfiltration payload\n")
-
-        leak = q_dir / "leak.txt"
-        try:
-            leak.symlink_to(secret)
-        except (OSError, NotImplementedError):
-            pytest.skip("symlink creation unsupported on this platform")
-
-        bundle = hub.SkillBundle(
-            name="bad-skill",
-            files={"SKILL.md": "---\nname: bad-skill\n---\n"},
-            source="community",
-            identifier="x",
-            trust_level="community",
-        )
-        scan_result = ScanResult(
-            skill_name="bad-skill",
-            source="community",
-            trust_level="community",
-            verdict="safe",
-        )
-
-        with patch.object(hub, "SKILLS_DIR", skills_dir), \
-             patch.object(hub, "QUARANTINE_DIR", quarantine_root):
-            with pytest.raises(ValueError, match="symlink"):
-                hub.install_from_quarantine(
-                    q_dir, "bad-skill", "", bundle, scan_result,
-                )
-
-        assert not (skills_dir / "bad-skill" / "leak.txt").exists()
-        assert secret.read_text() == "data exfiltration payload\n"

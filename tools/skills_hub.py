@@ -124,10 +124,6 @@ def _validate_category_name(category: str) -> str:
     return _normalize_bundle_path(category, field_name="category", allow_nested=False)
 
 
-def _validate_install_parent_path(category: str) -> str:
-    return _normalize_bundle_path(category, field_name="install parent path", allow_nested=True)
-
-
 def _normalize_lock_install_path(install_path: str, skill_name: str) -> str:
     """Validate a skill install path before it touches the lock file or disk.
 
@@ -138,10 +134,8 @@ def _normalize_lock_install_path(install_path: str, skill_name: str) -> str:
     let ``rmtree`` wipe either the entire ``skills/`` tree or content
     outside it.
 
-    Enforce that ``install_path`` ends with ``<skill_name>``. Nested
-    official optional skills may legitimately install below paths such as
-    ``mlops/training/<skill_name>``; traversal, absolute paths, empty paths,
-    and mismatched final components are still rejected.
+    Enforce that ``install_path`` is exactly ``<skill_name>`` or
+    ``<category>/<skill_name>``. Reject anything else.
     """
     safe_skill_name = _validate_skill_name(skill_name)
     normalized = _normalize_bundle_path(
@@ -150,7 +144,7 @@ def _normalize_lock_install_path(install_path: str, skill_name: str) -> str:
         allow_nested=True,
     )
     parts = normalized.split("/")
-    if not parts or parts[-1] != safe_skill_name:
+    if len(parts) not in {1, 2} or parts[-1] != safe_skill_name:
         raise ValueError(f"Unsafe install path: {install_path}")
     return normalized
 
@@ -3074,14 +3068,20 @@ class HubLockFile:
         files: List[str],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
+        # Validate both the skill name and the install path SHAPE before
+        # writing into lock.json. A poisoned lock entry is the precondition
+        # for the uninstall_skill rmtree-escape; reject malformed input at
+        # write time so the file never carries the bad state.
+        safe_name = _validate_skill_name(name)
+        safe_install_path = _normalize_lock_install_path(install_path, safe_name)
         data = self.load()
-        data["installed"][name] = {
+        data["installed"][safe_name] = {
             "source": source,
             "identifier": identifier,
             "trust_level": trust_level,
             "scan_verdict": scan_verdict,
             "content_hash": skill_hash,
-            "install_path": install_path,
+            "install_path": safe_install_path,
             "files": files,
             "metadata": metadata or {},
             "installed_at": datetime.now(timezone.utc).isoformat(),
@@ -3229,9 +3229,14 @@ def install_from_quarantine(
         raise ValueError(f"Unsafe quarantine path: {quarantine_path}")
 
     if safe_category:
-        install_dir = SKILLS_DIR / safe_category / safe_skill_name
+        install_rel_path = f"{safe_category}/{safe_skill_name}"
     else:
-        install_dir = SKILLS_DIR / safe_skill_name
+        install_rel_path = safe_skill_name
+
+    # Resolve via the same lock-path validator the uninstaller uses. Catches
+    # symlink-in-skills-tree redirects at install time so the lock entry's
+    # path can never refer to a redirected target.
+    install_dir = _resolve_lock_install_path(install_rel_path, safe_skill_name)
 
     if install_dir.exists():
         shutil.rmtree(install_dir)
@@ -3300,14 +3305,20 @@ def uninstall_skill(skill_name: str) -> Tuple[bool, str]:
     if not entry:
         return False, f"'{skill_name}' is not a hub-installed skill (may be a builtin)"
 
-    install_path = SKILLS_DIR / entry["install_path"]
-    # Prevent path traversal from poisoned lock.json entries
+    # Validate the lock entry's install_path against the skill name. This is
+    # the destructive boundary — anything that falls through to the rmtree
+    # below MUST be inside SKILLS_DIR and MUST NOT be SKILLS_DIR itself
+    # (an empty/"."/"/" install_path would otherwise wipe the entire tree).
+    # _resolve_lock_install_path enforces shape (<skill_name> or
+    # <category>/<skill_name>), rejects absolute/traversal paths, and walks
+    # the path component-by-component refusing symlink/junction redirects.
     try:
-        resolved = install_path.resolve()
-        if not resolved.is_relative_to(SKILLS_DIR.resolve()):
-            return False, f"Refusing to remove '{entry['install_path']}': resolves outside skills directory"
-    except (ValueError, OSError):
-        return False, f"Refusing to remove '{entry['install_path']}': path resolution failed"
+        install_path = _resolve_lock_install_path(
+            entry.get("install_path", ""), skill_name
+        )
+    except ValueError as exc:
+        return False, f"Refusing to uninstall '{skill_name}': {exc}"
+
     if install_path.exists():
         shutil.rmtree(install_path)
 
