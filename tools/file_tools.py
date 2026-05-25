@@ -271,28 +271,34 @@ def _resolve_path_for_task(filepath: str, task_id: str = "default") -> Path:
     return p.resolve()
 
 
-def _is_blocked_device(filepath: str) -> bool:
-    """Return True if the path would hang the process (infinite output or blocking input).
-
-    Surfaces the worktree-cwd divergence the moment it would matter: if the
-    agent passes a relative path but it resolves under a directory that is not
-    the workspace root (i.e. the edit is about to land in a different checkout
-    than the one the agent is working in), return a message naming the absolute
-    target. ``None`` when the path is absolute, the base is unknown, or the
-    resolved path is correctly under the workspace root.
-
-    The workspace root is the live terminal cwd when known, else a registered
-    task/session cwd override, else a sentinel-free absolute ``$TERMINAL_CWD``
-    — so a worktree or Desktop session whose terminal registry is still empty
-    (no ``cd`` run yet) is warned on the very first write.
-    """
-    normalized = os.path.expanduser(filepath)
+def _is_blocked_device_path(path: str) -> bool:
+    """Return True for concrete device/fd paths that can hang reads."""
+    normalized = os.path.expanduser(path)
     if normalized in _BLOCKED_DEVICE_PATHS:
         return True
     # /proc/self/fd/0-2 and /proc/<pid>/fd/0-2 are Linux aliases for stdio
     if normalized.startswith("/proc/") and normalized.endswith(
         ("/fd/0", "/fd/1", "/fd/2")
     ):
+        return True
+    return False
+
+
+def _is_blocked_device(filepath: str) -> bool:
+    """Return True if the path would hang the process (infinite output or blocking input).
+
+    Check the literal path first so aliases like /dev/stdin are caught before
+    they resolve to terminal-specific paths. Then check the resolved path so a
+    workspace symlink to /dev/zero cannot bypass the guard.
+    """
+    normalized = os.path.expanduser(filepath)
+    if _is_blocked_device_path(normalized):
+        return True
+    try:
+        resolved = os.path.realpath(normalized)
+    except (OSError, ValueError):
+        return False
+    if resolved != normalized and _is_blocked_device_path(resolved):
         return True
     return False
 
