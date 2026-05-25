@@ -51,23 +51,18 @@ from typing import Dict, List, Tuple
 # Default test discovery roots.
 _DEFAULT_ROOTS = ["tests"]
 
-# Directories to skip during discovery — these suites require real
-# external services (a model gateway, a docker daemon with a prebuilt
-# image, etc.) and are run in their own dedicated CI jobs:
+# Directories to skip during discovery — the e2e + integration suites
+# require real services and are run separately. Match exactly the
+# ``--ignore=`` flags the previous CI command used.
 #
-#   tests/e2e/         — .github/workflows/tests.yml :: e2e job
-#   tests/integration/ — historical; legacy --ignore flags
-#   tests/docker/      — .github/workflows/docker-publish.yml ::
-#                        build-amd64 job (runs against the freshly-loaded
-#                        nousresearch/hermes-agent:test image, via
-#                        ``HERMES_TEST_IMAGE`` so the fixture skips
-#                        rebuild). The full pytest-shard runner can't
-#                        host these because the session-scoped
-#                        ``built_image`` fixture would do a 3-7min
-#                        ``docker build`` inside a 180s per-test
-#                        pytest-timeout cap (set by tests/docker/conftest.py),
-#                        so the build is guaranteed to die in fixture
-#                        setup. The dedicated job sidesteps both costs.
+# ``docker`` joined this list in the salvage of PR #30136: the new
+# tests/docker/ harness builds the real Dockerfile in a session
+# fixture and runs ``docker run`` against it. On a CI runner where
+# Docker IS available (ubuntu-latest), the build can exceed
+# pytest-timeout's 180s ceiling and surface as a setup-timeout
+# instead of a real test failure. The harness has its own dedicated
+# action (.github/actions/hermes-smoke-test) plus the docker-lint
+# workflow; it is NOT meant to run in the regular ``test (N)`` shards.
 _SKIP_PARTS = {"integration", "e2e", "docker"}
 
 # Per-file wall-clock cap. Generous default — pytest-timeout still
