@@ -307,7 +307,28 @@ def _has_embedded_models() -> bool:
         return False
 
 
-# ── 本地 OpenAI 兼容服务器检测（LM Studio / llama.cpp server）──
+# ── 本地 OpenAI 兼容服务器检测（LM Studio / llama.cpp / FastLLM / vLLM / LocalAI 等）──
+#
+# 新后端接入模板:
+#   1. 在 _LOCAL_SERVER_CONFIGS 中添加一个条目（字段见下方注释）
+#   2. quickstart 会自动探测其 /v1/models 端点
+#   3. 探测到后, _write_local_backends() 写入 config.yaml 的 local_backends 段
+#   4. SmartRouter v2 自动识别并在路由时使用
+#
+# 自定义后端（不修改代码）:
+#   在 config.yaml 中直接添加:
+#     local_backends:
+#       - name: my-server
+#         base_url: http://localhost:9999/v1
+#         priority: 5
+#         kind: openai-compatible
+#   无需重启, SmartRouter 下次探测自动识别。
+#
+# local_backends 条目完整字段:
+#   name:     后端标识 (string, 必填) — 如 "vllm"、"my-server"
+#   base_url: API 端点 (string, 必填) — 以 /v1 结尾的 OpenAI 兼容 URL
+#   priority: 路由优先级 (int, 可选, 默认 99) — 数字越小越优先
+#   kind:     后端类型 (string, 可选) — "ollama"|"openai-compatible"|"lm-studio"|"llama-cpp"|"fastllm"
 
 _LOCAL_SERVER_CONFIGS = [
     {
@@ -323,6 +344,27 @@ _LOCAL_SERVER_CONFIGS = [
         "base_url": "http://localhost:8080/v1",
         "display_name": "llama.cpp（本地）",
         "default_model": "llama-3.2-3b-instruct",
+    },
+    {
+        "id": "fastllm",
+        "name": "FastLLM",
+        "base_url": "http://localhost:8088/v1",
+        "display_name": "FastLLM（本地）",
+        "default_model": "qwen2.5-7b-instruct",
+    },
+    {
+        "id": "vllm",
+        "name": "vLLM",
+        "base_url": "http://localhost:8000/v1",
+        "display_name": "vLLM（本地）",
+        "default_model": "qwen2.5-7b-instruct",
+    },
+    {
+        "id": "localai",
+        "name": "LocalAI",
+        "base_url": "http://localhost:8082/v1",
+        "display_name": "LocalAI（本地）",
+        "default_model": "qwen2.5-7b-instruct",
     },
 ]
 
@@ -884,6 +926,78 @@ def _write_smart_routing(
         return False
 
 
+def _write_local_backends(
+    ollama_info: Optional[dict] = None,
+    local_server_infos: Optional[list[dict]] = None,
+) -> bool:
+    """将多本地后端配置写入 config.yaml 的 local_backends 段。
+
+    SmartRouter v2 使用 local_backends 统一管理所有本地推理服务:
+      Ollama (port 11434), LM Studio (port 1234), llama.cpp (port 8080), FastLLM (port 8088)
+
+    每个后端条目包含:
+      - name: 后端名称 (ollama / lm-studio / llama-cpp / fastllm)
+      - base_url: API 地址
+      - priority: 路由优先级 (数字越小越优先)
+    """
+    try:
+        from hermes_cli.config import load_config, save_config
+
+        cfg = load_config()
+        backends = []
+        priority = 1
+
+        # Ollama
+        if ollama_info and ollama_info.get("available"):
+            backends.append({
+                "name": "ollama",
+                "base_url": "http://localhost:11434/v1",
+                "priority": priority,
+            })
+            priority += 1
+
+        # LM Studio / llama.cpp / FastLLM
+        local_server_infos = local_server_infos or []
+        for li in local_server_infos:
+            if li.get("available") and li.get("base_url"):
+                backends.append({
+                    "name": li.get("name", "").lower().replace(" ", "-"),
+                    "base_url": li.get("base_url", ""),
+                    "priority": priority,
+                })
+                priority += 1
+
+        if backends:
+            # v2.1 合并模式: 保留用户手动添加的自定义后端
+            existing = cfg.get("local_backends", [])
+            if isinstance(existing, list):
+                # 已知后端名称白名单 (quickstart 管理的)
+                known_names = {"ollama", "lm-studio", "llama-cpp", "fastllm", "vllm", "localai"}
+                detected_urls = {b["name"]: b["base_url"] for b in backends}
+                for old_entry in existing:
+                    old_name = old_entry.get("name", "")
+                    # 保留非已知名称的自定义后端
+                    if old_name not in known_names:
+                        if old_entry.get("base_url", "") not in detected_urls.values():
+                            backends.append(old_entry)
+                    # 已知后端如果已离线, 保留旧配置 (不覆盖)
+                    elif old_name in known_names and not any(
+                        b["name"] == old_name and b["base_url"] for b in backends
+                    ):
+                        backends.append(old_entry)
+            cfg["local_backends"] = backends
+        else:
+            # 保留旧 local_backends (如果用户手动配置了)
+            cfg.pop("local_backends", None)
+
+        save_config(cfg)
+        logger.info("local_backends 配置已写入: %d 个后端", len(backends))
+        return True
+    except Exception as e:
+        logger.warning("写入 local_backends 配置失败: %s", e)
+        return False
+
+
 def _get_current_provider_label() -> str:
     """获取当前配置的主力提供商描述。"""
     try:
@@ -914,6 +1028,80 @@ def _prompt_yes_no(prompt: str, default: bool = True) -> bool:
         return default
     return reply in ("y", "yes")
 
+
+
+def _prompt_add_custom_backend() -> Optional[dict]:
+    """交互式添加自定义本地推理后端 (Phase E: 新后端接入模板)。
+
+    引导用户输入后端名称、端口和默认模型名。
+    返回 server_config dict (兼容 _LOCAL_SERVER_CONFIGS 格式) 或 None。
+    """
+    from hermes_cli.colors import Colors, color
+
+    print()
+    print(f"  {color('🔧', Colors.BLUE)} 添加自定义本地后端")
+    print(f"     支持任意 OpenAI 兼容的本地推理服务 (vLLM, LocalAI, Ollama, 自建服务等)")
+    print()
+
+    # 后端名称
+    name = input("    后端名称 (如 vLLM、MyServer): ").strip()
+    if not name:
+        print(f"  {color('ℹ', Colors.BLUE)} 已跳过")
+        return None
+
+    name_id = name.lower().replace(" ", "-")
+
+    # 端口
+    port_str = input("    端口号 (默认 8000): ").strip()
+    try:
+        port = int(port_str) if port_str else 8000
+    except ValueError:
+        print(f"  {color('✗', Colors.RED)} 无效端口号")
+        return None
+
+    base_url = f"http://localhost:{port}/v1"
+
+    # 默认模型
+    default_model = input("    默认模型名 (如 qwen2.5-7b-instruct): ").strip()
+    if not default_model:
+        default_model = "qwen2.5-7b-instruct"
+
+    # 验证连通性
+    print(f"    正在探测 {base_url}/models ...", end=" ")
+    try:
+        info = _detect_local_server({
+            "id": name_id,
+            "name": name,
+            "base_url": base_url,
+            "display_name": f"{name}（自定义）",
+            "default_model": default_model,
+        })
+        if info and info.get("available"):
+            model_count = len(info.get("models", []))
+            print(f"{color('✓', Colors.GREEN)} ({model_count} 个模型)")
+            return info
+        else:
+            print(f"{color('⚠', Colors.YELLOW)} 无法连接（已记录配置，启动后端后自动生效）")
+            return {
+                "available": False,
+                "provider_id": name_id,
+                "name": name,
+                "display_name": f"{name}（自定义, 离线）",
+                "base_url": base_url,
+                "models": [],
+                "default_model": default_model,
+            }
+    except Exception as e:
+        print(f"{color('⚠', Colors.YELLOW)} 探测失败: {e}")
+        return {
+            "available": False,
+            "provider_id": name_id,
+            "name": name,
+            "display_name": f"{name}（自定义）",
+            "base_url": base_url,
+            "models": [],
+            "default_model": default_model,
+        }
 
 # ── 安装本地模型 ──
 
@@ -1142,6 +1330,26 @@ def cmd_quickstart(args) -> int:
         print(f"  {color('✓', Colors.GREEN)} MemPalace 记忆库: {init_status}（MCP {mcp_status}）")
 
     print()
+    # Phase E: 自定义后端接入
+    custom_backend_count = 0
+    while True:
+        if not _prompt_yes_no("添加自定义本地后端？", default=False):
+            break
+        custom_info = _prompt_add_custom_backend()
+        if custom_info:
+            local_server_infos.append(custom_info)
+            custom_backend_count += 1
+            resource_count += 1
+            if custom_info.get("available") and custom_info.get("models"):
+                display = custom_info.get("display_name", custom_info.get("name", ""))
+                print()
+                print(f"  {color('✓', Colors.GREEN)} {display}: 已添加")
+            else:
+                display = custom_info.get("display_name", custom_info.get("name", ""))
+                print(f"  {color('ℹ', Colors.BLUE)} {display}: 已记录（启动后端后自动生效）")
+        else:
+            break
+
 
     # ── 无资源 → 引导安装 ──
     if resource_count == 0:
@@ -1257,6 +1465,12 @@ def cmd_quickstart(args) -> int:
     _write_smart_routing(
         primary_id, primary_model, fallback_chain,
         api_providers, ollama_info,
+        local_server_infos=local_server_infos,
+    )
+
+    # v2: 写入多后端配置（local_backends）
+    _write_local_backends(
+        ollama_info=ollama_info,
         local_server_infos=local_server_infos,
     )
 

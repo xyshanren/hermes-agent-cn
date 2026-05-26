@@ -1,20 +1,16 @@
 """
-智能多模型路由引擎 — 三层自动降级：Ollama → 云端 → 嵌入式。
+智能多模型路由引擎 v2 — 能力感知多后端路由。
 
-Hermes-Agent-CN 核心组件，确保在任何网络条件下都能工作。
+Hermes-Agent-CN 核心组件，根据任务需求自动在 本地服务(Ollama/LM Studio/llama.cpp/FastLLM...)
+→ 云端API(DeepSeek/MiniMax/Kimi/Zai) → 嵌入式CPU 之间选择最佳模型。
 
 路由策略:
-    Tier 1 (最佳):   Ollama 本地服务器
-                     ├── 简单任务 → qwen3-vl:4b
-                     ├── 中等任务 → 用户配置的 Ollama 中等模型 / 云端
-                     └── 复杂任务 → 云端
-
-    Tier 2 (云端):   国产 API
-                     └── DeepSeek / MiniMax / Kimi / Zai
-
-    Tier 3 (兜底):   嵌入式 CPU 推理
-                     ├── Qwen2.5-Coder-1.5B (代码/推理)
-                     └── Qwen2.5-0.5B (bundled, 总是可用)
+    1. 分析任务需求 (TaskRequirements): 能力分、是否需要视觉、是否需要工具调用
+    2. 从所有后端收集可用模型, 按能力分过滤
+    3. 本地优先 (满足能力阈值的前提下选最强的本地模型)
+    4. 本地不可用/能力不足 → 云端
+    5. 云端不可用 → 嵌入式兜底
+    6. 熔断机制: 连续失败 2 次的模型临时屏蔽 5 分钟
 
 使用方式:
     from agent.zhineng_luyou import SmartRouter
@@ -25,12 +21,17 @@ Hermes-Agent-CN 核心组件，确保在任何网络条件下都能工作。
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import re
 import time
+import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -39,30 +40,107 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_DEFAULT_HOST = "localhost"
 OLLAMA_DEFAULT_PORT = 11434
-OLLAMA_DEFAULT_SIMPLE_MODEL = "qwen3-vl:4b"
-OLLAMA_HEALTH_TIMEOUT = 3.0           # 健康检查超时 (秒)
-OLLAMA_OFFLINE_COOLDOWN = 300          # 离线标记冷却 (秒, =5分钟)
-CACHE_TTL = 60                         # 路由决策缓存时间 (秒)
+LOCAL_HEALTH_TIMEOUT = 3.0           # 后端探测超时 (秒)
+LOCAL_OFFLINE_COOLDOWN = 300          # 离线标记冷却 (秒, =5分钟)
+CACHE_TTL = 60                        # 路由决策缓存时间 (秒)
+PROBE_COOLDOWN = 60                   # 后端探测冷却 (秒)
+CIRCUIT_BREAKER_THRESHOLD = 2         # 连续失败次数触发熔断
+CIRCUIT_BREAKER_COOLDOWN = 300        # 熔断冷却时间 (秒, =5分钟)
 
 # 嵌入式模型优先级
 EMBEDDED_MODEL_ORDER = ["qwen-coder-1.5b", "qwen-0.5b"]
+
+# 已知后端默认端口映射 (用于 auto-detect 时尝试)
+DEFAULT_BACKEND_PORTS = {
+    "ollama": 11434,
+    "lm-studio": 1234,
+    "llama-cpp": 8080,
+    "fastllm": 8088,
+}
+
+# 路由日志 (Phase C)
+ROUTE_LOG_EXT = ".route.jsonl"      # 路由日志后缀
+ROUTE_LOG_MAX_LINES = 5000           # 路由日志最大行数 (超过自动截断)
+ROUTE_LOG_TRUNCATE_TO = 3000         # 截断后保留行数
+
+
+# -- 后端类型枚举 ------------------------------------------------------------
+
+class BackendKind(Enum):
+    """后端类型"""
+    OLLAMA = "ollama"
+    LM_STUDIO = "lm-studio"
+    LLAMA_CPP = "llama-cpp"
+    FASTLLM = "fastllm"
+    OPENAI_COMPATIBLE = "openai-compatible"  # 通用 OpenAI 兼容后端
 
 
 # -- 数据类型 ----------------------------------------------------------------
 
 class ModelTier(Enum):
     """模型层级。"""
-    OLLAMA = "ollama"       # Tier 1: 本地 Ollama
+    LOCAL = "local"         # Tier 1: 本地模型 (所有后端)
     CLOUD = "cloud"         # Tier 2: 国产云端 API
     EMBEDDED = "embedded"   # Tier 3: 嵌入式 CPU 推理
     NONE = "none"           # 无可用的模型
 
+    # 向后兼容
+    OLLAMA = "local"        # 废弃，等同于 LOCAL
+
 
 class TaskComplexity(Enum):
-    """任务复杂度。"""
-    SIMPLE = "simple"       # 闲聊、翻译、简单问答
-    MEDIUM = "medium"       # 代码审查、多步操作、短文档
-    COMPLEX = "complex"     # 架构设计、大文件重构、多文件协调
+    """任务复杂度 (向后兼容保留, 新代码使用 TaskRequirements)。"""
+    SIMPLE = "simple"
+    MEDIUM = "medium"
+    COMPLEX = "complex"
+
+
+@dataclass
+class LocalModel:
+    """本地模型描述。"""
+    name: str                           # 模型名称, 如 "qwen3-vl:4b"
+    backend: str                        # 后端名称, 如 "ollama"
+    base_url: str                       # 后端 base_url
+    backend_priority: int = 99          # 后端优先级 (越小越优先)
+    params_b: int = 0                   # 参数量 (B)
+    context_length: int = 8192          # 上下文长度
+    supports_vision: bool = False       # 是否支持视觉
+    supports_tools: bool = True         # 是否支持工具调用
+    estimated_capability: int = 2       # 能力分 (0-10)
+    raw_details: Optional[Dict] = field(default_factory=dict)  # 原始 API 数据
+
+    @property
+    def provider_model(self) -> str:
+        """返回 "backend:name" 格式 (用于 Provider 层消费)。"""
+        return f"{self.backend}:{self.name}"
+
+
+@dataclass
+class TaskRequirements:
+    """任务对模型能力的需求量化。
+
+    min_capability: 最低能力分要求 (0-10)
+        - 0-2: 简单问答、闲聊、翻译
+        - 3-4: 代码片段、单文件操作
+        - 5-6: 代码审查、短文档
+        - 7-8: 架构设计、重构
+        - 9-10: 多文件协调、复杂推理
+    """
+    min_capability: int
+    needs_vision: bool = False
+    needs_tools: bool = False
+    min_context: int = 8192
+    prefer_fast: bool = False  # 简单任务优先低延迟本地模型
+
+    @classmethod
+    def from_complexity(cls, complexity: TaskComplexity) -> "TaskRequirements":
+        """从旧 TaskComplexity 转换 (向后兼容)。"""
+        mapping = {
+            TaskComplexity.SIMPLE: cls(min_capability=2, prefer_fast=True),
+            TaskComplexity.MEDIUM: cls(min_capability=5),
+            TaskComplexity.COMPLEX: cls(min_capability=8),
+        }
+        return mapping.get(complexity, cls(min_capability=5))
 
 
 @dataclass
@@ -71,7 +149,8 @@ class RouteResult:
     provider: str                       # Provider ID
     model: str                          # Model ID
     tier: ModelTier                     # 使用的层级
-    reason: str                         # 决策原因（中文）
+    reason: str                         # 决策原因 (中文)
+    backend: str = ""                   # 后端名称 (本地模型时有效)
     timestamp: float = field(default_factory=time.time)
 
     @property
@@ -84,17 +163,15 @@ class RouteResult:
         return self.tier != ModelTier.NONE
 
 
-# -- 复杂度判断 ----------------------------------------------------------------
+# -- 复杂度判断 (保留向后兼容) ------------------------------------------------
 
-# 简单任务关键词
 SIMPLE_KEYWORDS = [
     "你好", "hi", "hello", "谢谢", "再见", "翻译",
-    "hi", "hello", "thanks", "bye",
+    "thanks", "bye",
     "格式", "format", "缩进", "indent",
     "天气", "weather", "时间", "time", "日期", "date",
 ]
 
-# 复杂任务关键词
 COMPLEX_KEYWORDS = [
     "架构", "architecture", "设计", "design", "方案",
     "重构", "refactor", "refactoring",
@@ -107,24 +184,17 @@ COMPLEX_KEYWORDS = [
 
 
 def analyze_complexity(message: str) -> TaskComplexity:
-    """分析用户消息的复杂度。
+    """分析用户消息的复杂度 (向后兼容保留)。
 
-    策略：
-        1. 简单关键词匹配 → SIMPLE
-        2. 复杂关键词匹配 → COMPLEX（与简单冲突时复杂优先）
-        3. 消息长度 > 500 字符 → COMPLEX
-        4. 消息长度 < 50 字符 → SIMPLE
-        5. 默认 → MEDIUM
+    新代码请使用 SmartRouter._analyze_task() 获取 TaskRequirements。
     """
     text = message.lower().strip()
     length = len(message)
 
-    # 检查复杂关键词
     complex_score = sum(1 for kw in COMPLEX_KEYWORDS if kw.lower() in text)
     if complex_score >= 1 or length > 500:
         return TaskComplexity.COMPLEX
 
-    # 检查简单关键词
     simple_score = sum(1 for kw in SIMPLE_KEYWORDS if kw.lower() in text)
     if simple_score >= 1 or length < 50:
         return TaskComplexity.SIMPLE
@@ -132,7 +202,91 @@ def analyze_complexity(message: str) -> TaskComplexity:
     return TaskComplexity.MEDIUM
 
 
-# -- 路由引擎 ----------------------------------------------------------------
+# -- 参数量推断 ----------------------------------------------------------------
+
+def _parse_param_count(model_name: str) -> int:
+    """从模型名称推断参数量 (单位: B)。
+
+    支持格式:
+        "qwen3-vl:4b" → 4
+        "deepseek-r1:7b" → 7
+        "qwen3.5-2b-coder:latest" → 2
+        "llama3.2:3b-instruct-fp16" → 3
+        "phi-3-mini-4k-instruct" → 3
+        "glm-ocr:latest" → 0 (无法推断)
+    """
+    # 匹配 :数字b 或 -数字b 模式
+    m = re.search(r'[: -](\d+)b', model_name.lower())
+    if m:
+        return int(m.group(1))
+
+    # 匹配数字后缀 (如 model-3)
+    m = re.search(r'[-_ ](\d+)[-_ ]?([vV]\d+)?$', model_name)
+    if m:
+        val = int(m.group(1))
+        # 过滤数字过小的误匹配 (如 "model-2" 中 2 可能是版本号)
+        if 1 <= val <= 500:
+            return val
+
+    return 0
+
+
+def _estimate_params_from_api(model_info: Dict[str, Any]) -> int:
+    """从模型 API 信息中估算参数量 (优先使用 model_info)。"""
+    # Ollama /api/show 返回 "parameters" 字段
+    details = model_info.get("details", {})
+    params_str = details.get("parameter_size", "")
+    if params_str:
+        # "4.0B" → 4
+        m = re.match(r'([\d.]+)B', str(params_str), re.IGNORECASE)
+        if m:
+            return int(float(m.group(1)))
+
+    # 备选: 从名称解析
+    name = model_info.get("model", model_info.get("name", ""))
+    return _parse_param_count(name)
+
+
+def _infer_vision_support(model_name: str) -> bool:
+    """从模型名称推断是否支持视觉。"""
+    name_lower = model_name.lower()
+    vision_keywords = ["vl", "vision", "multimodal", "omni", "llava"]
+    return any(kw in name_lower for kw in vision_keywords)
+
+
+def _estimate_capability(params_b: int, context_length: int,
+                         supports_vision: bool = False,
+                         supports_tools: bool = True) -> int:
+    """根据模型参数估算能力分 (0-10)。
+
+    score ≈ log2(params_b) + context_bonus + feature_bonus
+    最终 clamp 到 0-10。
+    """
+    if params_b <= 0:
+        return 2 if supports_vision else 1
+
+    import math
+    # 基础分: 参数量对数
+    base = min(math.log2(max(params_b, 1)) * 2.0, 8.0)
+
+    # 上下文加分
+    if context_length >= 65536:
+        base += 1.5
+    elif context_length >= 32768:
+        base += 1.0
+    elif context_length >= 16384:
+        base += 0.5
+
+    # 特性加分
+    if supports_vision:
+        base += 0.5
+    if supports_tools:
+        base += 0.5
+
+    return max(1, min(10, int(round(base))))
+
+
+# -- 后端探测 ----------------------------------------------------------------
 
 @dataclass
 class _CacheEntry:
@@ -142,13 +296,379 @@ class _CacheEntry:
     ttl: float
 
 
-class SmartRouter:
-    """智能多模型路由引擎。
+class BackendHub:
+    """多后端统一管理中心。
 
-    三层自动降级路由，根据任务复杂度和模型可用性选择最佳 Provider。
+    负责:
+        1. 注册本地后端 (从 config.yaml 的 local_backends 段)
+        2. 并发探测所有后端, 获取可用模型列表
+        3. 构建统一模型编目 (ModelCatalog)
+        4. 对每个模型估算能力分
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self._config = config or {}
+        self._model_cache: List[LocalModel] = []
+        self._probe_timestamp: float = 0.0
+        self._backend_status: Dict[str, Dict[str, Any]] = {}
+        self._cache: Dict[str, _CacheEntry] = {}
+
+    # -- 注册后端 ----------------------------------------------------------
+
+    def get_registered_backends(self) -> List[Dict[str, Any]]:
+        """获取所有注册的本地后端。
+
+        来源: config.yaml → local_backends 段。
+        如果未配置, 自动探测 Ollama (默认 localhost:11434)。
+        """
+        configured = self._config.get("local_backends", [])
+
+        if not configured:
+            # 没有显式配置, 退回传统 auto-detect
+            return self._auto_detect_backends()
+
+        return [
+            {
+                "name": entry.get("name", f"local-{i}"),
+                "base_url": entry.get("base_url", "").rstrip("/"),
+                "priority": entry.get("priority", i + 1),
+                "kind": entry.get("kind", "openai-compatible"),
+            }
+            for i, entry in enumerate(configured)
+            if entry.get("base_url")
+        ]
+
+    def _auto_detect_backends(self) -> List[Dict[str, Any]]:
+        """自动探测常见本地后端 (回退兼容方案)。"""
+        backends = []
+
+        # Ollama 默认检测
+        backends.append({
+            "name": "ollama",
+            "base_url": f"http://localhost:{OLLAMA_DEFAULT_PORT}/v1",
+            "priority": 1,
+            "kind": "ollama",
+        })
+
+        # 检测 LM Studio (端口 1234)
+        backends.append({
+            "name": "lm-studio",
+            "base_url": "http://localhost:1234/v1",
+            "priority": 2,
+            "kind": "lm-studio",
+        })
+
+        # 检测 llama.cpp (端口 8080)
+        backends.append({
+            "name": "llama-cpp",
+            "base_url": "http://localhost:8080/v1",
+            "priority": 3,
+            "kind": "llama-cpp",
+        })
+
+        # 检测 FastLLM (端口 8088)
+        backends.append({
+            "name": "fastllm",
+            "base_url": "http://localhost:8088/v1",
+            "priority": 4,
+            "kind": "fastllm",
+        })
+
+        # 检测 vLLM (端口 8000)
+        backends.append({
+            "name": "vllm",
+            "base_url": "http://localhost:8000/v1",
+            "priority": 5,
+            "kind": "openai-compatible",
+        })
+
+        # 检测 LocalAI (端口 8082)
+        backends.append({
+            "name": "localai",
+            "base_url": "http://localhost:8082/v1",
+            "priority": 6,
+            "kind": "openai-compatible",
+        })
+
+        return backends
+
+    # -- 探测 --------------------------------------------------------------
+
+    def probe_all(self, force: bool = False) -> List[LocalModel]:
+        """探测所有注册后端, 返回可用模型列表。
+
+        缓存策略: PROBE_COOLDOWN 秒内返回缓存结果。
+        """
+        if not force and (time.time() - self._probe_timestamp) < PROBE_COOLDOWN:
+            return self._model_cache
+
+        all_models: List[LocalModel] = []
+        self._backend_status = {}
+
+        for backend_info in self.get_registered_backends():
+            name = backend_info["name"]
+            base_url = backend_info["base_url"]
+            priority = backend_info["priority"]
+
+            # 冷却期检查: 上次标记为离线的后端 PROBE_COOLDOWN 秒内不重试
+            status_key = f"probe:{name}"
+            cached = self._get_cached(status_key)
+            if cached is False:
+                self._backend_status[name] = {"online": False, "base_url": base_url, "error": "冷却中"}
+                continue
+
+            # 执行探测
+            online, models_raw = self._probe_backend(base_url, name)
+            self._backend_status[name] = {
+                "online": online,
+                "base_url": base_url,
+                "model_count": len(models_raw),
+            }
+
+            if online and models_raw:
+                for m in models_raw:
+                    lm = self._build_local_model(m, name, base_url, priority)
+                    all_models.append(lm)
+                logger.debug("后端 %s: 在线, %d 个模型", name, len(models_raw))
+            else:
+                logger.debug("后端 %s: 离线或无模型", name)
+                # 标记离线, 冷却
+                self._set_cache(status_key, False, ttl=PROBE_COOLDOWN)
+
+        self._model_cache = all_models
+        self._probe_timestamp = time.time()
+        return all_models
+
+    def get_all_models(self, force: bool = False) -> List[LocalModel]:
+        """获取所有可用本地模型 (带缓存)。"""
+        return self.probe_all(force=force)
+
+    def get_best_for_task(self, req: TaskRequirements,
+                          session_history: Optional[List] = None) -> Optional[LocalModel]:
+        """从本地模型中选出最适合任务需求的一个。
+
+        策略:
+            1. 过滤: 能力分 >= min_capability
+            2. 排序: 优先级 (backend_priority) ↑, 能力分 ↓ (在满足需求前提下选最强)
+            3. 如果 prefer_fast: 在满足需求的模型中选择最小能力分 (最小延迟)
+        """
+        all_models = self.get_all_models()
+
+        # 过滤
+        candidates = [
+            m for m in all_models
+            if m.estimated_capability >= req.min_capability
+            and (not req.needs_vision or m.supports_vision)
+            and m.context_length >= req.min_context
+        ]
+
+        if not candidates:
+            logger.debug("无本地模型满足需求 (min_cap=%d, vision=%s)",
+                        req.min_capability, req.needs_vision)
+            return None
+
+        # 排序
+        if req.prefer_fast:
+            # 选最轻量的满足需求的模型
+            candidates.sort(key=lambda m: (m.backend_priority, m.estimated_capability))
+        else:
+            # 选最强的满足需求的模型
+            candidates.sort(key=lambda m: (m.backend_priority, -m.estimated_capability))
+
+        return candidates[0]
+
+    # -- 内部方法 ----------------------------------------------------------
+
+    def _probe_backend(self, base_url: str, backend_name: str) -> Tuple[bool, List[Dict]]:
+        """探测单个后端, 返回 (online, models_list)。
+
+        Ollama: GET /api/tags (更准确的结构化返回)
+        OpenAI 兼容: GET /v1/models → GET /models
+        """
+        try:
+            import urllib.request as ur
+
+            if "ollama" in backend_name.lower():
+                # Ollama 特殊路径: /api/tags (无 /v1)
+                ollama_base = base_url.replace("/v1", "")
+                url = f"{ollama_base}/api/tags"
+            else:
+                # OpenAI 兼容后端
+                url = base_url.rstrip("/") + "/models"
+
+            req = ur.Request(url, method="GET", headers={"Accept": "application/json"})
+            with ur.urlopen(req, timeout=LOCAL_HEALTH_TIMEOUT) as resp:
+                if resp.status != 200:
+                    return False, []
+                data = json.loads(resp.read().decode())
+
+            # 解析模型列表
+            if "ollama" in backend_name.lower():
+                # Ollama 格式: {"models": [{"name": "qwen3-vl:4b", "details": {...}}]}
+                models_raw = data.get("models", [])
+                # 过滤 "global" 等非真实模型
+                models_raw = [
+                    m for m in models_raw
+                    if m.get("name") and m["name"] != "global"
+                ]
+            else:
+                # OpenAI 兼容格式: {"data": [{"id": "model-name", ...}]}
+                # 或 {"models": [{"name": "model-name", ...}]}
+                models_raw = data.get("data", data.get("models", []))
+
+            return True, models_raw
+
+        except Exception as e:
+            self._backend_status[backend_name] = {
+                "online": False, "base_url": base_url, "error": str(e)
+            }
+            return False, []
+
+    def _build_local_model(self, raw: Dict, backend: str,
+                           base_url: str, priority: int) -> LocalModel:
+        """从原始 API 返回构建 LocalModel 对象。"""
+        name = raw.get("name", raw.get("id", "unknown"))
+        params = _estimate_params_from_api(raw)
+        context_length = self._estimate_context_length(raw, name)
+        supports_vision = _infer_vision_support(name)
+        capability = _estimate_capability(params, context_length,
+                                          supports_vision, True)
+
+        return LocalModel(
+            name=name,
+            backend=backend,
+            base_url=base_url,
+            backend_priority=priority,
+            params_b=params,
+            context_length=context_length,
+            supports_vision=supports_vision,
+            supports_tools=True,
+            estimated_capability=capability,
+            raw_details=raw,
+        )
+
+    def _estimate_context_length(self, raw: Dict, name: str) -> int:
+        """估算模型的上下文长度。"""
+        # 尝试从 model details 获取
+        details = raw.get("details", {})
+        family = details.get("family", "").lower()
+
+        # Ollama 已知模型的默认 context
+        known_contexts = {
+            "qwen3": 32768, "qwen2.5": 32768, "qwen2": 32768,
+            "deepseek": 131072, "deepseek-r1": 131072,
+            "llama3.2": 131072, "llama3.1": 131072, "llama3": 8192,
+            "gemma3": 32768, "gemma2": 8192,
+            "phi": 4096, "phi-3": 128000,
+            "mistral": 32768, "mixtral": 32768,
+        }
+
+        for key, ctx in known_contexts.items():
+            if key in family or key in name.lower():
+                return ctx
+
+        return 8192
+
+    # -- 缓存 --------------------------------------------------------------
+
+    def _get_cached(self, key: str) -> Optional[Any]:
+        entry = self._cache.get(key)
+        if entry and (time.time() - entry.timestamp) < entry.ttl:
+            return entry.value
+        return None
+
+    def _set_cache(self, key: str, value: Any, ttl: float = CACHE_TTL):
+        self._cache[key] = _CacheEntry(value, time.time(), ttl)
+
+
+# -- 熔断管理 ----------------------------------------------------------------
+
+@dataclass
+class _ModelHealth:
+    """单个模型健康状态。"""
+    consecutive_failures: int = 0
+    last_failure: float = 0.0
+    last_success: float = 0.0
+
+
+class HealthTracker:
+    """模型健康追踪 + 熔断管理。
+
+    解决"本地服务在线但模型推理失败, 连续重试三次才 Fallback"问题:
+        - 连续失败 CIRCUIT_BREAKER_THRESHOLD 次 → 熔断
+        - 熔断冷却 CIRCUIT_BREAKER_COOLDOWN 秒后恢复
+        - 路由时自动过滤已熔断的模型
+    """
+
+    def __init__(self):
+        self._stats: Dict[str, _ModelHealth] = {}
+
+    def _key(self, provider: str, model: str) -> str:
+        return f"{provider}:{model}"
+
+    def record_success(self, provider: str, model: str):
+        """记录一次成功推理。"""
+        key = self._key(provider, model)
+        h = self._stats.get(key, _ModelHealth())
+        h.consecutive_failures = 0
+        h.last_success = time.time()
+        self._stats[key] = h
+
+    def record_failure(self, provider: str, model: str):
+        """记录一次失败推理。"""
+        key = self._key(provider, model)
+        h = self._stats.get(key, _ModelHealth())
+        h.consecutive_failures += 1
+        h.last_failure = time.time()
+        self._stats[key] = h
+        logger.warning("模型 %s 连续失败 %d 次", key, h.consecutive_failures)
+
+    def is_circuited(self, provider: str, model: str) -> bool:
+        """检查模型是否已被熔断。"""
+        key = self._key(provider, model)
+        h = self._stats.get(key)
+        if not h:
+            return False
+        if h.consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+            elapsed = time.time() - h.last_failure
+            if elapsed < CIRCUIT_BREAKER_COOLDOWN:
+                return True
+            # 冷却结束, 自动恢复
+            h.consecutive_failures = 0
+        return False
+
+    def filter(self, candidates: List[LocalModel]) -> List[LocalModel]:
+        """过滤掉已熔断的模型。"""
+        return [
+            c for c in candidates
+            if not self.is_circuited(c.backend, c.name)
+        ]
+
+    def get_status(self) -> Dict[str, Dict[str, Any]]:
+        """获取所有模型健康状态。"""
+        return {
+            key: {
+                "consecutive_failures": h.consecutive_failures,
+                "circuited": (
+                    h.consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD
+                    and (time.time() - h.last_failure) < CIRCUIT_BREAKER_COOLDOWN
+                ),
+                "last_failure": h.last_failure,
+                "last_success": h.last_success,
+            }
+            for key, h in self._stats.items()
+        }
+
+
+# -- 路由引擎 v2 --------------------------------------------------------------
+
+class SmartRouter:
+    """智能多模型路由引擎 v2。
+
+    根据任务需求和模型能力, 自动在 本地 → 云端 → 嵌入式 之间选择最佳模型。
 
     Args:
-        config: 完整的 config.yaml 配置字典（可选）。
+        config: 完整的 config.yaml 配置字典 (可选)。
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -156,81 +676,191 @@ class SmartRouter:
         self._cache: Dict[str, _CacheEntry] = {}
         self._ollama_offline_until: float = 0.0
 
+        # v2: 多后端管理
+        self.backend_hub = BackendHub(config)
+        # v2: 熔断管理
+        self.health_tracker = HealthTracker()
+
         # 加载路由配置
-        routing = self.config.get("agent", {}).get("routing", {})
+        routing = self.config.get("routing", self.config.get("agent", {}).get("routing", {}))
         self.routing_mode: str = routing.get("mode", "auto")
         self.ollama_config = routing.get("ollama", {})
         self.embedded_config = routing.get("embedded", {})
 
-        logger.debug("SmartRouter 初始化完成, mode=%s", self.routing_mode)
+        # Fallback 链
+        self.fallback_providers = self.config.get("fallback_providers", [])
+        if not self.fallback_providers:
+            fm = self.config.get("fallback_model", "")
+            # fallback_model may be: str, list[str] (legacy), or
+            # list[dict] (cfg migration injects {"provider":...,"model":...})
+            if isinstance(fm, list) and fm:
+                if isinstance(fm[0], dict):
+                    self.fallback_providers = fm  # already correct format
+                    fm = ""
+                else:
+                    fm = fm[0]  # string list -> take first entry
+            if isinstance(fm, str) and fm:
+                self.fallback_providers = [{
+                    "provider": provider or "deepseek",
+                    "model": model or "deepseek-chat",
+                }]
+
+        logger.debug("SmartRouter v2 初始化完成, mode=%s, backends=%d",
+                    self.routing_mode,
+                    len(self.backend_hub.get_registered_backends()))
 
     # -- 缓存管理 -------------------------------------------------------------
 
     def _get_cached(self, key: str) -> Optional[Any]:
-        """获取缓存值（未过期时）。"""
         entry = self._cache.get(key)
         if entry and (time.time() - entry.timestamp) < entry.ttl:
             return entry.value
         return None
 
     def _set_cache(self, key: str, value: Any, ttl: float = CACHE_TTL):
-        """设置缓存。"""
         self._cache[key] = _CacheEntry(value, time.time(), ttl)
 
     def _invalidate_cache(self):
         """清除所有缓存。"""
         self._cache.clear()
 
-    # -- 健康检查 -------------------------------------------------------------
+    # -- 任务分析 v2 ----------------------------------------------------------
+
+    def _analyze_task(self, message: str,
+                      session_turn_count: int = 0) -> TaskRequirements:
+        """分析任务需求, 返回量化能力需求。
+
+        综合考虑:
+            - 消息长度
+            - 是否含图片
+            - 是否含代码/工具调用
+            - 会话轮次 (多轮对话需要更大上下文)
+            - 关键词 (复杂任务检测)
+        """
+        text = message.lower()
+        length = len(message)
+        has_image = any(marker in message for marker in
+                       ("<image>", "![[", "![image]", "image_url"))
+        has_code = "```" in message or any(kw in text for kw in
+                   ("def ", "function", "class ", "import ", "async def"))
+
+        # 关键词加权
+        complex_score = sum(1 for kw in COMPLEX_KEYWORDS if kw.lower() in text)
+
+        # 基础能力分
+        if complex_score >= 2 or length > 3000:
+            base = 8
+        elif complex_score >= 1 or length > 1000:
+            base = 6
+        elif has_code and length > 300:
+            base = 5
+        elif has_image:
+            base = 4  # 图片需要视觉支持
+        elif session_turn_count > 20:
+            base = 5  # 长对话需要大模型
+        elif session_turn_count > 10:
+            base = 4
+        elif length < 80:
+            base = 2  # 短消息 → 简单问答
+            prefer_fast = True
+        elif length < 300:
+            base = 3
+            prefer_fast = True
+        else:
+            base = 4
+
+        prefer_fast = base <= 3 and not has_code and not has_image
+
+        return TaskRequirements(
+            min_capability=base,
+            needs_vision=has_image,
+            needs_tools=has_code,
+            min_context=32768 if length > 2000 or session_turn_count > 15 else 8192,
+            prefer_fast=prefer_fast,
+        )
+
+    # -- 健康检查 (向后兼容保留) -----------------------------------------------
 
     def check_ollama(self) -> bool:
-        """检查 Ollama 是否在线。
+        """检查是否有任何本地后端在线 (v2: 不再只查 Ollama)。
 
-        缓存策略：离线后 OLLAMA_OFFLINE_COOLDOWN 秒内不重试。
+        缓存策略: 离线后 LOCAL_OFFLINE_COOLDOWN 秒内不重试。
         """
-        # 如果还在冷却期，直接返回 False
         if time.time() < self._ollama_offline_until:
             return False
 
-        # 检查缓存
-        cached = self._get_cached("ollama_online")
+        cached = self._get_cached("any_local_online")
         if cached is not None:
             return cached
 
-        host = self.ollama_config.get("host", OLLAMA_DEFAULT_HOST)
-        port = self.ollama_config.get("port", OLLAMA_DEFAULT_PORT)
-        url = f"http://{host}:{port}/api/tags"
+        models = self.backend_hub.probe_all(force=True)
+        online = len(models) > 0
+
+        if online:
+            self._ollama_offline_until = 0.0
+        else:
+            self._ollama_offline_until = time.time() + LOCAL_OFFLINE_COOLDOWN
+
+        self._set_cache("any_local_online", online)
+        return online
+
+    def check_local_servers(self) -> Dict[str, Any]:
+        """检测所有本地 OpenAI 兼容服务 (v2: BackendHub 版本)。
+
+        返回第一个在线后端的模型列表 (向后兼容)。
+        """
+        models = self.backend_hub.get_all_models(force=True)
+        if models:
+            first = models[0]
+            return {
+                "online": True,
+                "provider": first.backend,
+                "base_url": first.base_url,
+                "models": [m.name for m in models],
+            }
+
+        # 回退兼容: 也检查传统 model.base_url
+        model_cfg = self.config.get("model", {})
+        base_url = (model_cfg.get("base_url") or "").strip()
+        result: Dict[str, Any] = {
+            "online": False, "provider": "", "base_url": base_url, "models": [],
+        }
+        if not base_url:
+            return result
+
+        is_local = ("localhost" in base_url.lower()
+                    or base_url.startswith("http://127.")
+                    or base_url.startswith("https://127."))
+        if not is_local:
+            return result
 
         try:
-            import urllib.request
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=OLLAMA_HEALTH_TIMEOUT) as resp:
+            models_url = base_url.rstrip("/") + "/models"
+            req = urllib.request.Request(models_url, method="GET",
+                                         headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=LOCAL_HEALTH_TIMEOUT) as resp:
                 if resp.status == 200:
-                    self._set_cache("ollama_online", True)
-                    self._ollama_offline_until = 0.0
-                    logger.debug("Ollama 在线: %s:%d", host, port)
-                    return True
-        except Exception as e:
-            logger.debug("Ollama 不可达 (%s:%d): %s", host, port, e)
+                    data = json.loads(resp.read().decode())
+                    models_list = data.get("data", data.get("models", []))
+                    model_names = [
+                        m.get("id", m.get("name", ""))
+                        for m in models_list
+                        if m.get("id") or m.get("name")
+                    ]
+                    result["online"] = True
+                    result["models"] = model_names
+        except Exception:
+            pass
 
-        # 标记离线
-        self._ollama_offline_until = time.time() + OLLAMA_OFFLINE_COOLDOWN
-        self._set_cache("ollama_online", False)
-        return False
+        return result
 
     def check_cloud(self) -> bool:
-        """检查是否有可用的云端 Provider。
-
-        检查条件：至少有一个国产 Provider 配置了 API Key。
-        """
+        """检查是否有可用的云端 Provider。"""
         cached = self._get_cached("cloud_available")
         if cached is not None:
             return cached
 
-        # 国产云端 Provider 列表
         cloud_providers = ["deepseek", "minimax", "minimax-cn", "kimi-for-coding", "zai"]
-
-        # 从环境变量 + .env 文件检测
         provider_env_map = {
             "deepseek": "DEEPSEEK_API_KEY",
             "minimax": "MINIMAX_API_KEY",
@@ -240,76 +870,21 @@ class SmartRouter:
         }
 
         from hermes_cli.config import get_env_value
-        for provider_id in cloud_providers:
-            env_var = provider_env_map.get(provider_id, "")
+        for pid in cloud_providers:
+            env_var = provider_env_map.get(pid, "")
             if env_var and get_env_value(env_var):
                 self._set_cache("cloud_available", True)
                 return True
 
-        # 也检查 config.yaml 的 providers 段
         user_providers = self.config.get("providers", {})
         if isinstance(user_providers, dict):
-            for provider_id in cloud_providers:
-                if provider_id in user_providers:
+            for pid in cloud_providers:
+                if pid in user_providers:
                     self._set_cache("cloud_available", True)
                     return True
 
         self._set_cache("cloud_available", False)
         return False
-
-    def check_local_servers(self) -> Dict[str, Any]:
-        """检测本地 OpenAI 兼容服务（LM Studio、llama.cpp 等）。
-
-        通过检查 model 配置中的 base_url 判断是否为本地服务，
-        并尝试 GET {base_url}/models 验证可用性。
-        """
-        result: Dict[str, Any] = {
-            "online": False,
-            "provider": "",
-            "base_url": "",
-            "models": [],
-        }
-        
-        model_cfg = self.config.get("model", {})
-        if not isinstance(model_cfg, dict):
-            return result
-        
-        base_url = (model_cfg.get("base_url") or "").strip()
-        if not base_url:
-            return result
-        
-        # 是否为本地 URL（localhost / 127.0.0.1）
-        is_local = (
-            "localhost" in base_url.lower()
-            or base_url.startswith("http://127.")
-            or base_url.startswith("https://127.")
-        )
-        if not is_local:
-            return result
-        
-        try:
-            import json, urllib.request
-            models_url = base_url.rstrip("/") + "/models"
-            req = urllib.request.Request(
-                models_url, method="GET",
-                headers={"Accept": "application/json"},
-            )
-            resp = urllib.request.urlopen(req, timeout=3)
-            if resp.status == 200:
-                data = json.loads(resp.read().decode())
-                models = data.get("data", data.get("models", []))
-                model_names = [
-                    m.get("id", m.get("name", ""))
-                    for m in models
-                    if m.get("id") or m.get("name")
-                ]
-                result["online"] = True
-                result["base_url"] = base_url
-                result["models"] = model_names
-        except Exception:
-            pass
-        
-        return result
 
     def check_embedded(self) -> bool:
         """检查嵌入式推理是否可用。"""
@@ -329,21 +904,16 @@ class SmartRouter:
     # -- 模型选择 -------------------------------------------------------------
 
     def _select_ollama_model(self, complexity: TaskComplexity) -> Optional[str]:
-        """根据任务复杂度选择 Ollama 模型。
+        """根据复杂度选择 Ollama 模型 (向后兼容保留)。
 
-        优先级：用户配置 > 内置默认。
+        v2 建议使用 _analyze_task + BackendHub 代替。
         """
-        if complexity == TaskComplexity.SIMPLE:
-            return self.ollama_config.get("simple_model", OLLAMA_DEFAULT_SIMPLE_MODEL)
-        elif complexity == TaskComplexity.MEDIUM:
-            medium = self.ollama_config.get("medium_model")
-            return medium if medium else None  # None 表示走云端
-        else:
-            complex_model = self.ollama_config.get("complex_model")
-            return complex_model if complex_model else None
+        req = TaskRequirements.from_complexity(complexity)
+        best = self.backend_hub.get_best_for_task(req)
+        return best.name if best else None
 
     def _select_cloud_model(self) -> str:
-        """选择云端模型（取第一个可用的）。"""
+        """选择云端模型 (取第一个可用的)。"""
         cloud_models = [
             ("deepseek", "deepseek-chat"),
             ("minimax", "minimax-m2"),
@@ -352,27 +922,21 @@ class SmartRouter:
         ]
 
         from hermes_cli.config import get_env_value
-        for provider_id, model_id in cloud_models:
-            env_var = f"{provider_id.upper().replace('-', '_')}_API_KEY"
+        for pid, mid in cloud_models:
+            env_var = f"{pid.upper().replace('-', '_')}_API_KEY"
             if get_env_value(env_var):
-                return f"{provider_id}:{model_id}"
+                return f"{pid}:{mid}"
 
-        # Fallback: 检查 config
         user_providers = self.config.get("providers", {})
         if isinstance(user_providers, dict):
-            for provider_id, model_id in cloud_models:
-                if provider_id in user_providers:
-                    return f"{provider_id}:{model_id}"
+            for pid, mid in cloud_models:
+                if pid in user_providers:
+                    return f"{pid}:{mid}"
 
         return "deepseek:deepseek-chat"
 
     def _select_embedded_model(self, complexity: TaskComplexity) -> Optional[str]:
-        """选择嵌入式模型。
-
-        代码/推理任务 → qwen-coder-1.5b
-        简单任务 → qwen-0.5b
-        取第一个已安装的。
-        """
+        """选择嵌入式模型。"""
         try:
             from hermes_cli.model_manager import get_available_embedded_model
             result = get_available_embedded_model()
@@ -382,122 +946,217 @@ class SmartRouter:
             pass
         return None
 
-    # -- 主路由 ---------------------------------------------------------------
+    # -- 主路由 v2 -----------------------------------------------------------
 
     def route(
         self,
         user_message: str,
         force_tier: Optional[ModelTier] = None,
+        session_turn_count: int = 0,
     ) -> RouteResult:
-        """执行智能路由决策。
+        """执行智能路由决策 v2。
+
+        能力感知路由: 分析任务需求 → 过滤满足能力的模型 → 选最佳。
+        自动记录路由日志到 ~/.hermes/logs/luyou_routes.jsonl。
 
         Args:
             user_message: 用户消息文本。
-            force_tier: 强制使用指定层级（忽略降级）。
+            force_tier: 强制使用指定层级 (忽略降级)。
+            session_turn_count: 会话轮次 (用于上下文需求评估)。
 
         Returns:
             RouteResult 路由决策结果。
         """
-        complexity = analyze_complexity(user_message)
-        logger.debug("路由决策: complexity=%s, mode=%s", complexity.value, self.routing_mode)
+        result = None
+        req = None
 
-        # 手动模式：直接使用指定的 provider/model
+        # 手动模式
         if self.routing_mode == "manual":
             default_model = self.config.get("model", {}).get("default", "ollama:qwen3-vl:4b")
             provider, _, model = default_model.partition(":")
-            return RouteResult(
+            result = RouteResult(
                 provider=provider or "ollama",
                 model=model or "qwen3-vl:4b",
-                tier=ModelTier.OLLAMA,
+                tier=ModelTier.LOCAL,
                 reason="手动模式，使用默认配置",
             )
+            self._log_route(result)
+            return result
 
-        # 强制嵌入式模式
+        # 分析任务需求
+        req = self._analyze_task(user_message, session_turn_count)
+        logger.debug("任务需求: min_cap=%d, vision=%s, tools=%s, ctx=%d",
+                    req.min_capability, req.needs_vision, req.needs_tools,
+                    req.min_context)
+
+        # 强制嵌入式
         if force_tier == ModelTier.EMBEDDED or self.routing_mode == "embedded-only":
+            complexity = analyze_complexity(user_message)
             model_id = self._select_embedded_model(complexity)
             if model_id:
-                return RouteResult(
-                    provider="embedded",
-                    model=model_id,
+                result = RouteResult(
+                    provider="embedded", model=model_id,
                     tier=ModelTier.EMBEDDED,
-                    reason=f"嵌入式模式 (复杂度: {complexity.value})",
+                    reason=f"嵌入式模式 (需求 cap={req.min_capability})",
                 )
-            return RouteResult(provider="", model="", tier=ModelTier.NONE,
-                              reason="嵌入式模型未安装，请执行模型下载")
+            else:
+                result = RouteResult(provider="", model="", tier=ModelTier.NONE,
+                              reason="嵌入式模型未安装")
+            self._log_route(result, req)
+            return result
 
-        # 强制云端模式
+        # 强制云端
         if force_tier == ModelTier.CLOUD or self.routing_mode == "cloud-only":
             if self.check_cloud():
                 cloud_sel = self._select_cloud_model()
                 provider, _, model = cloud_sel.partition(":")
-                return RouteResult(
+                result = RouteResult(
                     provider=provider, model=model,
                     tier=ModelTier.CLOUD,
-                    reason=f"云端模式 (复杂度: {complexity.value})",
+                    reason=f"云端模式 (需求 cap={req.min_capability})",
                 )
-            return RouteResult(provider="", model="", tier=ModelTier.NONE,
+            else:
+                result = RouteResult(provider="", model="", tier=ModelTier.NONE,
                               reason="云端 API 不可用")
+            self._log_route(result, req)
+            return result
 
-        # === 自动模式：三层降级路由 ===
+        # === 自动模式: 能力感知三层路由 ===
 
-        # Tier 1: Ollama
-        if self.check_ollama():
-            ollama_model = self._select_ollama_model(complexity)
-            if ollama_model:
-                return RouteResult(
-                    provider="ollama",
-                    model=ollama_model,
-                    tier=ModelTier.OLLAMA,
-                    reason=f"Ollama 本地推理 (复杂度: {complexity.value})",
+        # Tier 1: 本地模型
+        local_model = self.backend_hub.get_best_for_task(req)
+        if local_model:
+            # HealthTracker 过滤: 熔断的模型跳过
+            if self.health_tracker.is_circuited(
+                    local_model.backend, local_model.name):
+                logger.debug("本地模型 %s 已被熔断, 跳过",
+                           local_model.provider_model)
+            else:
+                result = RouteResult(
+                    provider=local_model.backend,
+                    model=local_model.name,
+                    tier=ModelTier.LOCAL,
+                    reason=(f"本地 {local_model.backend}"
+                            f" cap={local_model.estimated_capability}/10"
+                            f" (需求≥{req.min_capability})"
+                            f" → {local_model.name}"),
+                    backend=local_model.backend,
                 )
-            # 中等和复杂任务 Ollama 未配置 → 降级到云端
-            logger.debug("Ollama 在线但无匹配模型，降级到云端")
+                self._log_route(result, req)
+                return result
 
-        # Tier 2: 云端
+        # 本地模型不满足需求或无本地后端 → 云端
         if self.check_cloud():
             cloud_sel = self._select_cloud_model()
             provider, _, model = cloud_sel.partition(":")
-            return RouteResult(
+            reason = "云端介入"
+            if self.backend_hub.get_all_models():
+                reason += (" (本地模型能力不足:"
+                          f" 需求 cap≥{req.min_capability})")
+            else:
+                reason += " (本地后端离线)"
+            result = RouteResult(
                 provider=provider, model=model,
                 tier=ModelTier.CLOUD,
-                reason=f"云端 API (复杂度: {complexity.value})",
+                reason=reason,
             )
+            self._log_route(result, req)
+            return result
 
         # Tier 3: 嵌入式兜底
+        complexity = analyze_complexity(user_message)
         model_id = self._select_embedded_model(complexity)
         if model_id:
-            return RouteResult(
-                provider="embedded",
-                model=model_id,
+            result = RouteResult(
+                provider="embedded", model=model_id,
                 tier=ModelTier.EMBEDDED,
-                reason="无 Ollama / 无云端配置，启用嵌入式 CPU 推理兜底",
+                reason="本地离线且云端不可用, 启用嵌入式 CPU 推理",
             )
+            self._log_route(result, req)
+            return result
 
         # 全部不可用
-        return RouteResult(
+        result = RouteResult(
             provider="", model="", tier=ModelTier.NONE,
-            reason="无可用模型：请启动 Ollama 或配置云端 API Key 或下载嵌入式模型",
+            reason="无可用模型: 请启动本地推理服务 (Ollama/LM Studio/llama.cpp) 或配置云端 API Key",
         )
+        self._log_route(result, req)
+        return result
+
+    # -- 路由日志 (Phase C) -------------------------------------------------
+
+    def _log_route(self, result: RouteResult, task_req: Optional[TaskRequirements] = None) -> None:
+        """将路由决策写入日志文件 (JSONL 格式, ~/.hermes/logs/)。
+
+        记录: 时间戳、 路由模式、 决策结果、 原因、 任务需求。
+        日志支持自动截断, 避免无限制增长。
+        """
+        try:
+            log_dir = os.path.join(os.path.expanduser("~"), ".hermes", "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "luyou_routes.jsonl")
+
+            entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "mode": self.routing_mode,
+                "provider": result.provider,
+                "model": result.model,
+                "tier": result.tier.value if result.tier else "none",
+                "reason": result.reason,
+                "backend": result.backend,
+            }
+            if task_req:
+                entry["task"] = {
+                    "min_cap": task_req.min_capability,
+                    "vision": task_req.needs_vision,
+                    "tools": task_req.needs_tools,
+                    "context": task_req.min_context,
+                }
+
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+            # 自动截断: 超过上限时保留最近的记录
+            self._truncate_log(log_path)
+        except Exception:
+            pass  # 日志写入失败不影响主流程
+
+    def _truncate_log(self, log_path: str) -> None:
+        """截断路由日志: 超过 ROUTE_LOG_MAX_LINES 时保留最后 ROUTE_LOG_TRUNCATE_TO 行。"""
+        try:
+            with open(log_path, "rb") as f:
+                # quick count via seeking
+                f.seek(0, 2)
+                file_size = f.tell()
+                if file_size < 1024:  # too small to worry
+                    return
+
+            line_count = 0
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                for _ in f:
+                    line_count += 1
+
+            if line_count <= ROUTE_LOG_MAX_LINES:
+                return
+
+            # Read and keep last N lines
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            lines = lines[-ROUTE_LOG_TRUNCATE_TO:]
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+            logger.info("路由日志截断: %d → %d 行", line_count, ROUTE_LOG_TRUNCATE_TO)
+        except Exception:
+            pass
 
     def route_with_config(
         self,
         user_message: str,
         provider_model_config: Optional[str] = None,
     ) -> RouteResult:
-        """带用户配置的路由决策。
-
-        优先使用用户指定的 provider:model，否则自动路由。
-
-        Args:
-            user_message: 用户消息。
-            provider_model_config: 用户配置的 "provider:model" 字符串。
-
-        Returns:
-            RouteResult。
-        """
+        """带用户配置的路由决策。"""
         if provider_model_config and provider_model_config != "auto":
             provider, _, model = provider_model_config.partition(":")
-            # 检测是否为嵌入式
             if provider == "embedded":
                 return RouteResult(
                     provider="embedded", model=model,
@@ -510,54 +1169,149 @@ class SmartRouter:
                 tier=ModelTier.CLOUD,
                 reason="用户指定模型",
             )
-
         return self.route(user_message)
 
-    def status_report(self) -> Dict[str, Any]:
-        """生成当前路由状态报告（中文）。"""
-        local_servers = self.check_local_servers()
-        return {
-            "ollama": {
-                "online": self.check_ollama(),
-                "host": self.ollama_config.get("host", OLLAMA_DEFAULT_HOST),
-                "port": self.ollama_config.get("port", OLLAMA_DEFAULT_PORT),
-            },
-            "local_servers": {
-                "online": local_servers["online"],
-                "base_url": local_servers["base_url"],
-                "models": local_servers["models"],
-            },
-            "cloud": {
-                "available": self.check_cloud(),
-            },
-            "embedded": {
-                "available": self.check_embedded(),
-            },
+    # -- 状态报告 -------------------------------------------------------------
+
+    def status_dict(self, verbose: bool = False) -> Dict[str, Any]:
+        """生成当前路由状态字典 (v2: 多后端)。
+
+        Args:
+            verbose: 是否包含详细模型元信息 (param_size, tools_support 等)。
+
+        Returns:
+            路由状态字典, 可用于 JSON 输出。
+        """
+        local_models = self.backend_hub.get_all_models()
+        backends = {}
+        for b in self.backend_hub.get_registered_backends():
+            name = b["name"]
+            status = self.backend_hub._backend_status.get(name, {})
+            b_models = [m.name for m in local_models if m.backend == name]
+            backends[name] = {
+                "online": status.get("online", False),
+                "base_url": b["base_url"],
+                "error": status.get("error", ""),
+                "models": b_models,
+                "priority": b["priority"],
+            }
+
+        model_list = []
+        for m in sorted(local_models,
+                        key=lambda x: (x.backend_priority, -x.estimated_capability)):
+            entry = {
+                "name": m.name,
+                "backend": m.backend,
+                "params_b": m.params_b,
+                "context_length": m.context_length,
+                "capability": m.estimated_capability,
+                "vision": m.supports_vision,
+            }
+            if verbose:
+                entry["backend_priority"] = m.backend_priority
+                entry["tools_support"] = m.supports_tools
+                entry["raw_details"] = m.raw_details
+            model_list.append(entry)
+
+        result = {
+            "local_backends": backends,
+            "local_models": model_list,
+            "cloud": {"available": self.check_cloud()},
+            "embedded": {"available": self.check_embedded()},
             "routing_mode": self.routing_mode,
+            "health": self.health_tracker.get_status(),
         }
 
-    def print_status(self) -> str:
-        """生成可读的中文状态报告。"""
-        status = self.status_report()
-        lines = ["=== 路由引擎状态 ==="]
-        lines.append(f"模式: {status['routing_mode']}")
-        lines.append(f"Ollama: {'✅ 在线' if status['ollama']['online'] else '❌ 离线'}")
-        
-        # 本地服务（LM Studio / llama.cpp）
-        local = status["local_servers"]
-        if local["base_url"]:
-            if local["online"]:
-                model_list = ", ".join(local["models"][:3])
-                if len(local["models"]) > 3:
-                    model_list += f", ... (+{len(local['models']) - 3})"
-                lines.append(f"本地服务: ✅ 在线 ({local['base_url']}) — {model_list}")
-            else:
-                lines.append(f"本地服务: ❌ 离线 ({local['base_url']})")
+        if verbose:
+            result["config"] = {
+                "cache_ttl": CACHE_TTL,
+                "probe_cooldown": PROBE_COOLDOWN,
+                "circuit_breaker_threshold": CIRCUIT_BREAKER_THRESHOLD,
+                "circuit_breaker_cooldown": CIRCUIT_BREAKER_COOLDOWN,
+                "default_backend_ports": DEFAULT_BACKEND_PORTS,
+            }
+
+        return result
+
+    def status_report(self) -> Dict[str, Any]:
+        """向后兼容: status_report() = status_dict(verbose=False)。"""
+        return self.status_dict(verbose=False)
+
+    def print_status(self, verbose: bool = False) -> str:
+        """生成可读的中文状态报告 (v2: 多后端)。
+
+        Args:
+            verbose: 是否显示详细模型元信息。
+
+        Returns:
+            格式化的状态文本。
+        """
+        status = self.status_dict(verbose=verbose)
+        lines = ["=== 智能路由引擎 v2 ==="]
+        lines.append(f"路由模式: {status['routing_mode']}")
+
+        # 后端状态
+        backends = status["local_backends"]
+        if backends:
+            lines.append("\n▸ 本地后端:")
+            for name, info in backends.items():
+                icon = "✅" if info["online"] else "❌"
+                lines.append(f"  {icon} {name} (p{info['priority']})"
+                           f" — {info['base_url']}")
+                if info.get("error"):
+                    lines.append(f"     错误: {info['error']}")
+                if info.get("models"):
+                    shown = info["models"][:3]
+                    lines.append(f"     模型: {', '.join(shown)}"
+                               f"{' ... (+' + str(len(info['models']) - 3) + ')' if len(info['models']) > 3 else ''}")
         else:
-            lines.append(f"本地服务: ❌ 未配置")
-        
-        lines.append(f"云端 API: {'✅ 可用' if status['cloud']['available'] else '❌ 未配置'}")
-        lines.append(f"嵌入式模型: {'✅ 可用' if status['embedded']['available'] else '❌ 未安装'}")
+            lines.append("  本地后端: ❌ 未配置")
+
+        # 能力编目
+        local_models = status["local_models"]
+        if local_models:
+            lines.append(f"\n▸ 本地模型编目 ({len(local_models)} 个):")
+            for m in local_models[:10]:
+                vision = "👁" if m["vision"] else "  "
+                ctx = f"{m['context_length'] // 1024}K"
+                lines.append(f"  {vision} [{m['backend']}] {m['name']}"
+                           f" (cap={m['capability']}/10, ctx={ctx})")
+            if len(local_models) > 10:
+                lines.append(f"  ... 共 {len(local_models)} 个模型")
+
+        # 云端
+        lines.append(f"\n▸ 云端 API: {'✅ 可用' if status['cloud']['available'] else '❌ 未配置'}")
+        lines.append(f"▸ 嵌入式模型: {'✅ 可用' if status['embedded']['available'] else '❌ 未安装'}")
+
+        # Health
+        health = status["health"]
+        if health:
+            circuited = [k for k, v in health.items() if v.get("circuited")]
+            if circuited:
+                lines.append(f"\n▸ 熔断中: {', '.join(circuited)}")
+
+        # Verbose: 模型详情
+        if verbose:
+            cfg = status.get("config", {})
+            lines.append(f"\n▸ 配置参数:")
+            lines.append(f"  缓存TTL={cfg.get('cache_ttl')}s, "
+                       f"探测冷却={cfg.get('probe_cooldown')}s")
+            lines.append(f"  熔断阈值={cfg.get('circuit_breaker_threshold')}次, "
+                       f"熔断冷却={cfg.get('circuit_breaker_cooldown')}s")
+            lines.append(f"  默认后端端口: {cfg.get('default_backend_ports', {})}")
+            if local_models:
+                lines.append(f"\n▸ 模型详情:")
+                for m in local_models:
+                    vision = "YES" if m.get("vision") else "NO"
+                    tools = "YES" if m.get("tools_support") else "NO"
+                    lines.append(
+                        f"  [{m['backend']}] {m['name']}"
+                        f"\n     params={m.get('params_b')}B, ctx={m.get('context_length')}, "
+                        f"cap={m.get('capability')}/10"
+                        f"\n     vision={vision}, tools={tools}"
+                        f"\n     raw={m.get('raw_details', {})}"
+                    )
+
         return "\n".join(lines)
 
 
@@ -570,7 +1324,7 @@ def get_router(config: Optional[Dict[str, Any]] = None) -> SmartRouter:
     """获取全局路由实例。
 
     Args:
-        config: 配置字典（首次调用时提供）。
+        config: 配置字典 (首次调用时提供)。
 
     Returns:
         SmartRouter 实例。
@@ -585,7 +1339,7 @@ def get_router(config: Optional[Dict[str, Any]] = None) -> SmartRouter:
 
 
 def quick_route(message: str) -> RouteResult:
-    """快速路由（使用全局实例，不返回 None 时调用方需自行创建实例）。"""
+    """快速路由 (使用全局实例)。"""
     router = get_router()
     if router is None:
         return RouteResult(

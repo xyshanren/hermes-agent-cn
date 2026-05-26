@@ -401,10 +401,10 @@ CN 分支在上游基础上增加了以下关键功能：
 
 | 文件 | 功能 | 说明 |
 |------|------|------|
-| `agent/zhineng_luyou.py` | **智能路由** | 3 层自动回退: Ollama → 云端 → 嵌入式 CPU 推理 |
+| `agent/zhineng_luyou.py` | **智能路由** | SmartRouter v2: 多后端能力感知路由 + 健康检测 + 熔断 |
 | `agent/skill_tier_manager.py` | **技能分层管理** | Builtin/Frequent/Archived 三级，自动升降级 |
 | `agent/skill_matcher.py` | **技能匹配** | 3 种匹配策略：关键词/扩展名/Jaccard 模糊匹配 |
-| `hermes_cli/quickstart.py` | **一键配置** | 自动检测国产 API Key + Ollama + 本地模型 |
+| `hermes_cli/quickstart.py` | **一键配置** | 自动检测国产 API Key + Ollama + 多本地后端 + 智能路由规则 |
 | `hermes_cli/model_manager.py` | **本地模型管理** | 离线 CPU 模型 (Qwen2.5, whisper, tts) |
 | `tools/xb_native.py` | **xbrowser 原生工具** | 基于腾讯 xb CLI 的浏览器自动化 |
 | `tools/yuanbao_tools.py` | **元宝平台工具** | 群信息、贴纸、私信 |
@@ -456,20 +456,36 @@ hermes_cli/providers.py           (Hermes 元数据覆盖)
 
 ### 5.4 智能路由策略 (zhineng_luyou.py)
 
-CN 分支独有的 3 层路由，保证网络不稳定时仍能工作：
+CN 分支独有的多后端能力感知路由 (SmartRouter v2)，自动选择最佳模型：
 
 ```
-Tier 1: Ollama 本地模型
-  ├── 健康检查 → 可用
-  └── 不可用 → Tier 2
-
-Tier 2: 云端 API
-  ├── API Key 有效 → 使用
-  └── 无效 → Tier 3
-
-Tier 3: 嵌入式 CPU 推理
-  └── Qwen2.5-Coder-1.5B 等轻量模型（本地已安装）
+用户请求进入
+    │
+    ├── _apply_model_routing() (规则引擎, run_agent.py)
+    │   ├── model_routing.rules 匹配 → 使用指定模型
+    │   └── 无匹配 → SmartRouter v2 兜底 ↓
+    │
+    ▼
+SmartRouter v2 (agent/zhineng_luyou.py)
+    │
+    ├── BackendHub: 多后端统一管理
+    │   ├── Ollama (port 11434)
+    │   ├── LM Studio (port 1234)
+    │   ├── llama.cpp (port 8080)
+    │   ├── FastLLM (port 8088)
+    │   ├── vLLM (port 8000)
+    │   └── 自定义后端 (config.yaml local_backends)
+    │
+    ├── HealthTracker: 健康探测 + 熔断
+    │   └── 路由时自动跳过不健康后端
+    │
+    ├── 能力感知匹配: vision/tools/context_length
+    │   └── 8维能力分 → 选最佳模型
+    │
+    └── 本地不可用 → 云端 fallback (deepseek/minimax/...)
 ```
+
+**路由优先级**: 本地 (Ollama > 其他后端) > 云端 (deepseek > minimax > kimi > ...)
 
 ---
 
@@ -506,7 +522,7 @@ main.py (hermes / hermes chat)
               │
               ├──→ [CN] agent/skill_tier_manager.py
               │
-              └──→ [CN] agent/zhineng_luyou.py (智能路由)
+              └──→ [CN] agent/zhineng_luyou.py (SmartRouter v2: 多后端能力感知路由)
 ```
 
 ---
@@ -518,7 +534,7 @@ main.py (hermes / hermes chat)
 | **默认 Provider** | OpenAI, Anthropic 等 | DeepSeek, 智谱, 硅基流动 等 |
 | **Provider 过滤** | 显示所有 27+ | 只有 11 个国产/本地 |
 | **API Key 读取** | `os.getenv()` | `get_env_value()` (读 .env) |
-| **智能路由** | 无 | 3 层自动回退 (Ollama→云端→CPU) |
+| **智能路由** | 无 | 规则引擎 + SmartRouter v2 多后端能力感知路由 |
 | **技能管理** | 无 | 分层 + 自动升降级 |
 | **本地模型** | 无 | 嵌入式 CPU 模型 (离线可用) |
 | **一键配置** | 手动 setup | `quickstart` 自动检测 |

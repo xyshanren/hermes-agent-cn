@@ -1,7 +1,7 @@
 # 多模型路由方案 — 设计文档
 
-> 状态：Phase 0-3 已实现 | 日期：2026-05-15
-> 版本：v0.12.0-cn.6 | 场景：Ollama/LM Studio 部署多个模型时，按任务类型智能路由
+> 状态：Phase 0-2 & 4 已实现，Phase 3 关闭，F 已集成 | 日期：2026-05-27
+> 版本：v0.14.0+cn.1 | 场景：Ollama/LM Studio 部署多个模型时，按任务类型智能路由
 
 ## 实现进度
 
@@ -11,6 +11,8 @@
 | 1 | ✅ 已实现 | Ollama 多模型自动检测 + auxiliary.vision 自动配置 |
 | 2 | ✅ 已实现 | `model_routing.rules` 规则引擎 + 消息级模型选择（`run_agent.py`） |
 | 3 | ❌ 已关闭 | 运行时动态模型切换：被 Phase 2 自动路由覆盖，无需手动切换 |
+| 4 | ✅ 已实现 | **SmartRouter v2**: 多后端能力感知路由 (BackendHub/HealthTracker/熔断) — `agent/zhineng_luyou.py` (~850行) |
+| F | ✅ 已集成 | **Phase F**: SmartRouter v2 作为兜底路由集成到 `_apply_model_routing()` |
 
 ### Phase 0 实现详情（v0.12.0-cn.6，commit `58cbe081b`）
 
@@ -390,6 +392,65 @@ Phase 3（方案 C）: 运行时动态切换
 
 **结论**: Phase 2 的 `_apply_model_routing()` 已实现消息级自动模型选择，
 无需手动切换（3a），且当前架构下不存在上下文兼容性问题（3b）。Phase 3 关闭。
+
+### Phase 4 实现详情 (v0.14.0+cn.1, 2026-05-27) — SmartRouter v2
+
+**改动文件**:
+- `agent/zhineng_luyou.py` — 完整重写 (~850行)
+- `hermes_cli/main.py` — `route-status --verbose/--json`
+- `hermes_cli/quickstart.py` — 多后端检测 (FastLLM/vLLM/LocalAI) + local_backends 配置写入
+
+**核心架构**:
+
+```
+SmartRouter v2
+├── BackendHub
+│   ├── Ollama (port 11434)
+│   ├── LM Studio (port 1234)
+│   ├── llama.cpp (port 8080)
+│   ├── FastLLM (port 8088)
+│   ├── vLLM (port 8000)
+│   └── 自定义后端 (config.yaml local_backends)
+├── HealthTracker
+│   ├── 健康探测 → 失败计数 → 降温期 → 熔断 → 恢复
+│   └── 路由时自动跳过不健康后端
+├── 能力感知路由
+│   ├── 提取用户消息能力需求 (vision/tools/context_length)
+│   ├── 匹配模型能力分 (8维: reasoning, coding, chat, vision, 
+│   │   tools, speed, context, multilingual)
+│   └── 按 priority 排序选最佳模型
+├── 路由此志
+│   └── ~/.hermes/logs/luyou_routes.jsonl
+└── 云端 fallback
+    └── deepseek/minimax/kimi/zai (按配置优先级)
+```
+
+**配置示例**:
+```yaml
+# 自定义本地后端（无需修改代码）
+local_backends:
+  - name: my-server
+    base_url: http://localhost:9999/v1
+    priority: 5
+    kind: openai-compatible
+```
+
+### Phase F 实现详情 (v0.14.0+cn.1, 2026-05-27) — 运行时集成
+
+**改动文件**:
+- `run_agent.py` — `_apply_model_routing()` 尾部插入 SmartRouter v2 兜底 (~70行)
+
+**集成逻辑**:
+1. 规则匹配失败 → SmartRouter v2 兜底
+2. 显式 `model_routing.rules` 存在 → 跳过 SmartRouter v2（用户意图优先）
+3. Provider 切换 → `resolve_provider_client()` 验证 auth 后才切换
+4. 同 provider → 直接更新 model
+5. SmartRouter 异常 → 保留现有 model（优雅降级）
+6. 类级缓存 → 冷 1.8ms，热 ~0ms
+
+**Bug 修复**:
+- `resolve_provider_client` 参数名: `api_key` → `explicit_api_key`
+- `fallback_model` 类型兼容: str / list[str] / list[dict]
 
 ---
 

@@ -5706,13 +5706,19 @@ def cmd_doctor(args):
 
 
 def cmd_route_status(args):
-    """显示智能路由引擎状态（Ollama / 云端 / 嵌入式）。"""
+    """显示智能路由引擎状态 v2（多后端 / 能力编目 / 熔断）。"""
     from agent.zhineng_luyou import SmartRouter
     from hermes_cli.config import load_config
 
     config = load_config()
     router = SmartRouter(config)
-    print(router.print_status())
+
+    if getattr(args, "json", False):
+        import json as _json
+        status = router.status_dict(verbose=getattr(args, "verbose", False))
+        print(_json.dumps(status, ensure_ascii=False, indent=2))
+    else:
+        print(router.print_status(verbose=getattr(args, "verbose", False)))
 
 
 def cmd_dump(args):
@@ -10222,8 +10228,16 @@ def main():
     # =========================================================================
     route_status_parser = subparsers.add_parser(
         "route-status",
-        help="显示智能路由引擎状态（Ollama / 云端 API / 嵌入式）",
-        description="显示三层路由引擎的当前状态：Ollama 本地模型可用性、云端 API 配置状态、嵌入式模型就绪状态",
+        help="显示智能路由引擎状态（多后端 / 模型编目 / 熔断）",
+        description="显示多后端路由引擎的当前状态：本地后端列表、模型编目与能力分、云端 API 配置状态、嵌入式模型就绪状态、熔断管理",
+    )
+    route_status_parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="显示详细模型元信息（参数量/上下文/工具支持/Ollama原始数据）",
+    )
+    route_status_parser.add_argument(
+        "--json", "-j", action="store_true",
+        help="以 JSON 格式输出（可配合 jq 使用）",
     )
     route_status_parser.set_defaults(func=cmd_route_status)
 

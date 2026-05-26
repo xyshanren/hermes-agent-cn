@@ -9015,6 +9015,100 @@ class AIAgent:
             )
             self.model = default_cfg["model"]
 
+        # ── SmartRouter v2 fallback ──────────────────────────────────────
+        # If no rule matched and model_routing is not configured, use
+        # SmartRouter v2's capability-aware routing to select the best model.
+        #
+        # Skip when explicit model_routing rules exist (user intent to
+        # control routing manually).
+        _r_cfg = self.config.get("model_routing") or self.config.get("agent", {}).get("routing", {})
+        if (_r_cfg.get("rules") if isinstance(_r_cfg, dict) else False):
+            return
+
+        try:
+            from agent.zhineng_luyou import SmartRouter
+            from hermes_cli.config import load_config
+
+            cfg = load_config()
+
+            # Cache SmartRouter instance per config hash.
+            # Rebuild only when config changes (~100ms save per call).
+            _cache = getattr(type(self), "_smartrouter_cache", None)
+            if _cache is None:
+                _cache = {}
+                type(self)._smartrouter_cache = _cache
+            _cfg_key = hash(tuple(sorted(
+                (k, str(v)) for k, v in cfg.items()
+                if k in ("providers", "routing", "agent", "fallback_model", "fallback_providers")
+            )))
+            if _cache.get("_key") != _cfg_key:
+                _cache["_router"] = SmartRouter(cfg)
+                _cache["_key"] = _cfg_key
+            router = _cache["_router"]
+
+            # Extract user message for capability analysis
+            user_text = ""
+            for msg in reversed(api_messages):
+                if msg.get("role") != "user":
+                    continue
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    text_parts = [
+                        p.get("text", "")
+                        for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    ]
+                    user_text = " ".join(text_parts)
+                else:
+                    user_text = content
+                break
+
+            result = router.route(user_text)
+            new_provider = result.provider
+            new_model = result.model
+
+            current_provider = getattr(self, "provider", "auto") or "auto"
+
+            if new_provider and new_provider != current_provider:
+                # Provider changed — validate auth before switching.
+                # resolve_provider_client() uses provider + api_key to
+                # determine base_url + httpx client.
+                from agent.auxiliary_client import resolve_provider_client
+                _api_key = getattr(self, "api_key", None)
+                _resolved_client, _ = resolve_provider_client(
+                    provider=new_provider,
+                    explicit_api_key=_api_key,
+                    model=new_model,
+                )
+                if _resolved_client is not None:
+                    # Provider switch succeeded → update both.
+                    self.provider = new_provider
+                    self.model = new_model
+                    logger.debug(
+                        "model_routing: SmartRouter switched %s → %s:%s (%s)",
+                        current_provider, new_provider, new_model,
+                        result.tier.value,
+                    )
+                else:
+                    # Auth unavailable for the target provider.
+                    # Keep legacy default model+provider unchanged.
+                    logger.debug(
+                        "model_routing: SmartRouter wanted %s:%s but auth unavailable; "
+                        "keeping %s:%s",
+                        new_provider, new_model,
+                        current_provider, getattr(self, "model", ""),
+                    )
+            else:
+                # Same provider — only update model (safe within one provider).
+                self.model = new_model
+                logger.debug(
+                    "model_routing: SmartRouter v2 → %s:%s (%s)",
+                    new_provider, new_model, result.tier.value,
+                )
+        except Exception as ex:
+            # SmartRouter unavailable: keep existing model (already set above)
+            logger.debug("model_routing: SmartRouter v2 skipped: %s", ex)
+
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Build the keyword arguments dict for the active API mode."""
         self._apply_model_routing(api_messages)

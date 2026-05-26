@@ -4,6 +4,78 @@
 
 ---
 
+## v0.14.0+cn.1 (2026-05-27) — SmartRouter v2 + 运行时集成
+
+### SmartRouter v2 重构 (`agent/zhineng_luyou.py`, ~850 行)
+
+v1 三层路由 (Ollama/Cloud/Embedded) 完全重写为多后端能力感知架构：
+
+- **BackendHub** — 统一管理本地推理服务 (Ollama / LM Studio / llama.cpp / FastLLM / vLLM / LocalAI / 自定义)，每个后端独立健康检测 + 熔断
+- **HealthTracker** — 后端可用性追踪，失败 → 降温 → 熔断 → 恢复四阶段
+- **能力感知路由** — 从用户消息提取能力需求 (vision/tools/context_length)，匹配最佳模型
+- **路由此志** — `~/.hermes/logs/luyou_routes.jsonl` 记录每次路由决策
+- **5 个内置后端** + **交互式自定义后端添加**
+
+#### `hermes route-status` 增强
+
+- `--verbose` / `-v`: 显示详细模型元信息（参数量/上下文/工具支持/Ollama 原始数据）
+- `--json` / `-j`: JSON 格式输出（可配合 jq 使用）
+
+#### quickstart 多后端检测
+
+- 新增 FastLLM (port 8088)、vLLM (port 8000)、LocalAI (port 8082) 自动探测
+- `_write_local_backends()`: 将检测到的后端写入 `config.yaml` 的 `local_backends` 段
+- 自定义后端模板: 无需修改代码，直接在 config.yaml 添加 `local_backends` 条目即可
+
+### Phase F: SmartRouter v2 运行时集成
+
+将 SmartRouter v2 作为兜底路由集成到 `_apply_model_routing()`：
+
+- **路由守卫** — 仅当无显式 `model_routing.rules` 匹配时激活
+- **Provider 安全切换** — 切换前调用 `resolve_provider_client()` 验证 auth；auth 不可用时保留现有 provider
+- **同 provider 模型更新** — 同一提供商内直接切换 model
+- **SmartRouter 缓存** — 类级懒加载，按 config hash 失效（冷 1.8ms → 热 ~0ms）
+- **异常兜底** — SmartRouter 不可用时保留现有 model，不阻塞主流程
+
+### Bug 修复
+
+- **`resolve_provider_client` 参数名**: `api_key` → `explicit_api_key`
+- **`fallback_model` 类型兼容**: 兼容 `str` / `list[str]` / `list[dict]` 三种格式
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `agent/zhineng_luyou.py` | 完整重写 SmartRouter v2 (~850行) |
+| `run_agent.py` | Phase F 集成 (+70行): guard + cache + provider 安全切换 |
+| `hermes_cli/main.py` | `route-status --verbose/--json` |
+| `hermes_cli/quickstart.py` | 多后端检测 + local_backends 配置写入 |
+
+---
+
+## v0.14.0+cn.0 (2026-05-23) — upstream v0.14.0 合并
+
+### 合并概要
+
+- **upstream**: `github.com:NousResearch/hermes-agent` main → cn 分支
+- **合并规模**: 1,398 commits
+- **版本跳跃**: v0.12.0 → v0.14.0
+- **Commit**: `dd97a5e9c`
+
+### 合并处理
+
+- **20 个冲突文件**按梯队处理：配置文件保留 CN 分支、UI 文本合并双方、基础设施文件遵循 upstream 重构
+- **配置迁移**: v16 → v23 schema 升级（删除重复 `fallback_providers`）
+- **CN 分支保留项**: 中文 UI 本地化、Ollama 上下文窗口 8192 bug 修复 (commit `22e3decf8`)
+
+### upstream v0.14.0 主要变更
+
+- Agent 核心: tool gateway 重构、auxiliary client 路由器、多 provider 适配
+- 安全增强: 控制平面文件保护 (#27784)、webhook HMAC bypass 修复 (#8306)
+- Anthropic adapter 重构: `convert_messages_to_anthropic` 拆分为 7 个辅助函数
+- FAL 图像生成后端迁移到插件系统
+- TUI 界面升级 (React-based)
+
 ---
 
 ### 根因更深层修复
