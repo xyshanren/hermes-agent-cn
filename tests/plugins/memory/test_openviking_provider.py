@@ -356,49 +356,9 @@ def test_post_setup_create_remote_user_profile_can_mirror_to_openviking_store(tm
         "_prompt",
         _prompt_from_values({
             "OpenViking server URL": "https://openviking.example",
-            "OpenViking user API key": "user-secret",
-            "OpenViking agent": "hermes",
-            "OpenViking profile name": "VPS",
-        }),
-    )
-    config = {"memory": {}}
-
-    OpenVikingMemoryProvider().post_setup(str(hermes_home), config)
-
-    mirrored_path = tmp_path / ".openviking" / "ovcli.conf.VPS"
-    assert mirrored_path.exists()
-    assert json.loads(mirrored_path.read_text(encoding="utf-8")) == {
-        "url": "https://openviking.example",
-        "api_key": "user-secret",
-        "actor_peer_id": "hermes",
-    }
-    assert config["memory"]["provider"] == "openviking"
-    assert config["memory"]["openviking"] == {
-        "use_ovcli_config": True,
-        "ovcli_config_path": str(mirrored_path),
-    }
-    env_path = hermes_home / ".env"
-    if env_path.exists():
-        assert "OPENVIKING_" not in env_path.read_text(encoding="utf-8")
-
-
-def test_post_setup_create_remote_user_can_keep_hermes_only(tmp_path, monkeypatch):
-    _clear_openviking_env(monkeypatch)
-    hermes_home = tmp_path / "hermes"
-    hermes_home.mkdir()
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-    _allow_setup_validation(monkeypatch)
-
-    from hermes_cli import memory_setup
-
-    choices = iter([1, 0, 0])
-    monkeypatch.setattr(memory_setup, "_curses_select", lambda *args, **kwargs: next(choices))
-    monkeypatch.setattr(
-        memory_setup,
-        "_prompt",
-        _prompt_from_values({
-            "OpenViking server URL": "https://openviking.example",
-            "OpenViking user API key": "user-secret",
+            "OpenViking root API key": "root-secret",
+            "OpenViking account": "acct",
+            "OpenViking user": "alice",
             "OpenViking agent": "agent",
         }),
     )
@@ -567,10 +527,14 @@ def test_post_setup_root_key_path_can_route_detected_user_key_to_user_setup(tmp_
         _prompt_from_values(
             {
                 "OpenViking server URL": "https://openviking.example",
-                "OpenViking root API key": "user-secret",
+                "OpenViking user API key": "user-secret",
                 "OpenViking agent": "agent",
             },
-            forbidden={"OpenViking user API key", "OpenViking account", "OpenViking user"},
+            forbidden={
+                "OpenViking account",
+                "OpenViking root API key",
+                "OpenViking user",
+            },
         ),
     )
     config = {"memory": {}}
@@ -589,20 +553,60 @@ def test_manual_root_key_flow_prints_validation_progress(monkeypatch, capsys):
 
     monkeypatch.setattr(openviking_module, "_validate_openviking_reachability", lambda endpoint: (True, ""))
 
-    validate_calls = []
+    save_config = MagicMock()
+    monkeypatch.setattr(hermes_config, "save_config", save_config)
+    choices = iter([2, 0])
+    monkeypatch.setattr(
+        memory_setup,
+        "_curses_select",
+        lambda *args, **kwargs: next(choices),
+    )
+    monkeypatch.setattr(
+        memory_setup,
+        "_prompt",
+        _prompt_from_values({
+            "OpenViking server URL": "https://openviking.example",
+            "OpenViking user API key": "",
+        }),
+    )
+    config = {"memory": {"provider": "builtin"}}
 
-    def validate_values(values, *, require_api_key=False):
-        validate_calls.append(dict(values))
-        return True, "", "root"
+    OpenVikingMemoryProvider().post_setup(str(hermes_home), config)
 
-    monkeypatch.setattr(openviking_module, "_validate_openviking_setup_values", validate_values)
-    choices = iter([1])
+    save_config.assert_not_called()
+    assert config == {"memory": {"provider": "builtin"}}
+    assert ovcli_path.read_text(encoding="utf-8") == original_ovcli
+    assert not (hermes_home / ".env").exists()
 
-    values = openviking_module._prompt_manual_connection_values(
+
+def test_post_setup_manual_root_requires_account_and_user(tmp_path, monkeypatch):
+    _clear_openviking_env(monkeypatch)
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir()
+    ovcli_path = tmp_path / "ovcli.conf"
+    original_ovcli = json.dumps({"url": "http://old.local"})
+    ovcli_path.write_text(original_ovcli, encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("OPENVIKING_CLI_CONFIG_FILE", str(ovcli_path))
+
+    from hermes_cli import config as hermes_config
+    from hermes_cli import memory_setup
+
+    save_config = MagicMock()
+    choices = iter([2, 1])
+    monkeypatch.setattr(hermes_config, "save_config", save_config)
+    monkeypatch.setattr(
+        memory_setup,
+        "_curses_select",
+        lambda *args, **kwargs: next(choices),
+    )
+    monkeypatch.setattr(
+        memory_setup,
+        "_prompt",
         _prompt_from_values({
             "OpenViking server URL": "https://openviking.example",
             "OpenViking root API key": "root-secret",
-            "OpenViking account": "acct",
+            "OpenViking account": "",
             "OpenViking user": "alice",
             "OpenViking agent": "agent",
         }),
@@ -1062,25 +1066,27 @@ def test_post_setup_local_server_down_can_offer_autostart(tmp_path, monkeypatch)
 
     from hermes_cli import memory_setup
 
-    reachability_calls = []
-
-    def validate_reachability(endpoint):
-        reachability_calls.append(endpoint)
-        return False, "OpenViking server is not reachable." if len(reachability_calls) == 1 else ""
-
-    started = []
-    monkeypatch.setattr(openviking_module, "_validate_openviking_reachability", validate_reachability)
-    monkeypatch.setattr(openviking_module, "_start_local_openviking_server", lambda endpoint: (started.append(endpoint) or True, "started"))
-    monkeypatch.setattr(openviking_module, "_wait_for_openviking_health", lambda endpoint, **kwargs: True)
-    choices = iter([1, 0, 0, 0])
-    monkeypatch.setattr(memory_setup, "_curses_select", lambda *args, **kwargs: next(choices))
+    choices = iter([2, 0, 1])
+    monkeypatch.setattr(
+        memory_setup,
+        "_curses_select",
+        lambda *args, **kwargs: next(choices),
+    )
     monkeypatch.setattr(
         memory_setup,
         "_prompt",
-        _prompt_from_values({
-            "OpenViking server URL": "localhost",
-            "OpenViking agent": "agent",
-        }),
+        _prompt_from_values(
+            {
+                "OpenViking server URL": "http://localhost:1933",
+                "OpenViking agent": "agent",
+            },
+            forbidden={
+                "OpenViking account",
+                "OpenViking root API key",
+                "OpenViking user",
+                "OpenViking user API key",
+            },
+        ),
     )
     config = {"memory": {}}
 

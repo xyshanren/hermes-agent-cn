@@ -798,215 +798,41 @@ def _write_ovcli_config(path: Path, values: dict) -> None:
     _restrict_secret_file_permissions(path)
 
 
-def _validate_openviking_reachability(endpoint: str) -> tuple[bool, str]:
-    endpoint = _normalize_openviking_url(endpoint)
-    try:
-        client = _VikingClient(endpoint)
-        if hasattr(client, "health_payload"):
-            payload = client.health_payload()
-            if payload.get("healthy") is False:
-                return False, "OpenViking server responded but reported unhealthy status."
-            if payload:
-                return True, ""
-        elif client.health():
-            return True, ""
-    except Exception as e:
-        if _status_code_from_error(e) is not None:
-            return False, f"OpenViking server responded with {_format_openviking_exception(e)}."
-        return False, f"OpenViking server is not reachable at {endpoint}: {_format_openviking_exception(e)}"
-    return False, f"OpenViking server is not reachable at {endpoint}."
+def _prompt_manual_connection_values(prompt, select, cancelled):
+    endpoint = _clean_config_value(
+        prompt("OpenViking server URL", default=_DEFAULT_ENDPOINT)
+    ) or _DEFAULT_ENDPOINT
+    is_local = _is_local_openviking_url(endpoint)
 
-
-def _validate_openviking_auth(values: dict) -> tuple[bool, str]:
-    endpoint = _normalize_openviking_url(values.get("endpoint"))
-    try:
-        client = _VikingClient(
-            endpoint,
-            _clean_config_value(values.get("api_key")),
-            account=_clean_config_value(values.get("account")),
-            user=_clean_config_value(values.get("user")),
-            agent=_clean_config_value(values.get("agent")) or _DEFAULT_AGENT,
+    values = {
+        "endpoint": endpoint,
+        "api_key": "",
+        "account": "",
+        "user": "",
+        "agent": "",
+    }
+    if is_local:
+        credential_choice = select(
+            "  OpenViking credential",
+            [
+                ("No API key", "local dev mode"),
+                ("User API key", "server derives account/user automatically"),
+                ("Root API key", "requires account and user IDs"),
+            ],
+            default=0,
+            cancel_returns=cancelled,
         )
-        client.validate_auth()
-    except Exception as e:
-        return False, f"OpenViking authentication validation failed: {_format_openviking_exception(e)}"
-    return True, ""
-
-
-def _validate_openviking_root_access(values: dict) -> tuple[bool, str]:
-    endpoint = _normalize_openviking_url(values.get("endpoint"))
-    try:
-        client = _VikingClient(
-            endpoint,
-            _clean_config_value(values.get("api_key")),
-            agent=_clean_config_value(values.get("agent")) or _DEFAULT_AGENT,
-        )
-        client.validate_root_access()
-    except Exception as e:
-        return False, f"OpenViking root API key validation failed: {_format_openviking_exception(e)}"
-    return True, ""
-
-
-def _validate_openviking_user_key_scope(values: dict) -> tuple[bool, str]:
-    root_ok, _message = _validate_openviking_root_access(values)
-    if not root_ok:
-        return True, ""
-    return (
-        False,
-        "That key has ROOT access. Choose Root API key and provide account/user, "
-        "or enter a user API key.",
-    )
-
-
-def _status_code_from_error(error: Exception) -> Optional[int]:
-    if isinstance(error, _OpenVikingHTTPError):
-        return error.status_code
-    response = getattr(error, "response", None)
-    return getattr(response, "status_code", None)
-
-
-def _admin_probe_means_regular_key(error: Exception) -> bool:
-    return _status_code_from_error(error) in {401, 403, 404}
-
-
-def _should_probe_openviking_auth(health: dict, *, require_api_key: bool, has_api_key: bool) -> bool:
-    if require_api_key or has_api_key:
-        return True
-    auth_mode = health.get("auth_mode")
-    if auth_mode == "dev":
-        return False
-    if auth_mode in {"api_key", "trusted", None}:
-        return True
-    return False
-
-
-def _validate_openviking_setup_values(
-    values: dict,
-    *,
-    require_api_key: bool = False,
-) -> tuple[bool, str, Optional[str]]:
-    endpoint = _normalize_openviking_url(values.get("endpoint"))
-    api_key = _clean_config_value(values.get("api_key"))
-    if require_api_key and not api_key:
-        return False, "Remote OpenViking configs require an API key.", None
-
-    try:
-        client = _VikingClient(
-            endpoint,
-            api_key,
-            account=_clean_config_value(values.get("account")),
-            user=_clean_config_value(values.get("user")),
-            agent=_clean_config_value(values.get("agent")) or _DEFAULT_AGENT,
-        )
-        health = client.health_payload()
-        if health.get("healthy") is False:
-            return False, "OpenViking server responded but reported unhealthy status.", None
-        if _should_probe_openviking_auth(
-            health,
-            require_api_key=require_api_key,
-            has_api_key=bool(api_key),
-        ):
-            client.validate_auth()
-        if not api_key:
-            return True, "", None
-        try:
-            client.validate_root_access()
-            return True, "", "root"
-        except Exception as e:
-            if _admin_probe_means_regular_key(e):
-                return True, "", "user"
-            raise
-    except Exception as e:
-        return False, f"OpenViking validation failed: {_format_openviking_exception(e)}", None
-
-
-def _retry_or_cancel_manual_setup(select, title: str, message: str, cancelled):
-    print(f"  {message}")
-    choice = select(
-        title,
-        [
-            ("Retry", "try this step again"),
-            ("Cancel setup", "no changes saved"),
-        ],
-        default=0,
-        cancel_returns=cancelled,
-    )
-    if choice == 0:
-        return True
-    return _SETUP_CANCELLED
-
-
-def _print_validation_progress(message: str) -> None:
-    print(f"  {message}", flush=True)
-
-
-def _local_openviking_bind(endpoint: str) -> tuple[str, int]:
-    normalized = _normalize_openviking_url(endpoint)
-    parsed = urlparse(normalized)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 1933
-    return host, port
-
-
-def _openviking_server_log_path() -> Path:
-    try:
-        from hermes_constants import get_hermes_home
-        home = get_hermes_home()
-    except Exception:
-        home = Path(os.environ.get("HERMES_HOME", "")).expanduser() if os.environ.get("HERMES_HOME") else Path.home() / ".hermes"
-    return home / _OPENVIKING_SERVER_LOG_RELATIVE_PATH
-
-
-def _start_local_openviking_server(endpoint: str) -> tuple[bool, str]:
-    server_cmd = shutil.which("openviking-server")
-    if not server_cmd:
-        return False, "openviking-server was not found on PATH. Start it manually, then retry."
-    try:
-        host, port = _local_openviking_bind(endpoint)
-    except ValueError as e:
-        return False, f"Could not parse local OpenViking URL: {e}"
-    log_path = _openviking_server_log_path()
-    try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("ab") as log_file:
-            subprocess.Popen(
-                [server_cmd, "--host", host, "--port", str(port)],
-                stdout=log_file,
-                stderr=log_file,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-    except Exception as e:
-        return False, f"Could not start openviking-server: {e}"
-    return True, f"Started openviking-server on {host}:{port} in the background. Logs: {log_path}"
-
-
-def _wait_for_openviking_health(endpoint: str, *, timeout_seconds: float = 15.0) -> bool:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        ok, _message = _validate_openviking_reachability(endpoint)
-        if ok:
-            return True
-        time.sleep(0.5)
-    return False
-
-
-def _reachability_failure_allows_local_autostart(message: str) -> bool:
-    return not (message or "").startswith(_OPENVIKING_RESPONDED_FAILURE_PREFIX)
-
-
-def _handle_unreachable_endpoint(
-    endpoint: str,
-    message: str,
-    select,
-    cancelled,
-    *,
-    allow_local_autostart: bool = True,
-):
-    if _is_local_openviking_url(endpoint) and allow_local_autostart:
-        print(f"  {message}")
-        choice = select(
-            "  Local OpenViking server is down",
+        if credential_choice == cancelled:
+            return _SETUP_CANCELLED
+        if credential_choice == 0:
+            values["agent"] = _clean_config_value(
+                prompt("OpenViking agent", default=_DEFAULT_AGENT)
+            ) or _DEFAULT_AGENT
+            return values
+        api_key_type = "root" if credential_choice == 2 else "user"
+    else:
+        credential_choice = select(
+            "  OpenViking API key type",
             [
                 ("Start local OpenViking", "run openviking-server and retry"),
                 ("Retry URL", "enter the server URL again"),
@@ -1015,23 +841,29 @@ def _handle_unreachable_endpoint(
             default=0,
             cancel_returns=cancelled,
         )
-        if choice == 0:
-            started, start_message = _start_local_openviking_server(endpoint)
-            print(f"  {start_message}")
-            if not started:
-                return False
-            print("  Waiting for OpenViking server to become reachable...", flush=True)
-            if _wait_for_openviking_health(
-                endpoint,
-                timeout_seconds=_LOCAL_OPENVIKING_AUTOSTART_TIMEOUT,
-            ):
-                print("  OpenViking server is reachable.")
-                return True
-            print("  OpenViking server did not become reachable.")
-            return False
-        if choice == 1:
-            return False
-        return _SETUP_CANCELLED
+        if credential_choice == cancelled:
+            return _SETUP_CANCELLED
+        api_key_type = "root" if credential_choice == 1 else "user"
+
+    values["api_key_type"] = api_key_type
+    api_key_label = (
+        "OpenViking root API key"
+        if api_key_type == "root"
+        else "OpenViking user API key"
+    )
+    values["api_key"] = _clean_config_value(prompt(api_key_label, secret=True))
+    if not values["api_key"]:
+        print(f"\n  {api_key_label} is required.")
+        print("  No changes saved.\n")
+        return None
+
+    if api_key_type == "root":
+        values["account"] = _clean_config_value(prompt("OpenViking account"))
+        values["user"] = _clean_config_value(prompt("OpenViking user"))
+        if not values["account"] or not values["user"]:
+            print("\n  Root API keys require both OpenViking account and user.")
+            print("  No changes saved.\n")
+            return None
 
     return _retry_or_cancel_manual_setup(
         select,
