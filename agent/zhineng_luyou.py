@@ -59,7 +59,6 @@ DEFAULT_BACKEND_PORTS = {
 }
 
 # 路由日志 (Phase C)
-ROUTE_LOG_EXT = ".route.jsonl"      # 路由日志后缀
 ROUTE_LOG_MAX_LINES = 5000           # 路由日志最大行数 (超过自动截断)
 ROUTE_LOG_TRUNCATE_TO = 3000         # 截断后保留行数
 
@@ -1341,9 +1340,4 @@ def get_router(config: Optional[Dict[str, Any]] = None) -> SmartRouter:
 def quick_route(message: str) -> RouteResult:
     """快速路由 (使用全局实例)。"""
     router = get_router()
-    if router is None:
-        return RouteResult(
-            provider="", model="", tier=ModelTier.NONE,
-            reason="路由引擎未初始化",
-        )
     return router.route(message)
