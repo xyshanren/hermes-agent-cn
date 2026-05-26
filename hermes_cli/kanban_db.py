@@ -953,6 +953,89 @@ CREATE INDEX IF NOT EXISTS idx_notify_task           ON kanban_notify_subs(task_
 _INITIALIZED_PATHS: set[str] = set()
 _INIT_LOCK = threading.RLock()
 _SQLITE_HEADER = b"SQLite format 3\x00"
+DEFAULT_BUSY_TIMEOUT_MS = 120_000
+
+
+def _resolve_busy_timeout_ms() -> int:
+    """Return the SQLite busy timeout for Kanban connections.
+
+    Kanban is the shared cross-profile dispatch bus, so worker stampedes are
+    expected.  A long busy timeout lets SQLite serialize writers via WAL rather
+    than surfacing transient ``database is locked`` failures during bursts.
+    """
+    raw = os.environ.get("HERMES_KANBAN_BUSY_TIMEOUT_MS", "").strip()
+    if raw:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            parsed = 0
+        if parsed > 0:
+            return parsed
+    return DEFAULT_BUSY_TIMEOUT_MS
+
+
+def _sqlite_connect(path: Path) -> sqlite3.Connection:
+    """Open a Kanban SQLite connection with consistent lock waiting."""
+    busy_timeout_ms = _resolve_busy_timeout_ms()
+    conn = sqlite3.connect(
+        str(path),
+        isolation_level=None,
+        timeout=busy_timeout_ms / 1000.0,
+    )
+    # ``sqlite3.connect(timeout=...)`` normally maps to busy_timeout, but set
+    # the PRAGMA explicitly so it is observable and survives future wrapper
+    # changes. Parameter binding is not supported for PRAGMA assignments.
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+    return conn
+
+
+@contextlib.contextmanager
+def _cross_process_init_lock(path: Path):
+    """Serialize first-connect WAL/schema/integrity setup across processes.
+
+    ``_INIT_LOCK`` only protects threads inside one Python process. During a
+    dispatcher burst, many worker processes can all hit a fresh/legacy board at
+    once and each process has an empty ``_INITIALIZED_PATHS`` cache. This file
+    lock keeps header validation, integrity probing, WAL activation, and
+    additive migrations single-file/single-writer across the whole host while
+    leaving normal post-init DB usage concurrent under SQLite WAL.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + ".init.lock")
+    handle = lock_path.open("a+b")
+    try:
+        if _IS_WINDOWS:
+            import msvcrt
+
+            # Lock a single byte in the sidecar file. ``msvcrt.locking`` starts
+            # at the current file position, so seek explicitly before both
+            # lock and unlock.  The file is opened in append/read binary mode so
+            # it always exists but the byte-range lock is the synchronization
+            # primitive; no payload needs to be written.
+            handle.seek(0)
+            locking = getattr(msvcrt, "locking")
+            lock_mode = getattr(msvcrt, "LK_LOCK")
+            locking(handle.fileno(), lock_mode, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if _IS_WINDOWS:
+                import msvcrt
+
+                handle.seek(0)
+                locking = getattr(msvcrt, "locking")
+                unlock_mode = getattr(msvcrt, "LK_UNLCK")
+                locking(handle.fileno(), unlock_mode, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 def _looks_like_tls_record_at(data: bytes, offset: int) -> bool:
