@@ -60,7 +60,6 @@ AUTHOR_MAP = {
     "shriganesh.patel@gmail.com": "ashishpatel26",
     "45688690+fujinice@users.noreply.github.com": "fujinice",
     "276689385+carltonawong@users.noreply.github.com": "carltonawong",
-    "wangpuv@hotmail.com": "wangpuv",
     # teknium (multiple emails)
     "teknium1@gmail.com": "teknium1",
     "cipherframe@users.noreply.github.com": "CipherFrame",
