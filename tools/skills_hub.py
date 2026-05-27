@@ -124,6 +124,75 @@ def _validate_category_name(category: str) -> str:
     return _normalize_bundle_path(category, field_name="category", allow_nested=False)
 
 
+def _validate_install_parent_path(category: str) -> str:
+    return _normalize_bundle_path(category, field_name="install parent path", allow_nested=True)
+
+
+def _normalize_lock_install_path(install_path: str, skill_name: str) -> str:
+    """Validate a skill install path before it touches the lock file or disk.
+
+    Lock-file ``install_path`` entries are the source-of-truth for where
+    ``uninstall_skill`` will call ``shutil.rmtree``. A poisoned or buggy
+    entry — empty string, ``"."``, an absolute path, ``../..`` traversal,
+    or anything whose final component doesn't match the skill name — would
+    let ``rmtree`` wipe either the entire ``skills/`` tree or content
+    outside it.
+
+    Enforce that ``install_path`` ends with ``<skill_name>``. Nested
+    official optional skills may legitimately install below paths such as
+    ``mlops/training/<skill_name>``; traversal, absolute paths, empty paths,
+    and mismatched final components are still rejected.
+    """
+    safe_skill_name = _validate_skill_name(skill_name)
+    normalized = _normalize_bundle_path(
+        install_path,
+        field_name="install path",
+        allow_nested=True,
+    )
+    parts = normalized.split("/")
+    if not parts or parts[-1] != safe_skill_name:
+        raise ValueError(f"Unsafe install path: {install_path}")
+    return normalized
+
+
+def _is_path_redirect(path: Path) -> bool:
+    """True when ``path`` is a symlink or (on Windows) a directory junction.
+
+    Either form lets an attacker who can write into the ``skills/`` tree
+    redirect a subsequent ``rmtree`` to content outside it. ``is_junction``
+    only exists on Python 3.12+ Windows; gate with ``hasattr``.
+    """
+    return path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction())
+
+
+def _resolve_lock_install_path(install_path: str, skill_name: str) -> Path:
+    """Resolve a lock-file install path without allowing escapes from ``SKILLS_DIR``.
+
+    Two layers of defence on top of the existing ``is_relative_to`` check
+    that's been on main:
+
+    1. Walk the path component-by-component and refuse if any intermediate
+       component is a symlink/junction (a path resolution that follows a
+       symlink to outside skills/ would otherwise be hidden by Path.resolve).
+    2. After resolve(), reject not just escape-out but also ``resolved == SKILLS_DIR``
+       — an empty/``"."``/``""`` install_path resolves to the skills root itself,
+       and ``rmtree(SKILLS_DIR)`` would wipe every installed skill.
+    """
+    normalized = _normalize_lock_install_path(install_path, skill_name)
+    skills_root = SKILLS_DIR.resolve()
+
+    target = SKILLS_DIR
+    for part in normalized.split("/"):
+        target = target / part
+        if _is_path_redirect(target):
+            raise ValueError(f"Unsafe install path: {install_path}")
+
+    target = target.resolve()
+    if target == skills_root or not target.is_relative_to(skills_root):
+        raise ValueError(f"Unsafe install path: {install_path}")
+    return target
+
+
 def _guarded_http_get(url: str, *, timeout: int = 20) -> Optional[httpx.Response]:
     """Fetch a URL with SSRF and redirect-target validation."""
     current_url = url
@@ -2954,7 +3023,7 @@ def install_from_quarantine(
 ) -> Path:
     """Move a scanned skill from quarantine into the skills directory."""
     safe_skill_name = _validate_skill_name(skill_name)
-    safe_category = _validate_category_name(category) if category else ""
+    safe_category = _validate_install_parent_path(category) if category else ""
     quarantine_resolved = quarantine_path.resolve()
     quarantine_root = QUARANTINE_DIR.resolve()
     if not quarantine_resolved.is_relative_to(quarantine_root):
@@ -3017,7 +3086,20 @@ def uninstall_skill(skill_name: str) -> Tuple[bool, str]:
     if not entry:
         return False, f"'{skill_name}' is not a hub-installed skill (may be a builtin)"
 
-    install_path = SKILLS_DIR / entry["install_path"]
+    # Validate the lock entry's install_path against the skill name. This is
+    # the destructive boundary — anything that falls through to the rmtree
+    # below MUST be inside SKILLS_DIR and MUST NOT be SKILLS_DIR itself
+    # (an empty/"."/"/" install_path would otherwise wipe the entire tree).
+    # _resolve_lock_install_path enforces a relative path ending in
+    # <skill_name>, rejects absolute/traversal paths, and walks the path
+    # component-by-component refusing symlink/junction redirects.
+    try:
+        install_path = _resolve_lock_install_path(
+            entry.get("install_path", ""), skill_name
+        )
+    except ValueError as exc:
+        return False, f"Refusing to uninstall '{skill_name}': {exc}"
+
     if install_path.exists():
         shutil.rmtree(install_path)
 
