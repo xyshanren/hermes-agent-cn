@@ -2557,6 +2557,106 @@ class TestCodexAuxiliaryAdapterTimeout:
         assert time.monotonic() - started < 0.14
 
 
+class TestCodexAuxiliaryAdapterNullOutputRecovery:
+    def test_recovers_output_item_when_terminal_event_has_null_output(self):
+        """Regression for #11179 in auxiliary calls.
+
+        The wire shape that broke the SDK is ``response.completed`` with
+        ``response.output = null``.  The event-driven path is structurally
+        immune because it reconstructs from ``response.output_item.done``
+        events and never reads the terminal event's ``output`` field for
+        content.  Assert the auxiliary path returns the streamed item even
+        when the terminal frame's output is ``null``.
+        """
+        output_item = SimpleNamespace(
+            type="message",
+            content=[SimpleNamespace(type="output_text", text="aux survived")],
+        )
+        events = [
+            SimpleNamespace(type="response.created"),
+            SimpleNamespace(type="response.output_item.done", item=output_item),
+            SimpleNamespace(type="response.completed", response=SimpleNamespace(
+                status="completed",
+                id="resp_null_output",
+                # This is the field the SDK helper would have iterated and crashed on:
+                output=None,
+                usage=None,
+            )),
+        ]
+
+        class _NullOutputCreateStream:
+            def __iter__(self): return iter(events)
+            def close(self): pass
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                return _NullOutputCreateStream()
+
+        fake_client = SimpleNamespace(responses=FakeResponses())
+        adapter = _CodexCompletionsAdapter(fake_client, "gpt-5.5")
+
+        response = adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+        assert response.choices[0].message.content == "aux survived"
+
+    def test_handles_final_output_is_none_after_consumer(self):
+        """Regression for #33368 — defense against ``final.output`` being ``None``.
+
+        The event-driven consumer always sets ``final.output`` to a list, so this
+        shape can't come from our own path. But a mocked client / compatibility
+        shim that returns a typed Response with ``output=None`` directly (or a
+        future code path that wraps a different consumer) would crash on
+        ``for item in getattr(final, "output", [])`` because ``getattr`` returns
+        ``None`` (not the default) when the attribute exists but is ``None``.
+        Coerce with ``or []`` to handle this defensively.
+        """
+        # Stream that returns no items but a terminal with output=None.
+        # The consumer assembles an empty list. We then mock the consumer's
+        # return to simulate a third-party path that returns final.output=None.
+        empty_events = [
+            SimpleNamespace(type="response.completed", response=SimpleNamespace(
+                status="completed", id="r", output=None, usage=None,
+            )),
+        ]
+
+        class _Stream:
+            def __iter__(self): return iter(empty_events)
+            def close(self): pass
+
+        # Monkey-patch the consumer to return a final whose .output is None
+        # (mimics third-party shim behavior the defensive guard protects against).
+        from agent import codex_runtime
+        original_consume = codex_runtime._consume_codex_event_stream
+
+        def _consume_returning_none_output(*args, **kwargs):
+            return SimpleNamespace(
+                output=None,  # the defensive guard target
+                output_text="",
+                usage=None,
+                status="completed",
+                id="r",
+                model=kwargs.get("model"),
+                incomplete_details=None,
+                error=None,
+            )
+
+        codex_runtime._consume_codex_event_stream = _consume_returning_none_output
+        try:
+            class FakeResponses:
+                def create(self, **kwargs):
+                    return _Stream()
+
+            fake_client = SimpleNamespace(responses=FakeResponses())
+            adapter = _CodexCompletionsAdapter(fake_client, "gpt-5.5")
+
+            # Should not raise TypeError: 'NoneType' object is not iterable
+            response = adapter.create(messages=[{"role": "user", "content": "x"}])
+            assert response.choices[0].message.content is None
+            assert response.choices[0].finish_reason == "stop"
+        finally:
+            codex_runtime._consume_codex_event_stream = original_consume
+
+
 # ---------------------------------------------------------------------------
 # Issue #23432 — auxiliary timeout poisons cached client; later aux calls fail
 # ---------------------------------------------------------------------------
