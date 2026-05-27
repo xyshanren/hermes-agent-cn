@@ -1868,7 +1868,11 @@ The user has requested that this compaction PRIORITISE preserving all informatio
         # the explicit end marker so the model has a clear "summary ends
         # here, respond to the message below" signal.
         if not _merge_summary_into_tail:
-            summary = summary + "\n\n" + _SUMMARY_END_MARKER
+            summary = (
+                summary
+                + "\n\n--- END OF CONTEXT SUMMARY — "
+                "respond to the message below, not the summary above ---"
+            )
 
         if not _merge_summary_into_tail:
             compressed.append({
