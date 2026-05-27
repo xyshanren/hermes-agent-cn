@@ -32,14 +32,6 @@ INSTALL_DIR="/opt/hermes"
 # is a no-op if the dir already exists. (#18482, salvages #18488)
 mkdir -p "$HERMES_HOME"
 
-# Numeric UID/GID validation: must be digits only, 1000-65534
-validate_uid_gid() {
-    case "$1" in
-        ''|*[!0-9]*) return 1 ;;
-        *) [ "$1" -ge 1000 ] && [ "$1" -le 65534 ] ;;
-    esac
-}
-
 # --- UID/GID remap ---
 # Accept PUID/PGID as aliases for HERMES_UID/HERMES_GID.  NAS users (UGOS,
 # Synology, unRAID) expect the LinuxServer.io PUID/PGID convention and
