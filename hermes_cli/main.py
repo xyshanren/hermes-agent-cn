@@ -6925,59 +6925,6 @@ def _run_with_idle_timeout(
     return subprocess.CompletedProcess(cmd, rc, stdout=combined, stderr="")
 
 
-def _nixos_build_env() -> dict[str, str] | None:
-    """Return extra env vars for native module builds on NixOS.
-
-    On NixOS, python3 is typically not on the system PATH (it lives in
-    the Nix store and only enters PATH inside a nix-shell or when
-    explicitly installed as a system package).  node-gyp uses Python to
-    compile native addons like ``node-pty`` and its ``find-python.js``
-    does a bare ``PATH`` lookup — which fails on NixOS.
-
-    Two-tier resolution:
-    1. Fast path — the hermes venv's python3 (present in managed installs)
-    2. Fallback — resolves the absolute python3 path via ``nix-shell``
-
-    Returns an env dict suitable for ``subprocess.run(env=...)`` or
-    ``None`` when we are not on NixOS or python3 is already on PATH.
-    """
-    import re
-
-    try:
-        os_release = Path("/etc/os-release").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    if not re.search(r"^ID=nixos$", os_release, re.M):
-        return None
-
-    # python3 already on PATH — nothing to do
-    if shutil.which("python3"):
-        return None
-
-    # Tier 1: fast path — hermes venv python3, no nix-shell overhead
-    for venv_name in ("venv", ".venv"):
-        venv_python = PROJECT_ROOT / venv_name / "bin" / "python3"
-        if venv_python.exists():
-            return {**os.environ, "PYTHON": str(venv_python)}
-
-    # Tier 2: nix-shell fallback — resolves the absolute python3 path once.
-    # Slower (~2–5 s for the nix-shell eval) but always works, even without
-    # a hermes venv (pip / non-managed / bare-git installs).  The resolved
-    # path is a self-contained Nix store binary (all deps via RPATH) so it
-    # stays valid even after the nix-shell exits.
-    try:
-        result = subprocess.run(
-            ["nix-shell", "-p", "python3", "--run", "which python3"],
-            capture_output=True, text=True, check=False, timeout=15,
-        )
-        if result.returncode == 0:
-            python3_path = result.stdout.strip()
-            if python3_path and Path(python3_path).exists():
-                return {**os.environ, "PYTHON": python3_path}
-    except Exception:
-        pass  # nix-shell not available — caller will get None
-
-    return None
 def _run_npm_install_deterministic(
     npm: str,
     cwd: Path,
@@ -8138,6 +8085,11 @@ def _update_via_zip(args):
         _install_python_dependencies_with_optional_fallback(pip_cmd)
 
     _update_node_dependencies()
+    # Core (Python deps + git pull / ZIP extract) is now complete; the CLI
+    # is functional from this point onward. The web UI build below is
+    # optional — a failure here only affects ``hermes dashboard``. Make
+    # that visible so users don't panic and reboot mid-build (#33788).
+    print("→ Core update complete. Building dashboard (optional)...")
     _build_web_ui(PROJECT_ROOT / "web")
 
     # Sync skills
@@ -10720,6 +10672,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
         _refresh_active_lazy_features()
 
         _update_node_dependencies()
+        # See note above (ZIP path): core is now complete, web UI build is
+        # optional from a CLI perspective. Telegraphing this avoids the
+        # "stuck at webui-build → reboot → broken install" trap (#33788).
+        print("→ Core update complete. Building dashboard (optional)...")
         _build_web_ui(PROJECT_ROOT / "web")
 
         # Rebuild the desktop app if the source tree changed since the last
