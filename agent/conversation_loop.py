@@ -2964,7 +2964,10 @@ def run_conversation(
                 if is_client_error:
                     # Try fallback before aborting — a different provider
                     # may not have the same issue (rate limit, auth, etc.)
-                    agent._emit_status(f"⚠️ Non-retryable error (HTTP {status_code}) — trying fallback...")
+                    if classified.reason == FailoverReason.content_policy_blocked:
+                        agent._buffer_status("⚠️ Provider safety filter blocked this request — trying fallback...")
+                    else:
+                        agent._buffer_status(f"⚠️ Non-retryable error (HTTP {status_code}) — trying fallback...")
                     if agent._try_activate_fallback():
                         retry_count = 0
                         compression_attempts = 0
@@ -2977,22 +2980,15 @@ def run_conversation(
                     # Terminal — flush buffered context so the user sees
                     # what was tried before the abort.
                     agent._flush_status_buffer()
-                    # Summarize once: Cloudflare/proxy HTML challenge pages and
-                    # other raw provider bodies must be collapsed to a short
-                    # one-liner here, otherwise the full page leaks into the
-                    # returned ``error`` field and downstream consumers deliver
-                    # it verbatim (e.g. a cron failure notification dumped a
-                    # ~60KB Cloudflare challenge page as 31 Discord messages).
-                    _nonretryable_summary = agent._summarize_api_error(api_error)
                     if classified.reason == FailoverReason.content_policy_blocked:
                         agent._emit_status(
                             f"❌ Provider safety filter blocked this request: "
-                            f"{_nonretryable_summary}"
+                            f"{agent._summarize_api_error(api_error)}"
                         )
                     else:
                         agent._emit_status(
                             f"❌ Non-retryable error (HTTP {status_code}): "
-                            f"{_nonretryable_summary}"
+                            f"{agent._summarize_api_error(api_error)}"
                         )
                     agent._vprint(f"{agent.log_prefix}❌ Non-retryable client error (HTTP {status_code}). Aborting.", force=True)
                     agent._vprint(f"{agent.log_prefix}   🔌 Provider: {_provider}  Model: {_model}", force=True)
@@ -3027,6 +3023,28 @@ def run_conversation(
                                 agent._vprint(f"{agent.log_prefix}      • Check credits: https://openrouter.ai/settings/credits", force=True)
                     else:
                         agent._vprint(f"{agent.log_prefix}   💡 This type of error won't be fixed by retrying.", force=True)
+                    # Content-policy blocks deserve their own actionable
+                    # guidance — neither "fix your API key" nor "retry won't
+                    # help" tells the user what to actually do. The provider
+                    # has refused this specific prompt, so the recovery is
+                    # either a rephrase or routing to a different model.
+                    if classified.reason == FailoverReason.content_policy_blocked:
+                        agent._vprint(
+                            f"{agent.log_prefix}   💡 The provider's safety filter rejected this specific prompt.",
+                            force=True,
+                        )
+                        agent._vprint(
+                            f"{agent.log_prefix}      • Try rephrasing the request, narrowing the context, or splitting into smaller steps.",
+                            force=True,
+                        )
+                        agent._vprint(
+                            f"{agent.log_prefix}      • Configure a fallback provider so future blocks route automatically:",
+                            force=True,
+                        )
+                        agent._vprint(
+                            f"{agent.log_prefix}        hermes fallback add   (interactive picker — same as `hermes model`)",
+                            force=True,
+                        )
                     logger.error(f"{agent.log_prefix}Non-retryable client error: {api_error}")
                     # Skip session persistence when the error is likely
                     # context-overflow related (status 400 + large session).
@@ -3042,18 +3060,22 @@ def run_conversation(
                     else:
                         agent._persist_session(messages, conversation_history)
                     if classified.reason == FailoverReason.content_policy_blocked:
+                        _summary = agent._summarize_api_error(api_error)
                         _policy_response = (
-                            "⚠️  The model provider's safety filter blocked this request "
-                            "(not a Hermes/gateway failure).\n\n"
-                            f"Provider message: {_nonretryable_summary}\n\n"
-                            f"{_CONTENT_POLICY_RECOVERY_HINT}"
+                            f"⚠️  The model provider's safety filter blocked this request "
+                            f"(not a Hermes/gateway failure).\n\n"
+                            f"Provider message: {_summary}\n\n"
+                            f"Try rephrasing the request, narrowing the context, or "
+                            f"adding a fallback provider with `hermes fallback add`."
                         )
-                        return _content_policy_blocked_result(
-                            messages,
-                            api_call_count,
-                            final_response=_policy_response,
-                            error_detail=_nonretryable_summary,
-                        )
+                        return {
+                            "final_response": _policy_response,
+                            "messages": messages,
+                            "api_calls": api_call_count,
+                            "completed": False,
+                            "failed": True,
+                            "error": f"content_policy_blocked: {_summary}",
+                        }
                     return {
                         "final_response": None,
                         "messages": messages,
