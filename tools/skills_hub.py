@@ -1791,8 +1791,18 @@ class ClawHubSource(SkillSource):
             results = self._search_catalog(query, limit=limit)
             if results:
                 return results
+        else:
+            # Empty query: route through the paginating catalog walker so the
+            # full ClawHub catalog (20k+ skills) lands in the index. The
+            # single-request listing path below caps at one page (200 items)
+            # regardless of `limit`, which silently truncates the public
+            # skills index. The catalog walker follows `nextCursor`.
+            catalog = self._load_catalog_index()
+            if catalog:
+                return self._dedupe_results(catalog)[:limit] if limit > 0 else self._dedupe_results(catalog)
 
-        # Empty query or catalog fallback failure: use the lightweight listing API.
+        # Non-empty query catalog miss, or catalog walker failure: fall back to
+        # the lightweight listing API for a best-effort response.
         cache_key = f"clawhub_search_listing_v1_{hashlib.md5(query.encode()).hexdigest()}_{limit}"
         cached = _read_index_cache(cache_key)
         if cached is not None:
@@ -1927,17 +1937,6 @@ class ClawHubSource(SkillSource):
         # terminates well before this on `nextCursor` going None — the cap is
         # a safety rail against an infinite-cursor loop.
         max_pages = 750
-        # Wall-clock budget is for interactive browse (max_items > 0) only.
-        # The offline index builder passes max_items=0 and must walk the full
-        # catalog — a 12s cap there ships ~3k skills and trips the deploy
-        # health floor (20k).
-        deadline = (
-            time.monotonic() + self.CATALOG_WALK_BUDGET_SECONDS
-            if max_items > 0
-            else None
-        )
-        hit_deadline = False
-        hit_max_items = False
 
         for _ in range(max_pages):
             if deadline is not None and time.monotonic() > deadline:

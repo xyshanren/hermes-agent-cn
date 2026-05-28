@@ -273,9 +273,8 @@ def main():
     # (well above current catalog size) lets the full catalog land in the
     # index instead of being truncated at an arbitrary build-time limit.
     SOURCE_LIMITS = {
-        # 0 = unbounded catalog walk (max_items=0 in ClawHubSource). A positive
-        # limit bounds the walk and also enables the interactive 12s budget.
-        "clawhub": 0,
+        # ClawHub had 49,698+ skills as of May 2026; 200k leaves headroom.
+        "clawhub": 200_000,
         "lobehub": 100_000,
         "browse-sh": 5_000,
         "claude-marketplace": 5_000,
@@ -288,7 +287,8 @@ def main():
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {}
         for name, source in sources.items():
-            futures[pool.submit(crawl_source, source, name, 500)] = name
+            limit = SOURCE_LIMITS.get(name, DEFAULT_SOURCE_LIMIT)
+            futures[pool.submit(crawl_source, source, name, limit)] = name
         for future in as_completed(futures):
             try:
                 all_skills.extend(future.result())
@@ -336,6 +336,54 @@ def main():
                        if s["source"] == src and s.get("resolved_github_id"))
         extra = f" ({resolved} resolved)" if resolved else ""
         print(f"  {src}: {count}{extra}")
+
+    # Health check: catch silent breakage early. Every source listed below
+    # has historically returned at least `floor` entries; a zero (or near-
+    # zero) result almost certainly means a tap path moved, an API changed,
+    # or rate limiting kicked in.  Failing here forces a human look before
+    # the broken index reaches the live docs.
+    EXPECTED_FLOORS = {
+        "skills.sh": 100,
+        "lobehub": 100,
+        # ClawHub had 49,698+ skills as of May 2026 — anything under 20k means
+        # pagination broke or the API surface changed.  Fail loudly rather
+        # than ship a degenerate index (we shipped 200/50000 silently for
+        # weeks because the floor was 50).
+        "clawhub": 20000,
+        "official": 50,
+        "github": 30,        # collapsed across all GitHub taps
+        "browse-sh": 50,
+    }
+    health_errors = []
+    for src, floor in EXPECTED_FLOORS.items():
+        # 'skills-sh' and 'skills.sh' are the same source; both labels exist.
+        count = by_source.get(src, 0)
+        if src == "skills.sh":
+            count = by_source.get("skills.sh", 0) + by_source.get("skills-sh", 0)
+        if count < floor:
+            health_errors.append(f"  {src}: {count} < expected floor {floor}")
+
+    MIN_TOTAL = 1500
+    if len(deduped) < MIN_TOTAL:
+        health_errors.append(
+            f"  total: {len(deduped)} < expected floor {MIN_TOTAL}"
+        )
+
+    if health_errors:
+        print(
+            "\nERROR: skills index health check failed — refusing to ship "
+            "a degenerate index. Investigate the following sources:",
+            file=sys.stderr,
+        )
+        for line in health_errors:
+            print(line, file=sys.stderr)
+        print(
+            "\nIf the drop is expected (e.g. a hub is genuinely shutting "
+            "down), lower the floor in scripts/build_skills_index.py "
+            "EXPECTED_FLOORS in the same PR.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 
 if __name__ == "__main__":
