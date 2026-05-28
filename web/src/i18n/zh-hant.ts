@@ -127,6 +127,8 @@ export const zhHant: Translations = {
 
   sessions: {
     title: "工作階段",
+    history: "歷史",
+    overview: "總覽",
     searchPlaceholder: "搜尋訊息內容...",
     noSessions: "尚無工作階段",
     noMatch: "沒有符合的工作階段",
@@ -419,7 +421,7 @@ export const zhHant: Translations = {
   },
 
   language: {
-    switchTo: "切換為英文",
+    switchTo: "切換語言",
   },
 
   theme: {

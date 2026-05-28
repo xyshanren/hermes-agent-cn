@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Palette, Check, Type } from "lucide-react";
+import { Palette, Check } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import { BottomSheet } from "@nous-research/ui/ui/components/bottom-sheet";
@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
  * the sidebar (same idea as a responsive Drawer).
  */
 export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitcherProps) {
-  const { themeName, availableThemes, setTheme, fontId, fontChoices, setFont } = useTheme();
+  const { themeName, availableThemes, setTheme } = useTheme();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -146,11 +146,6 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
               close={close}
               setTheme={setTheme}
               themeName={themeName}
-            />
-            <FontSection
-              fontChoices={fontChoices}
-              fontId={fontId}
-              setFont={setFont}
             />
           </div>
         );

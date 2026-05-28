@@ -127,6 +127,8 @@ export const ga: Translations = {
 
   sessions: {
     title: "Seisiúin",
+    history: "Stair",
+    overview: "Forbhreathnú",
     searchPlaceholder: "Cuardaigh ábhar teachtaireachta...",
     noSessions: "Gan seisiúin go fóill",
     noMatch: "Níl seisiún ar bith ag teacht le do chuardach",
@@ -419,7 +421,7 @@ export const ga: Translations = {
   },
 
   language: {
-    switchTo: "Athraigh go Béarla",
+    switchTo: "Athraigh teanga",
   },
 
   theme: {

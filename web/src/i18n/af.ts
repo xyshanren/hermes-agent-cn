@@ -127,6 +127,8 @@ export const af: Translations = {
 
   sessions: {
     title: "Sessies",
+    history: "Geskiedenis",
+    overview: "Oorsig",
     searchPlaceholder: "Soek boodskap-inhoud...",
     noSessions: "Nog geen sessies nie",
     noMatch: "Geen sessies stem ooreen met jou soektog nie",
@@ -419,7 +421,7 @@ export const af: Translations = {
   },
 
   language: {
-    switchTo: "Skakel oor na Engels",
+    switchTo: "Verander taal",
   },
 
   theme: {

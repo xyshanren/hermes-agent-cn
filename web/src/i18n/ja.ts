@@ -127,6 +127,8 @@ export const ja: Translations = {
 
   sessions: {
     title: "セッション",
+    history: "履歴",
+    overview: "概要",
     searchPlaceholder: "メッセージ内容を検索...",
     noSessions: "まだセッションがありません",
     noMatch: "検索条件に一致するセッションはありません",
@@ -419,7 +421,7 @@ export const ja: Translations = {
   },
 
   language: {
-    switchTo: "英語に切り替え",
+    switchTo: "言語を切り替え",
   },
 
   theme: {

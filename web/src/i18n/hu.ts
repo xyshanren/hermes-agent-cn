@@ -127,6 +127,8 @@ export const hu: Translations = {
 
   sessions: {
     title: "Munkamenetek",
+    history: "Előzmények",
+    overview: "Áttekintés",
     searchPlaceholder: "Keresés üzenettartalomban...",
     noSessions: "Még nincsenek munkamenetek",
     noMatch: "Nincs a keresésnek megfelelő munkamenet",
@@ -419,7 +421,7 @@ export const hu: Translations = {
   },
 
   language: {
-    switchTo: "Váltás angolra",
+    switchTo: "Nyelv váltása",
   },
 
   theme: {

@@ -127,6 +127,8 @@ export const pt: Translations = {
 
   sessions: {
     title: "Sessões",
+    history: "Histórico",
+    overview: "Visão geral",
     searchPlaceholder: "Pesquisar conteúdo das mensagens...",
     noSessions: "Ainda não há sessões",
     noMatch: "Nenhuma sessão corresponde à pesquisa",
@@ -419,7 +421,7 @@ export const pt: Translations = {
   },
 
   language: {
-    switchTo: "Mudar para inglês",
+    switchTo: "Mudar idioma",
   },
 
   theme: {

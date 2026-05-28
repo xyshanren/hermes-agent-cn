@@ -820,8 +820,159 @@ export default function SessionsPage() {
         </div>
       )}
 
-      {platformEntries.length > 0 && status && (
-        <PlatformsCard platforms={platformEntries} />
+      {(showOverviewTab && !isSearching) || showList ? (
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-3">
+            {showOverviewTab && !isSearching && (
+              <Segmented
+                className="w-fit shrink-0"
+                size="md"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "overview", label: t.sessions.overview },
+                  { value: "list", label: t.sessions.history },
+                ]}
+              />
+            )}
+
+            {showList && (
+              <div className="relative min-w-0 w-full sm:w-auto sm:min-w-[12rem] sm:max-w-md sm:flex-1">
+                {searching ? (
+                  <Spinner className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[0.875rem] text-primary" />
+                ) : (
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                )}
+                <Input
+                  placeholder={t.sessions.searchPlaceholder}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-8 py-0 pr-7 pl-8 text-xs leading-none"
+                />
+                {search && (
+                  <Button
+                    ghost
+                    size="xs"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setSearch("")}
+                    aria-label={t.common.clear}
+                  >
+                    <X />
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {showPagination && (
+            <SessionsPagination
+              compact
+              className="shrink-0 sm:ml-auto"
+              page={page}
+              total={total}
+              onPageChange={setPage}
+            />
+          )}
+        </div>
+      ) : null}
+
+      {showList ? (
+        filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <Clock className="h-8 w-8 mb-3 opacity-40" />
+            <p className="text-sm font-medium">
+              {search ? t.sessions.noMatch : t.sessions.noSessions}
+            </p>
+            {!search && (
+              <p className="text-xs mt-1 text-text-tertiary">
+                {t.sessions.startConversation}
+              </p>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex min-w-0 flex-col gap-1.5">
+              {filtered.map((s) => (
+                <SessionRow
+                  key={s.id}
+                  session={s}
+                  snippet={snippetMap.get(s.id)}
+                  searchQuery={search || undefined}
+                  isExpanded={expandedId === s.id}
+                  onToggle={() =>
+                    setExpandedId((prev) => (prev === s.id ? null : s.id))
+                  }
+                  onDelete={() => sessionDelete.requestDelete(s.id)}
+                  resumeInChatEnabled={resumeInChatEnabled}
+                />
+              ))}
+            </div>
+
+            {showPagination && (
+              <SessionsPagination
+                page={page}
+                total={total}
+                onPageChange={setPage}
+              />
+            )}
+          </>
+        )
+      ) : (
+        <div className="flex min-w-0 flex-col gap-4">
+          {platformEntries.length > 0 && status && (
+            <PlatformsCard platforms={platformEntries} />
+          )}
+
+          {recentSessions.length > 0 && (
+            <Card className="min-w-0 max-w-full overflow-hidden">
+              <CardHeader className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Clock className="h-5 w-5 shrink-0 text-muted-foreground" />
+                  <CardTitle className="min-w-0 truncate text-base">
+                    {t.status.recentSessions}
+                  </CardTitle>
+                </div>
+              </CardHeader>
+
+              <CardContent className="grid min-w-0 gap-3">
+                {recentSessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex min-w-0 max-w-full flex-col gap-2 border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="font-mondwest normal-case min-w-0 truncate text-sm font-medium">
+                        {s.title ?? t.common.untitled}
+                      </span>
+
+                      <span className="min-w-0 break-words text-xs text-muted-foreground">
+                        <span className="font-mono-ui">
+                          {(s.model ?? t.common.unknown).split("/").pop()}
+                        </span>{" "}
+                        · {s.message_count} {t.common.msgs} ·{" "}
+                        {timeAgo(s.last_active)}
+                      </span>
+
+                      {s.preview && (
+                        <p className="font-mondwest normal-case min-w-0 max-w-full text-xs leading-snug text-text-tertiary [overflow-wrap:anywhere]">
+                          {s.preview}
+                        </p>
+                      )}
+                    </div>
+
+                    <Badge
+                      tone="outline"
+                      className="shrink-0 self-start text-xs sm:self-center"
+                    >
+                      <Database className="mr-1 h-3 w-3" />
+                      {s.source ?? "local"}
+                    </Badge>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {recentSessions.length > 0 && (
