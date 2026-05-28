@@ -7783,7 +7783,8 @@ class GatewayRunner:
                                 "🎤 I received your voice message but can't transcribe it — "
                                 "no speech-to-text provider is configured.\n\n"
                                 "To enable voice: install faster-whisper "
-                                "(`pip install faster-whisper` in the Hermes venv) "
+                                "(`uv pip install faster-whisper` in the Hermes venv; "
+                                "`pip install faster-whisper` also works if pip is on PATH) "
                                 "and set `stt.enabled: true` in config.yaml, "
                                 "then /restart the gateway."
                             )
