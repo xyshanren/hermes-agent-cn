@@ -3460,6 +3460,7 @@ def _model_flow_nous(config, current_model="", args=None):
     if not free_tier:
         try:
             refreshed_creds = resolve_nous_runtime_credentials(
+                min_key_ttl_seconds=5 * 60,
                 force_refresh=True,
             )
             if refreshed_creds:

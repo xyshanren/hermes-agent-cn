@@ -133,6 +133,104 @@ def _ra():
     return run_agent
 
 
+def _nous_entitlement_message(capability: str) -> str:
+    try:
+        from hermes_cli.nous_account import (
+            format_nous_portal_entitlement_message,
+            get_nous_portal_account_info,
+        )
+
+        account_info = get_nous_portal_account_info(force_fresh=True)
+        message = format_nous_portal_entitlement_message(
+            account_info,
+            capability=capability,
+        )
+        return message or ""
+    except Exception:
+        return ""
+
+
+def _print_nous_entitlement_guidance(agent, capability: str) -> bool:
+    message = _nous_entitlement_message(capability)
+    if not message:
+        return False
+    for line in message.splitlines():
+        agent._vprint(f"{agent.log_prefix}   💡 {line}", force=True)
+    return True
+
+
+def _is_nous_inference_route(provider: str, base_url: str) -> bool:
+    provider = (provider or "").strip().lower()
+    if provider == "nous":
+        return True
+    base = str(base_url or "")
+    return (
+        base_url_host_matches(base, "inference-api.nousresearch.com")
+        or base_url_host_matches(base, "inference.nousresearch.com")
+    )
+
+
+def _billing_or_entitlement_message(
+    *,
+    capability: str,
+    provider: str,
+    base_url: str,
+    model: str,
+) -> str:
+    if _is_nous_inference_route(provider, base_url):
+        return _nous_entitlement_message(capability)
+
+    provider_label = (provider or "").strip() or "the selected provider"
+    model_label = (model or "").strip() or "the selected model"
+    lines = [
+        (
+            f"{provider_label} reported that billing, credits, or account "
+            f"entitlement is exhausted for {model_label}."
+        ),
+        "Add credits or update billing with that provider, then retry.",
+    ]
+    if base_url_host_matches(str(base_url or ""), "openrouter.ai"):
+        lines.append("OpenRouter credits: https://openrouter.ai/settings/credits")
+    lines.append("You can switch providers temporarily with /model <model> --provider <provider>.")
+    return "\n".join(lines)
+
+
+def _print_billing_or_entitlement_guidance(
+    agent,
+    *,
+    capability: str,
+    provider: str,
+    base_url: str,
+    model: str,
+) -> bool:
+    message = _billing_or_entitlement_message(
+        capability=capability,
+        provider=provider,
+        base_url=base_url,
+        model=model,
+    )
+    if not message:
+        return False
+    for line in message.splitlines():
+        agent._vprint(f"{agent.log_prefix}   💡 {line}", force=True)
+    return True
+
+
+def _try_refresh_nous_paid_entitlement_credentials(agent) -> bool:
+    """Refresh Nous runtime credentials after a fresh paid-entitlement check."""
+    try:
+        from hermes_cli.nous_account import get_nous_portal_account_info
+
+        account_info = get_nous_portal_account_info(force_fresh=True)
+        if account_info.paid_service_access is not True:
+            return False
+        return agent._try_refresh_nous_client_credentials(
+            force=True,
+        )
+    except Exception:
+        return False
+
+
 def _restore_or_build_system_prompt(agent, system_message, conversation_history):
     """Restore the cached system prompt from the session DB or build it fresh.
 
