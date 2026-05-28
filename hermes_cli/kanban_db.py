@@ -4069,6 +4069,29 @@ def _classify_worker_exit(pid: int) -> "tuple[str, Optional[int]]":
     return ("unknown", None)
 
 
+def reap_worker_zombies() -> "list[int]":
+    """Reap all zombie children of this process without blocking.
+
+    Returns the list of reaped PIDs. Safe to call when there are no
+    children (returns []). No-op on Windows.
+    """
+    reaped: "list[int]" = []
+    if os.name != "nt":
+        try:
+            while True:
+                try:
+                    pid, status = os.waitpid(-1, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if pid == 0:
+                    break
+                _record_worker_exit(pid, status)
+                reaped.append(pid)
+        except Exception:
+            pass
+    return reaped
+
+
 def _pid_alive(pid: Optional[int]) -> bool:
     """Return True if ``pid`` is still running on this host.
 
