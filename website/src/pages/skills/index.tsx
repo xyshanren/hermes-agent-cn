@@ -19,10 +19,6 @@ interface Skill {
   docsPath?: string;
   identifier?: string;
   installCmd?: string;
-  /** Clickable URL to the skill's origin (repo / detail page). Synthesized
-   *  in extract-skills.py for community skills that have no generated docs
-   *  page, so the expanded card always has somewhere to send the user. */
-  sourceUrl?: string;
   /** Lowercase pre-joined haystack used by the search filter.
    *  Built once at load time so per-keystroke filtering is a single
    *  `.includes()` per skill instead of array-join + toLowerCase on
