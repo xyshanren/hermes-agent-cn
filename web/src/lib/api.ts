@@ -104,7 +104,7 @@ export async function fetchJSON<T>(
     // that reload once on the first stale-token 401 — gated mode is
     // handled above, so reaching here in gated mode means a real
     // middleware failure that should not reload-loop.
-    if (!window.__HERMES_AUTH_REQUIRED__ && !options?.allowUnauthorized) {
+    if (!window.__HERMES_AUTH_REQUIRED__) {
       let alreadyReloaded = false;
       try {
         alreadyReloaded =
