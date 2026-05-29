@@ -96,28 +96,44 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         if not isinstance(function_args, dict):
             function_args = {}
 
-        # Checkpoint for file-mutating tools
-        if function_name in {"write_file", "patch"} and agent._checkpoint_mgr.enabled:
-            try:
-                file_path = function_args.get("path", "")
-                if file_path:
-                    work_dir = agent._checkpoint_mgr.get_working_dir_for_path(file_path)
-                    agent._checkpoint_mgr.ensure_checkpoint(work_dir, f"before {function_name}")
-            except Exception:
-                pass
+        # ── Tool Search unwrap ────────────────────────────────────────
+        # When the model invokes the tool_call bridge, peel it open so
+        # every downstream check (checkpointing, guardrails, plugin
+        # pre-tool-call hooks, the display/activity feed, the post-call
+        # callback) sees the underlying tool — not the bridge. This is
+        # the OpenClaw lesson: hooks must observe the real tool name.
+        #
+        # The original tool_call entry on ``tool_call.function`` is left
+        # untouched so the conversation transcript and the matching
+        # tool_call_id are preserved exactly as the model emitted them.
+        #
+        # Scope gate: the unwrap dispatches the underlying tool directly
+        # (bypassing the bridge branch in handle_function_call and its
+        # scope check), so we enforce session toolset scope HERE. A tool
+        # the session was not granted is rejected before any checkpoint,
+        # hook, or dispatch fires.
+        _ts_scope_block = None
+        try:
+            from tools import tool_search as _ts
+            if function_name == _ts.TOOL_CALL_NAME:
+                _underlying, _underlying_args, _err = _ts.resolve_underlying_call(function_args)
+                if not _err and _underlying:
+                    if _underlying in _tool_search_scoped_names(agent):
+                        function_name = _underlying
+                        function_args = _underlying_args
+                    else:
+                        _ts_scope_block = json.dumps({
+                            "error": (
+                                f"'{_underlying}' is not available in this session. "
+                                "Use tool_search to find tools you can call."
+                            ),
+                        }, ensure_ascii=False)
+        except Exception:
+            pass
 
-        # Checkpoint before destructive terminal commands
-        if function_name == "terminal" and agent._checkpoint_mgr.enabled:
-            try:
-                cmd = function_args.get("command", "")
-                if _is_destructive_command(cmd):
-                    cwd = function_args.get("workdir") or os.getenv("TERMINAL_CWD", os.getcwd())
-                    agent._checkpoint_mgr.ensure_checkpoint(
-                        cwd, f"before terminal: {cmd[:60]}"
-                    )
-            except Exception:
-                pass
-
+        # ── Block evaluation (BEFORE checkpoint preflight) ───────────
+        # We must know whether the tool will execute before touching
+        # checkpoint state (dedup slot, real snapshots).
         block_result = None
         blocked_by_guardrail = False
         try:
@@ -135,6 +151,30 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
             if not guardrail_decision.allows_execution:
                 block_result = agent._guardrail_block_result(guardrail_decision)
                 blocked_by_guardrail = True
+
+        # ── Checkpoint preflight (only for tools that will execute) ──
+        if block_result is None:
+            # Checkpoint for file-mutating tools
+            if function_name in {"write_file", "patch"} and agent._checkpoint_mgr.enabled:
+                try:
+                    file_path = function_args.get("path", "")
+                    if file_path:
+                        work_dir = agent._checkpoint_mgr.get_working_dir_for_path(file_path)
+                        agent._checkpoint_mgr.ensure_checkpoint(work_dir, f"before {function_name}")
+                except Exception:
+                    pass
+
+            # Checkpoint before destructive terminal commands
+            if function_name == "terminal" and agent._checkpoint_mgr.enabled:
+                try:
+                    cmd = function_args.get("command", "")
+                    if _is_destructive_command(cmd):
+                        cwd = function_args.get("workdir") or os.getenv("TERMINAL_CWD", os.getcwd())
+                        agent._checkpoint_mgr.ensure_checkpoint(
+                            cwd, f"before terminal: {cmd[:60]}"
+                        )
+                except Exception:
+                    pass
 
         parsed_calls.append((tool_call, function_name, function_args, block_result, blocked_by_guardrail))
 
