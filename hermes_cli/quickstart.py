@@ -78,7 +78,7 @@ _PROVIDER_CHECKS = [
 _CN_PROVIDER_IDS = {p["id"] for p in _PROVIDER_CHECKS}
 
 # ── Ollama 模型分类关键词 ──
-_VISION_KEYWORDS = ("vl", "vision", "llava", "cogvlm", "minicpm-v")
+_VISION_KEYWORDS = ("vl", "vision", "llava", "cogvlm", "minicpm-v", "ocr")
 _REASONING_KEYWORDS = ("r1", "reasoning", "think", "qwq")
 
 # L2 层：无需 API 调用的已知视觉家族检测
@@ -89,6 +89,7 @@ _VISION_FAMILIES = (
     "yi-vl", "internvl2", "internvl",
     "pixtral", "bakllava",
     "moondream", "llama-v", "llava-llama",
+    "glm",
 )
 # 匹配家族但实际是编码专用模型的排除关键词
 # 注: 模型名会被 replace('-', ' ') 归一化，所以排除词也需考虑空格形式
@@ -701,6 +702,8 @@ def _build_fallback_chain(
         primary_model = ollama_info["default_model"]
         for m in ollama_info.get("models", []):
             m_type = _classify_ollama_model(m)
+            if "embed" in m.lower():
+                continue  # embedding 模型不能用于 chat
             if m != primary_model and m_type not in ("vision", "coding"):
                 chain.append({
                     "provider": "ollama",
