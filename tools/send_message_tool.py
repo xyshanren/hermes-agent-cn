@@ -35,11 +35,6 @@ _E164_TARGET_RE = re.compile(r"^\s*\+(\d{7,15})\s*$")
 # an explicit target for the email platform, not fall through to channel-name
 # resolution which has no way to resolve a raw address.
 _EMAIL_TARGET_RE = re.compile(r"^\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$")
-# Most platforms read their home channel from "<PLATFORM>_HOME_CHANNEL", but a
-# few diverge. Email reads EMAIL_HOME_ADDRESS (see gateway/config.py), so the
-# generic "<PLATFORM>_HOME_CHANNEL" hint would point users at a variable that is
-# never read. Map the exceptions so the error guidance is actually actionable.
-_HOME_CHANNEL_ENV_OVERRIDES = {"email": "EMAIL_HOME_ADDRESS"}
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".3gp"}
 _AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac"}
@@ -289,10 +284,6 @@ def _parse_target_ref(platform_name: str, target_ref: str):
         if target_ref.strip().isdigit():
             return f"group:{target_ref.strip()}", None, True
         return None, None, False
-    if platform_name == "ntfy":
-        topic = target_ref.strip()
-        if topic:
-            return topic, None, True
     if platform_name == "email":
         match = _EMAIL_TARGET_RE.fullmatch(target_ref)
         if match:
