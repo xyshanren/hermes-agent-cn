@@ -25,9 +25,7 @@ def resolve_agent_cwd() -> Path:
 
 
 def resolve_context_cwd() -> Path | None:
-    # None means "no configured cwd": build_context_files_prompt then falls back
-    # to the launch dir (os.getcwd()) — correct for the local CLI. The gateway
-    # avoids slurping its install dir by setting TERMINAL_CWD (see system_prompt.py).
-    # No getcwd arm here: that fallback is owned by the caller, not this resolver.
+    # None is load-bearing: it signals "skip context-file discovery" so the
+    # gateway install dir's AGENTS.md isn't slurped (see system_prompt.py).
     raw = os.environ.get("TERMINAL_CWD", "").strip()
     return Path(raw).expanduser() if raw else None
