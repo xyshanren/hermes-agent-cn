@@ -144,6 +144,19 @@ jobs:
           echo "::error::CRITICAL supply chain risk patterns detected in this PR. See the PR comment for details."
           exit 1
 
+  # Gate: reports success when scan was skipped (no relevant files changed).
+  # This ensures the required check always gets a status.
+  scan-gate:
+    name: Scan PR for critical supply chain risks
+    needs: changes
+    # always() so the gate still reports SUCCESS even if `changes` fails/is
+    # skipped — without it, a failed dependency would leave the required
+    # check unreported (i.e. "pending"), the exact failure mode this fixes.
+    if: always() && needs.changes.outputs.scan != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No supply-chain-relevant files changed, skipping scan."
+
   dep-bounds:
     name: Check PyPI dependency upper bounds
     runs-on: ubuntu-latest
@@ -208,3 +221,16 @@ jobs:
         run: |
           echo "::error::PyPI dependencies without upper bounds detected. Add <next_major ceiling per CONTRIBUTING.md policy."
           exit 1
+
+  # Gate: reports success when dep-bounds was skipped (no pyproject.toml changed).
+  # This ensures the required check always gets a status.
+  dep-bounds-gate:
+    name: Check PyPI dependency upper bounds
+    needs: changes
+    # always() so the gate still reports SUCCESS even if `changes` fails/is
+    # skipped — without it, a failed dependency would leave the required
+    # check unreported (i.e. "pending"), the exact failure mode this fixes.
+    if: always() && needs.changes.outputs.deps != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No pyproject.toml changes, skipping dependency bounds check."
