@@ -162,6 +162,40 @@ class RouteResult:
         return self.tier != ModelTier.NONE
 
 
+@dataclass
+class RoutingRule:
+    """用户定义的规则路由条目。
+
+    对应 YAML 配置中的 model_routing.rules 条目:
+        rules:
+          - name: vision
+            match:
+              has_image: true
+            model: "qwen3-vl:8b"
+          - name: coding
+            match:
+              keywords: ["写代码", "函数", "class"]
+              threshold: 2
+            model: "deepseek-coder"
+    """
+    name: str                                  # 规则名称 (用于日志)
+    model: str                                 # 目标模型名
+    match: Optional[Dict[str, Any]] = None     # 匹配条件
+    provider: str = ""                         # 目标 provider (可选)
+    priority: int = 0                          # 优先级 (保留字段)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "RoutingRule":
+        """从字典创建 RoutingRule。"""
+        return cls(
+            name=d.get("name", "(unnamed)"),
+            model=d.get("model", ""),
+            match=d.get("match") or {},
+            provider=d.get("provider", ""),
+            priority=d.get("priority", 0),
+        )
+
+
 # -- 复杂度判断 (保留向后兼容) ------------------------------------------------
 
 SIMPLE_KEYWORDS = [
@@ -1147,6 +1181,155 @@ class SmartRouter:
             logger.info("路由日志截断: %d → %d 行", line_count, ROUTE_LOG_TRUNCATE_TO)
         except Exception:
             pass
+    # -- 规则匹配 (原 run_agent.py AIAgent._match_rule) -----------------------
+
+    @staticmethod
+    def _match_rule(match: dict, has_image: bool, text_lower: str, text_length: int) -> bool:
+        """检查路由规则是否匹配。
+
+        Returns True when ALL specified conditions are satisfied.
+        """
+        # has_image condition
+        if "has_image" in match:
+            if bool(match["has_image"]) != has_image:
+                return False
+
+        # keywords condition (any keyword triggers by default)
+        keywords = match.get("keywords", [])
+        if keywords:
+            threshold = int(match.get("threshold", 1))
+            matched = sum(1 for kw in keywords if kw.lower() in text_lower)
+            if matched < threshold:
+                return False
+
+        # max_length condition (message length in chars)
+        max_len = match.get("max_length")
+        if max_len is not None:
+            if text_length > int(max_len):
+                return False
+
+        # exclude_keywords condition (any match disqualifies)
+        excl = match.get("exclude_keywords", [])
+        if excl and any(kw.lower() in text_lower for kw in excl):
+            return False
+
+        return True
+
+    def route_with_rules(
+        self,
+        user_message: str,
+        rules: Optional[List[RoutingRule]] = None,
+        legacy_cfg: Optional[Dict[str, Any]] = None,
+        has_image: bool = False,
+        force_tier: Optional[ModelTier] = None,
+        session_turn_count: int = 0,
+    ) -> RouteResult:
+        """规则优先路由: 先匹配用户规则, 未命中则回落能力感知路由。
+
+        统一了 model_routing.rules + legacy model_routing + SmartRouter 的完整流程。
+        Args:
+            user_message: 用户消息文本。
+            rules: 用户定义的规则列表 (model_routing.rules)。
+            legacy_cfg: 旧格式 model_routing 配置 (vision/reasoning/default)。
+            has_image: 消息是否包含图片附件。
+            force_tier: 强制使用指定层级。
+            session_turn_count: 会话轮次 (用于上下文需求评估)。
+        Returns:
+            RouteResult 路由决策结果。
+        """
+        text_lower = user_message.lower() if user_message else ""
+        text_length = len(user_message) if user_message else 0
+
+        # 阶段1: 规则匹配 (新格式 rules)
+        if rules:
+            for rule in rules:
+                match = rule.match or {}
+                if not match:
+                    continue  # 无条件规则暂不匹配, 最后兜底
+                if self._match_rule(match, has_image, text_lower, text_length):
+                    logger.debug(
+                        "route_with_rules: rule '%s' matched → %s",
+                        rule.name, rule.model,
+                    )
+                    return RouteResult(
+                        provider=rule.provider or "auto",
+                        model=rule.model,
+                        tier=ModelTier.CLOUD,
+                        reason=f"规则匹配: {rule.name}",
+                    )
+
+            # 无条件的默认规则
+            for rule in rules:
+                match = rule.match or {}
+                if not match:
+                    logger.debug(
+                        "route_with_rules: default rule '%s' → %s",
+                        rule.name, rule.model,
+                    )
+                    return RouteResult(
+                        provider=rule.provider or "auto",
+                        model=rule.model,
+                        tier=ModelTier.CLOUD,
+                        reason=f"默认规则: {rule.name}",
+                    )
+
+        # 阶段2: 旧格式匹配 (vision / reasoning / default)
+        if legacy_cfg and isinstance(legacy_cfg, dict):
+            # 图片附件匹配
+            if has_image:
+                vision_cfg = legacy_cfg.get("vision", {})
+                if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
+                    logger.debug(
+                        "route_with_rules: legacy vision → %s", vision_cfg["model"],
+                    )
+                    return RouteResult(
+                        provider="auto", model=vision_cfg["model"],
+                        tier=ModelTier.CLOUD, reason="旧格式: vision",
+                    )
+
+            # 视觉关键词匹配
+            _vision_kw = ["看图", "图片", "截图", "识别图中", "这张图"]
+            if any(kw in text_lower for kw in _vision_kw):
+                vision_cfg = legacy_cfg.get("vision", {})
+                if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
+                    logger.debug(
+                        "route_with_rules: legacy vision kw → %s", vision_cfg["model"],
+                    )
+                    return RouteResult(
+                        provider="auto", model=vision_cfg["model"],
+                        tier=ModelTier.CLOUD, reason="旧格式: vision关键词",
+                    )
+
+            # 推理关键词匹配
+            _reasoning_kw = ["分析", "推理", "证明", "思考"]
+            if any(kw in text_lower for kw in _reasoning_kw):
+                reasoning_cfg = legacy_cfg.get("reasoning", {})
+                if isinstance(reasoning_cfg, dict) and reasoning_cfg.get("model"):
+                    logger.debug(
+                        "route_with_rules: legacy reasoning → %s", reasoning_cfg["model"],
+                    )
+                    return RouteResult(
+                        provider="auto", model=reasoning_cfg["model"],
+                        tier=ModelTier.CLOUD, reason="旧格式: reasoning",
+                    )
+
+            # 默认模型
+            default_cfg = legacy_cfg.get("default", {})
+            if isinstance(default_cfg, dict) and default_cfg.get("model"):
+                logger.debug(
+                    "route_with_rules: legacy default → %s", default_cfg["model"],
+                )
+                return RouteResult(
+                    provider="auto", model=default_cfg["model"],
+                    tier=ModelTier.CLOUD, reason="旧格式: default",
+                )
+
+        # 阶段3: 能力感知自动路由
+        return self.route(
+            user_message,
+            force_tier=force_tier,
+            session_turn_count=session_turn_count,
+        )
 
     def route_with_config(
         self,

@@ -1114,6 +1114,7 @@ class AIAgent:
         checkpoint_max_file_size_mb: int = 10,
         pass_session_id: bool = False,
         disable_model_routing: bool = False,
+        openrouter_min_coding_score: Optional[float] = None,
     ):
         """
         Initialize the AI Agent.
@@ -1359,6 +1360,7 @@ class AIAgent:
         self.provider_sort = provider_sort
         self.provider_require_parameters = provider_require_parameters
         self.provider_data_collection = provider_data_collection
+        self.openrouter_min_coding_score = openrouter_min_coding_score
 
         # Store toolset filtering options
         self.enabled_toolsets = enabled_toolsets
@@ -8811,38 +8813,6 @@ class AIAgent:
                     content[-1]["cache_control"] = {"type": "ephemeral"}
                 break
 
-    @staticmethod
-    def _match_rule(match: dict, has_image: bool, text_lower: str, text_length: int) -> bool:
-        """Check if a routing rule's match conditions are met.
-
-        Returns True when ALL specified conditions are satisfied.
-        """
-        # has_image condition
-        if "has_image" in match:
-            if bool(match["has_image"]) != has_image:
-                return False
-
-        # keywords condition (any keyword triggers by default)
-        keywords = match.get("keywords", [])
-        if keywords:
-            threshold = int(match.get("threshold", 1))
-            matched = sum(1 for kw in keywords if kw.lower() in text_lower)
-            if matched < threshold:
-                return False
-
-        # max_length condition (message length in chars)
-        max_len = match.get("max_length")
-        if max_len is not None:
-            if text_length > int(max_len):
-                return False
-
-        # exclude_keywords condition (any match disqualifies)
-        excl = match.get("exclude_keywords", [])
-        if excl and any(kw.lower() in text_lower for kw in excl):
-            return False
-
-        return True
-
     def _apply_model_routing(self, api_messages: list) -> None:
         """Apply model routing rules based on message content (once per turn).
 
@@ -8881,6 +8851,9 @@ class AIAgent:
 
         Rules are checked in list order; first match wins.  A rule without
         match conditions acts as the final default.
+
+        Now delegates to SmartRouter.route_with_rules() for the full
+        pipeline: rules → legacy → capability-aware fallback.
         """
         if getattr(self, "_routing_applied", False):
             return
@@ -8893,16 +8866,6 @@ class AIAgent:
         if getattr(self, "_disable_model_routing", False):
             return
         if getattr(self, "_fallback_activated", False):
-            return
-
-        try:
-            from hermes_cli.config import load_config
-            config = load_config()
-            route_config = config.get("model_routing", {})
-        except Exception:
-            return
-
-        if not route_config:
             return
 
         # —— Extract user message and image flag ——
@@ -8927,109 +8890,27 @@ class AIAgent:
 
             break
 
-        text_lower = user_text.lower() if user_text else ""
-        text_length = len(user_text)
-
-        # —— Rule-based routing (new format) ——
-        rules = route_config.get("rules")
-        if rules and isinstance(rules, list):
-            for rule in rules:
-                if not isinstance(rule, dict):
-                    continue
-                model_name = rule.get("model", "")
-                if not model_name:
-                    continue
-
-                match = rule.get("match", {})
-                if not isinstance(match, dict) or not match:
-                    # No match conditions → default rule; handled below
-                    continue
-
-                if self._match_rule(match, has_image, text_lower, text_length):
-                    logger.debug(
-                        "model_routing: rule '%s' matched → %s",
-                        rule.get("name", "(unnamed)"), model_name,
-                    )
-                    self.model = model_name
-                    return
-
-            # No conditional rule matched — look for a default rule (no match)
-            for rule in rules:
-                if not isinstance(rule, dict):
-                    continue
-                model_name = rule.get("model", "")
-                if not model_name:
-                    continue
-                match = rule.get("match", {})
-                if not match or not isinstance(match, dict):
-                    logger.debug(
-                        "model_routing: default rule '%s' → %s",
-                        rule.get("name", "(unnamed)"), model_name,
-                    )
-                    self.model = model_name
-                    return
-
-            return
-
-        # —— Legacy format (vision / reasoning / default keys) ——
-        if has_image:
-            vision_cfg = route_config.get("vision", {})
-            if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
-                logger.debug(
-                    "model_routing: 检测到图片附件 → vision model: %s",
-                    vision_cfg["model"],
-                )
-                self.model = vision_cfg["model"]
-                return
-
-        # Vision keywords (legacy)
-        _vision_kw = ["看图", "图片", "截图", "识别图中", "这张图"]
-        if any(kw in text_lower for kw in _vision_kw):
-            vision_cfg = route_config.get("vision", {})
-            if isinstance(vision_cfg, dict) and vision_cfg.get("model"):
-                logger.debug(
-                    "model_routing: 视觉关键词匹配 → vision model: %s",
-                    vision_cfg["model"],
-                )
-                self.model = vision_cfg["model"]
-                return
-
-        # Reasoning keywords (legacy)
-        _reasoning_kw = ["分析", "推理", "证明", "思考"]
-        if any(kw in text_lower for kw in _reasoning_kw):
-            reasoning_cfg = route_config.get("reasoning", {})
-            if isinstance(reasoning_cfg, dict) and reasoning_cfg.get("model"):
-                logger.debug(
-                    "model_routing: 推理关键词匹配 → reasoning model: %s",
-                    reasoning_cfg["model"],
-                )
-                self.model = reasoning_cfg["model"]
-                return
-
-        # Default (legacy)
-        default_cfg = route_config.get("default", {})
-        if isinstance(default_cfg, dict) and default_cfg.get("model"):
-            logger.debug(
-                "model_routing: 使用默认路由模型: %s",
-                default_cfg["model"],
-            )
-            self.model = default_cfg["model"]
-
-        # ── SmartRouter v2 fallback ──────────────────────────────────────
-        # If no rule matched and model_routing is not configured, use
-        # SmartRouter v2's capability-aware routing to select the best model.
-        #
-        # Skip when explicit model_routing rules exist (user intent to
-        # control routing manually).
-        _r_cfg = self.config.get("model_routing") or self.config.get("agent", {}).get("routing", {})
-        if (_r_cfg.get("rules") if isinstance(_r_cfg, dict) else False):
-            return
-
+        # —— Delegate to SmartRouter route_with_rules() ——
         try:
-            from agent.zhineng_luyou import SmartRouter
+            from agent.zhineng_luyou import SmartRouter, RoutingRule
             from hermes_cli.config import load_config
 
             cfg = load_config()
+            route_config = cfg.get("model_routing", {}) or {}
+
+            # Parse rules (new format) and legacy config
+            rules_list: list[RoutingRule] = []
+            raw_rules = route_config.get("rules") if isinstance(route_config, dict) else None
+            if raw_rules and isinstance(raw_rules, list):
+                for r in raw_rules:
+                    if isinstance(r, dict):
+                        rules_list.append(RoutingRule.from_dict(r))
+
+            legacy_cfg = route_config if isinstance(route_config, dict) else None
+
+            if not rules_list and not legacy_cfg:
+                # No routing config at all — skip
+                return
 
             # Cache SmartRouter instance per config hash.
             # Rebuild only when config changes (~100ms save per call).
@@ -9046,33 +8927,24 @@ class AIAgent:
                 _cache["_key"] = _cfg_key
             router = _cache["_router"]
 
-            # Extract user message for capability analysis
-            user_text = ""
-            for msg in reversed(api_messages):
-                if msg.get("role") != "user":
-                    continue
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    text_parts = [
-                        p.get("text", "")
-                        for p in content
-                        if isinstance(p, dict) and p.get("type") == "text"
-                    ]
-                    user_text = " ".join(text_parts)
-                else:
-                    user_text = content
-                break
+            # Unified routing
+            result = router.route_with_rules(
+                user_message=user_text,
+                rules=rules_list or None,
+                legacy_cfg=legacy_cfg,
+                has_image=has_image,
+                session_turn_count=getattr(self, "_turn_count", 0),
+            )
 
-            result = router.route(user_text)
+            if not result:
+                return
+
             new_provider = result.provider
             new_model = result.model
-
             current_provider = getattr(self, "provider", "auto") or "auto"
 
             if new_provider and new_provider != current_provider:
                 # Provider changed — validate auth before switching.
-                # resolve_provider_client() uses provider + api_key to
-                # determine base_url + httpx client.
                 from agent.auxiliary_client import resolve_provider_client
                 _api_key = getattr(self, "api_key", None)
                 _resolved_client, _ = resolve_provider_client(
@@ -9081,7 +8953,6 @@ class AIAgent:
                     model=new_model,
                 )
                 if _resolved_client is not None:
-                    # Provider switch succeeded → update both.
                     self.provider = new_provider
                     self.model = new_model
                     logger.debug(
@@ -9089,25 +8960,25 @@ class AIAgent:
                         current_provider, new_provider, new_model,
                         result.tier.value,
                     )
+                    return
                 else:
-                    # Auth unavailable for the target provider.
-                    # Keep legacy default model+provider unchanged.
                     logger.debug(
                         "model_routing: SmartRouter wanted %s:%s but auth unavailable; "
                         "keeping %s:%s",
                         new_provider, new_model,
                         current_provider, getattr(self, "model", ""),
                     )
-            else:
+            elif new_model:
                 # Same provider — only update model (safe within one provider).
                 self.model = new_model
                 logger.debug(
-                    "model_routing: SmartRouter v2 → %s:%s (%s)",
-                    new_provider, new_model, result.tier.value,
+                    "model_routing: SmartRouter → %s:%s (%s)",
+                    new_provider or current_provider, new_model, result.reason,
                 )
+
         except Exception as ex:
-            # SmartRouter unavailable: keep existing model (already set above)
-            logger.debug("model_routing: SmartRouter v2 skipped: %s", ex)
+            # Routing unavailable: keep existing model
+            logger.debug("model_routing: SmartRouter skipped: %s", ex)
 
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Build the keyword arguments dict for the active API mode."""
