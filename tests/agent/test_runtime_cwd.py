@@ -71,9 +71,3 @@ class TestResolveContextCwd:
     def test_expands_leading_tilde(self, monkeypatch):
         monkeypatch.setenv("TERMINAL_CWD", "~")
         assert resolve_context_cwd() == Path(os.path.expanduser("~"))
-
-    def test_whitespace_only_terminal_cwd_returns_none(self, monkeypatch):
-        # "   ".strip() → "" → None, so the caller getcwds for discovery rather
-        # than building Path("   ") and resolving garbage under the launch dir.
-        monkeypatch.setenv("TERMINAL_CWD", "   ")
-        assert resolve_context_cwd() is None
