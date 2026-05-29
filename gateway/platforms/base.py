@@ -2560,6 +2560,37 @@ class BasePlatformAdapter(ABC):
         return await self.send(chat_id=chat_id, content=text, reply_to=reply_to, metadata=metadata)
 
     @staticmethod
+    def validate_media_delivery_path(path: str) -> Optional[str]:
+        """Return a resolved path if it is safe for native attachment upload."""
+        return validate_media_delivery_path(path)
+
+    @staticmethod
+    def filter_media_delivery_paths(media_files) -> List[Tuple[str, bool]]:
+        """Drop unsafe MEDIA paths and normalize accepted paths."""
+        safe_media: List[Tuple[str, bool]] = []
+        for media_path, is_voice in media_files or []:
+            raw = str(media_path)
+            safe_path = validate_media_delivery_path(raw)
+            if safe_path:
+                safe_media.append((safe_path, bool(is_voice)))
+            else:
+                logger.warning("Skipping unsafe MEDIA directive path: %s", _log_safe_path(raw))
+        return safe_media
+
+    @staticmethod
+    def filter_local_delivery_paths(file_paths) -> List[str]:
+        """Drop unsafe bare local file paths and normalize accepted paths."""
+        safe_paths: List[str] = []
+        for file_path in file_paths or []:
+            raw = str(file_path)
+            safe_path = validate_media_delivery_path(raw)
+            if safe_path:
+                safe_paths.append(safe_path)
+            else:
+                logger.warning("Skipping unsafe local file path: %s", _log_safe_path(raw))
+        return safe_paths
+
+    @staticmethod
     def extract_media(content: str) -> Tuple[List[Tuple[str, bool]], str]:
         """
         Extract MEDIA:<path> tags and [[audio_as_voice]] directives from response text.
@@ -2607,7 +2638,12 @@ class BasePlatformAdapter(ABC):
                 path = path[1:-1].strip()
             path = path.lstrip("`\"'").rstrip("`\"',.;:)}]")
             if path:
-                media.append((os.path.expanduser(path), has_voice_tag))
+                try:
+                    media.append((os.path.expanduser(path), has_voice_tag))
+                except (OSError, RuntimeError, ValueError):
+                    # Skip a crafted ~\x00 path rather than aborting extraction
+                    # and dropping every other attachment in the response.
+                    continue
 
         # Remove the delivered MEDIA tags from the user-visible text. Mask
         # ``cleaned`` (same length, so offsets line up with it), find the real
