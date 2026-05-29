@@ -4,6 +4,49 @@
 
 ---
 
+## v0.14.0+cn.2 (2026-05-29) — 双路由统一 + openrouter_min_coding_score 修复
+
+### Bug 修复
+
+- **`AIAgent.__init__()` 缺少 `openrouter_min_coding_score` 参数**：`tools/delegate_tool.py` 创建子 Agent 时传入 `openrouter_min_coding_score`，但构造函数未接收该参数导致 `TypeError`。修复：添加参数并赋值。
+
+### 双路由统一：SmartRouter 接管 model_routing
+
+**问题**：`run_agent.py` 中 `_apply_model_routing()` 与 `agent/zhineng_luyou.py` 的 `SmartRouter.route()` 各自独立实现路由逻辑，导致规则解析、关键词匹配、兜底策略三套代码并行维护，难以测试和演进。
+
+**方案**：将 `RoutingRule` 数据类、`_match_rule()` 静态方法、`route_with_rules()` 统一方法全部归入 `SmartRouter`，`run_agent.py` 的 `_apply_model_routing()` 简化为调用 `SmartRouter.route_with_rules()` 的薄封装。
+
+#### 核心变更
+
+| 变更 | 之前 | 之后 |
+|------|------|------|
+| 路由入口 | 3 个方法：`_match_rule()` + `_apply_model_routing()` + `SmartRouter.route()` | 1 个方法：`SmartRouter.route_with_rules()` |
+| 代码分布 | `run_agent.py` ~270 行 + `zhineng_luyou.py` 各自独立 | `zhineng_luyou.py` ~220 行统一管理 |
+| 规则格式 | 两套规则解析逻辑 | 统一 `route_with_rules()` 按序处理：rules → legacy → capability-aware fallback |
+| 关键字检测 | `run_agent.py` 硬编码 6 个关键字列表 | `RoutingRule.match.keywords` 配置化 |
+| 跨规则切换 | 旧格式到 SmartRouter 需手动 `setattr` | `route_with_rules()` 一步切换，自动处理 provider 安全切换 |
+
+#### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `agent/zhineng_luyou.py` | +`RoutingRule` 数据类 (from_dict)、+`_match_rule()` 静态方法、+`route_with_rules()` 方法 (183 行新增) |
+| `run_agent.py` | +`openrouter_min_coding_score` 参数；`_apply_model_routing()` 重构为 SmartRouter 调用 (~270→~165 行)；移除 `_match_rule()` 方法 |
+
+#### 向后兼容
+
+- 无 `model_routing.rules` 时：自动回退 legacy 格式（`vision/reasoning/default` 键），行为不变
+- 无任何 `model_routing` 配置时：回退 `SmartRouter.route()` 能力感知路由
+- 所有旧配置无需修改
+
+#### Commit
+```
+04c2d7a67 fix(cn): unify model_routing into SmartRouter; fix openrouter_min_coding_score TypeError
+2 files changed, 222 insertions(+), 168 deletions(-)
+```
+
+---
+
 ## v0.14.0+cn.1 (2026-05-27) — SmartRouter v2 + 运行时集成
 
 ### SmartRouter v2 重构 (`agent/zhineng_luyou.py`, ~850 行)
