@@ -6180,6 +6180,31 @@ class GatewayRunner:
             return YuanbaoAdapter(config)
 
         return None
+
+    def _adapter_enforces_own_access_policy(self, platform: Optional[Platform]) -> bool:
+        """Whether the adapter for *platform* gates access at intake itself.
+
+        Mirrors ``BasePlatformAdapter.enforces_own_access_policy``. Adapters
+        such as WeCom, Weixin, Yuanbao, and QQBot evaluate their documented
+        ``dm_policy`` / ``group_policy`` / ``allow_from`` config before a
+        message is dispatched to the gateway, so a message that reaches
+        ``_is_user_authorized`` has already been authorized by the adapter.
+        Defaults to ``False`` when the adapter is unknown or doesn't expose
+        the flag.
+        """
+        if not platform:
+            return False
+        # Some test helpers build a bare GatewayRunner via object.__new__ and
+        # never set ``adapters``; treat a missing/empty map as "no adapter"
+        # rather than raising (see pitfalls.md #17).
+        adapters = getattr(self, "adapters", None)
+        if not adapters:
+            return False
+        adapter = adapters.get(platform)
+        if adapter is None:
+            return False
+        return bool(getattr(adapter, "enforces_own_access_policy", False))
+
     def _is_user_authorized(self, source: SessionSource) -> bool:
         """
         Check if a user is authorized to use the bot.
