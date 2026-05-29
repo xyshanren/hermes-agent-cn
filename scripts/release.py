@@ -144,6 +144,8 @@ AUTHOR_MAP = {
     "202622897+ticketclosed-wontfix@users.noreply.github.com": "ticketclosed-wontfix",
     "wuxuebin1993@gmail.com": "victorGPT",
     "211828103+julio-cloudvisor@users.noreply.github.com": "julio-cloudvisor",
+    "17778+kweiner@users.noreply.github.com": "kweiner",
+    "223516181+faisfamilytravel@users.noreply.github.com": "faisfamilytravel",
     # teknium (multiple emails)
     "teknium1@gmail.com": "teknium1",
     "kenyon1977@gmail.com": "kenyonxu",
