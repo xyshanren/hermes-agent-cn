@@ -1,14 +1,7 @@
 from pathlib import Path
 import tomllib
 
-import pytest
-
-# setuptools is declared in the [dev] extra and is the build backend, but
-# guard the import so a runner without it skips these packaging checks
-# instead of erroring out collection for the whole shard (it used to be
-# picked up ambiently from the CI image; newer ubuntu-latest images don't
-# ship it in the test venv).
-find_packages = pytest.importorskip("setuptools", exc_type=ImportError).find_packages
+from setuptools import find_packages
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
