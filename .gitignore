@@ -50,11 +50,24 @@ cli-config.yaml
 # Skills Hub state (lives in ~/.hermes/skills/.hub/ at runtime, but just in case)
 skills/.hub/
 ignored/
+
+# AtomCode local config (graph.bin, per-machine MCP/hook settings)
+.atomcode/
 .worktrees/
 environments/benchmarks/evals/
 
 # Web UI build output
 hermes_cli/web_dist/
+
+# Release script temp files
+.release_notes.md
+mini-swe-agent/
+
+# Nix
+.direnv/
+.nix-stamps/
+result
+website/static/api/skills-index.json
 
 # Web UI assets — synced from @nous-research/ui at build time via
 # `npm run sync-assets` (see web/package.json).
@@ -75,3 +88,6 @@ hermes_cli/tui_dist/*
 hermes_cli/scripts/
 docs/superpowers/*
 graphify-out/
+
+# AtomCode local-scope configs (machine-specific)
+.atomcode/local/
