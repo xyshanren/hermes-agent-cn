@@ -539,7 +539,7 @@ main.py (hermes / hermes chat)
 | **本地模型** | 无 | 嵌入式 CPU 模型 (离线可用) |
 | **一键配置** | 手动 setup | `quickstart` 自动检测 |
 | **中文支持** | 英文为主 | 全中文界面 + 提示词 |
-| **聊天平台** | Telegram/Discord | 钉钉/飞书/企业微信/QQ 等 |
+| **聊天平台** | Telegram/Discord/Slack/WhatsApp 等 12 个 | 钉钉/飞书/企业微信/QQ 等（国外已裁剪） |
 
 ---
 

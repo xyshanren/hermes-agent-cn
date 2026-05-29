@@ -1,0 +1,44 @@
+# 裁剪记录
+# 以下文件已在 downstream 删除，合并上游更新时请跳过/忽略。
+# 格式: [status] relative/path  # 原因
+# status: DEL = 已删除, SED = 替换为空文件
+
+## 平台模块 (11 个)
+DEL  gateway/platforms/discord.py              # 不需要的聊天平台
+DEL  gateway/platforms/telegram.py             # 不需要的聊天平台
+DEL  gateway/platforms/telegram_network.py     # telegram 依赖
+DEL  gateway/platforms/slack.py                # 不需要的聊天平台
+DEL  gateway/platforms/whatsapp.py             # 不需要的聊天平台
+DEL  gateway/platforms/signal.py               # 不需要的聊天平台
+DEL  gateway/platforms/signal_rate_limit.py    # signal 依赖
+DEL  gateway/platforms/sms.py                  # 不需要的聊天平台
+DEL  gateway/platforms/bluebubbles.py          # 不需要的聊天平台
+DEL  gateway/platforms/matrix.py               # 不需要的聊天平台
+DEL  gateway/platforms/mattermost.py           # 不需要的聊天平台
+
+## 工具模块 (2 个)
+DEL  tools/x_search_tool.py                    # 不需要的搜索工具 (X/Twitter)
+DEL  tools/discord_tool.py                     # 不需要的 discord 工具
+
+## 脚本 (2 个)
+DEL  scripts/discord-voice-doctor.py           # discord 语音调试脚本
+DEL  scripts/kill_modal.sh                     # 无用的弹窗清理脚本
+
+## 测试文件 (12 个)
+DEL  tests/tools/test_x_search_tool.py         # 测试被删的 x_search
+DEL  tests/tools/test_send_message_tool.py     # 测试被删的 signal 逻辑
+DEL  tests/gateway/conftest.py                 # 测试被删的 telegram
+DEL  tests/gateway/test_allowed_channels_widening.py  # 依赖被删的平台
+DEL  tests/gateway/test_dm_topics.py           # 依赖被删的 telegram
+DEL  tests/gateway/test_media_download_retry.py       # 依赖被删的平台
+DEL  tests/gateway/test_send_image_file.py     # 依赖被删的平台
+DEL  tests/gateway/test_send_multiple_images.py       # 依赖被删的平台
+DEL  tests/gateway/test_text_batching.py       # 依赖被删的平台
+DEL  tests/gateway/test_voice_command.py       # 依赖被删的 discord
+DEL  tests/gateway/test_ws_auth_retry.py       # 依赖被删的平台
+DEL  tests/integration/test_voice_channel_flow.py     # 依赖被删的 discord
+
+## 内部引用清理 (文件本身保留，删除了对以上模块的引用)
+SED  gateway/run.py                            # 删除了被删平台的环境变量读取
+SED  hermes_cli/tools_config.py                # 删除了 x_search / xai 的残留引用
+SED  tools/send_message_tool.py                # 删除了被删平台的 _send_* 函数
