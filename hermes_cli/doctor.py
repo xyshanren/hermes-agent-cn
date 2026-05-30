@@ -749,6 +749,7 @@ def run_doctor(args):
                 "huggingface",
                 "lmstudio",
                 "nous",
+                "nvidia",
             }
             if (
                 default_model
