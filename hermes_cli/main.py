@@ -10352,7 +10352,7 @@ def _cmd_update_pip(args):
 
     print(f"→ Running: {' '.join(cmd)}")
     run_kwargs = {}
-    if export_virtualenv:
+    if sys.prefix != sys.base_prefix:
         run_kwargs["env"] = {**os.environ, "VIRTUAL_ENV": sys.prefix}
     result = subprocess.run(cmd, **run_kwargs)
     if result.returncode != 0:
