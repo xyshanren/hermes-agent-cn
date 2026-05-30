@@ -91,13 +91,10 @@ export async function readClipboardText(
   return null
 }
 
-// PowerShell on Windows/WSL decodes piped stdin with the system ANSI code
-// page (e.g. CP936), not UTF-8, so $input-based writes mangle CJK/emoji. We
-// instead base64-encode the UTF-8 bytes and pass them as a -Command argument,
-// decoding with UTF8.GetString — this removes the stdin-encoding variable
-// entirely (also immune to BOM injection on redirect). PowerShell entries set
-// stdin=false; every other backend reads UTF-8 stdin natively.
-type WriteCmd = { args: readonly string[]; cmd: string; stdin: boolean }
+type WriteCmd = { args: readonly string[]; cmd: string } & (
+  | { stdin: true }
+  | { stdin: false; psScript: (b64: string) => string }
+)
 
 function _powershellWriteScript(b64: string): string {
   return `Set-Clipboard -Value ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}')))`
@@ -112,13 +109,18 @@ function writeClipboardCommands(
   }
 
   if (platform === 'win32') {
-    return [{ cmd: 'powershell', args: ['-NoProfile', '-NonInteractive'], stdin: false }]
+    return [{ cmd: 'powershell', args: ['-NoProfile', '-NonInteractive'], stdin: false, psScript: _powershellWriteScript }]
   }
 
   const attempts: WriteCmd[] = []
 
   if (env.WSL_INTEROP || env.WSL_DISTRO_NAME) {
-    attempts.push({ cmd: 'powershell.exe', args: ['-NoProfile', '-NonInteractive'], stdin: false })
+    attempts.push({
+      cmd: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive'],
+      stdin: false,
+      psScript: _powershellWriteScript
+    })
   }
 
   if (env.WAYLAND_DISPLAY) {
@@ -163,7 +165,7 @@ export async function writeClipboardText(
           child.stdin?.end(text)
         } else {
           const b64 = Buffer.from(text, 'utf8').toString('base64')
-          const script = _powershellWriteScript(b64)
+          const script = cmdEntry.psScript(b64)
           const child = start(cmdEntry.cmd, [...cmdEntry.args, '-Command', script], { stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true })
           child.once('error', () => resolve(false))
           child.once('close', (code: number | null) => resolve(code === 0))
