@@ -22,6 +22,24 @@ logger = logging.getLogger(__name__)
 _FEISHU_TARGET_RE = re.compile(r"^\s*((?:oc|ou|on|chat|open)_[-A-Za-z0-9]+)(?::([-A-Za-z0-9_]+))?\s*$")
 _WEIXIN_TARGET_RE = re.compile(r"^\s*((?:wxid|gh|v\d+|wm|wb)_[A-Za-z0-9_-]+|[A-Za-z0-9._-]+@chatroom|filehelper)\s*$")
 _YUANBAO_TARGET_RE = re.compile(r"^\s*((?:group|direct):[^:]+)\s*$")
+# Discord snowflake IDs are numeric, same regex pattern as Telegram topic targets.
+_NUMERIC_TOPIC_RE = _TELEGRAM_TOPIC_TARGET_RE
+# Platforms that address recipients by phone number and accept E.164 format
+# (with a leading '+'). Without this, "+15551234567" fails the isdigit() check
+# below and falls through to channel-name resolution, which has no way to
+# resolve a raw phone number. Keeping the '+' preserves the E.164 form that
+# downstream adapters (signal, etc.) expect.
+_PHONE_PLATFORMS = frozenset({"signal", "sms", "whatsapp"})
+_E164_TARGET_RE = re.compile(r"^\s*\+(\d{7,15})\s*$")
+# Email addresses — a valid email like "user@domain.com" should be treated as
+# an explicit target for the email platform, not fall through to channel-name
+# resolution which has no way to resolve a raw address.
+_EMAIL_TARGET_RE = re.compile(r"^\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$")
+# Most platforms read their home channel from "<PLATFORM>_HOME_CHANNEL", but a
+# few diverge. Email reads EMAIL_HOME_ADDRESS (see gateway/config.py), so the
+# generic "<PLATFORM>_HOME_CHANNEL" hint would point users at a variable that is
+# never read. Map the exceptions so the error guidance is actually actionable.
+_HOME_CHANNEL_ENV_OVERRIDES = {"email": "EMAIL_HOME_ADDRESS"}
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".3gp"}
 _AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac"}
@@ -199,10 +217,13 @@ def _handle_send(args):
             chat_id = home.chat_id
             used_home_channel = True
         else:
+            home_env = _HOME_CHANNEL_ENV_OVERRIDES.get(
+                platform_name, f"{platform_name.upper()}_HOME_CHANNEL"
+            )
             return json.dumps({
                 "error": f"No home channel set for {platform_name} to determine where to send the message. "
                 f"Either specify a channel directly with '{platform_name}:CHANNEL_NAME', "
-                f"or set a home channel via: hermes config set {platform_name.upper()}_HOME_CHANNEL <channel_id>"
+                f"or set a home channel via: hermes config set {home_env} <channel_id>"
             })
 
     duplicate_skip = _maybe_skip_cron_duplicate_send(platform_name, chat_id, thread_id)
