@@ -2416,7 +2416,9 @@ def _has_sticky_block(conn: sqlite3.Connection, task_id: str) -> bool:
     return bool(row) and row["kind"] == "blocked"
 
 
-def recompute_ready(conn: sqlite3.Connection) -> int:
+def recompute_ready(
+    conn: sqlite3.Connection, failure_limit: int = None,
+) -> int:
     """Promote ``todo`` tasks to ``ready`` when all parents are ``done`` or ``archived``.
 
     Returns the number of tasks promoted.  Safe to call inside or outside
@@ -2424,13 +2426,29 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
 
     ``blocked`` tasks are also considered for promotion (so a task
     blocked purely by a parent dependency unblocks itself when the
-    parent completes), *except* when the most recent block event was a
-    worker-initiated ``kanban_block`` — those stay blocked until an
-    explicit ``kanban_unblock`` (#28712).  Without that guard, a
-    ``review-required`` handoff would auto-respawn, the fresh worker
-    would find nothing to do, exit cleanly, get recorded as a protocol
-    violation, and the cycle would repeat indefinitely.
+    parent completes), *except* in two cases:
+
+    1. The most recent block event was a worker-initiated
+       ``kanban_block`` — those stay blocked until an explicit
+       ``kanban_unblock`` (#28712).
+
+    2. The task's ``consecutive_failures`` has reached the effective
+       failure limit.  This prevents infinite retry loops when a task
+       repeatedly exhausts its iteration budget: without this guard the
+       counter would reset on every recovery cycle and the circuit
+       breaker could never trip (#35072).
+
+    The effective failure limit resolves in the same order as the
+    circuit breaker in ``_record_task_failure`` so the two never
+    disagree about when a task is permanently blocked:
+
+      1. per-task ``max_retries`` if set
+      2. caller-supplied ``failure_limit`` (the dispatcher passes the
+         ``kanban.failure_limit`` config value through ``dispatch_once``)
+      3. ``DEFAULT_FAILURE_LIMIT``
     """
+    if failure_limit is None:
+        failure_limit = DEFAULT_FAILURE_LIMIT
     promoted = 0
     with write_txn(conn):
         todo_rows = conn.execute(
@@ -2456,6 +2474,22 @@ def recompute_ready(conn: sqlite3.Connection) -> int:
                 # this is effectively an auto-unblock (circuit-breaker
                 # recovery; worker-initiated blocks are skipped above).
                 if cur_status == "blocked":
+                    # Don't auto-recover tasks that have hit the
+                    # circuit-breaker failure limit.  Without this
+                    # guard, a task that repeatedly exhausts its
+                    # iteration budget would cycle forever:
+                    # block → auto-recover → respawn → budget
+                    # exhausted → block → …  The counter must also
+                    # be preserved so the breaker can accumulate
+                    # across recovery cycles.
+                    failures = int(row["consecutive_failures"] or 0)
+                    task_limit = row["max_retries"]
+                    effective_limit = (
+                        int(task_limit) if task_limit is not None
+                        else int(failure_limit)
+                    )
+                    if failures >= effective_limit:
+                        continue
                     conn.execute(
                         "UPDATE tasks SET status = 'ready', "
                         "consecutive_failures = 0, last_failure_error = NULL "
@@ -5368,7 +5402,7 @@ def dispatch_once(
     if _crash_auto_blocked:
         result.auto_blocked.extend(_crash_auto_blocked)
     result.timed_out = enforce_max_runtime(conn)
-    result.promoted = recompute_ready(conn)
+    result.promoted = recompute_ready(conn, failure_limit=failure_limit)
 
     # Count tasks already running so max_spawn enforces concurrency rather
     # than a per-tick spawn budget. See the docstring above for the full
