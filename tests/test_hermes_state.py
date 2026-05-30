@@ -7,12 +7,21 @@ from pathlib import Path
 from hermes_state import SessionDB
 
 
-class _NoTrigramCursor(sqlite3.Cursor):
-    """Simulate a SQLite build with FTS5 but without the trigram tokenizer."""
+class _NoFtsCursor(sqlite3.Cursor):
+    """Simulate a SQLite build without the fts5 module."""
+
+    def execute(self, sql, parameters=()):
+        probe = sql.strip()
+        if probe in (
+            "SELECT * FROM messages_fts LIMIT 0",
+            "SELECT * FROM messages_fts_trigram LIMIT 0",
+        ):
+            raise sqlite3.OperationalError("no such table: " + probe.split()[-3])
+        return super().execute(sql, parameters)
 
     def executescript(self, sql_script):
-        if "tokenize='trigram'" in sql_script:
-            raise sqlite3.OperationalError("no such tokenizer: trigram")
+        if "USING fts5" in sql_script:
+            raise sqlite3.OperationalError("no such module: fts5")
         return super().executescript(sql_script)
 
 
