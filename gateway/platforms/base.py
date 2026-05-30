@@ -815,6 +815,270 @@ def cache_video_from_bytes(data: bytes, ext: str = ".mp4") -> str:
 # ---------------------------------------------------------------------------
 
 DOCUMENT_CACHE_DIR = get_hermes_dir("cache/documents", "document_cache")
+SCREENSHOT_CACHE_DIR = get_hermes_dir("cache/screenshots", "browser_screenshots")
+_HERMES_HOME = get_hermes_home()
+MEDIA_DELIVERY_ALLOW_DIRS_ENV = "HERMES_MEDIA_ALLOW_DIRS"
+MEDIA_DELIVERY_TRUST_RECENT_ENV = "HERMES_MEDIA_TRUST_RECENT_FILES"
+MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV = "HERMES_MEDIA_TRUST_RECENT_SECONDS"
+# Strict mode toggles the original allowlist+recency path-validation behavior.
+# Off by default — symmetric with inbound (we accept any document type the
+# user uploads), and with the denylist still blocking obvious credential /
+# system paths. Operators running public-facing gateways where prompt
+# injection from one user could exfiltrate the host's secrets to that same
+# user should set this to true.
+MEDIA_DELIVERY_STRICT_ENV = "HERMES_MEDIA_DELIVERY_STRICT"
+MEDIA_DELIVERY_SAFE_ROOTS = (
+    IMAGE_CACHE_DIR,
+    AUDIO_CACHE_DIR,
+    VIDEO_CACHE_DIR,
+    DOCUMENT_CACHE_DIR,
+    SCREENSHOT_CACHE_DIR,
+    _HERMES_HOME / "image_cache",
+    _HERMES_HOME / "audio_cache",
+    _HERMES_HOME / "video_cache",
+    _HERMES_HOME / "document_cache",
+    _HERMES_HOME / "browser_screenshots",
+    # Canonical cache layout — listed alongside the legacy *_cache dirs so
+    # generated artifacts deliver on installs that have both (#31733).
+    _HERMES_HOME / "cache" / "images",
+    _HERMES_HOME / "cache" / "audio",
+    _HERMES_HOME / "cache" / "videos",
+    _HERMES_HOME / "cache" / "documents",
+    _HERMES_HOME / "cache" / "screenshots",
+)
+
+# Default recency window for trusting freshly-produced files (seconds).
+# The agent's actual work generally completes well inside 10 minutes; legitimate
+# build artifacts (PDFs from pandoc, plots from matplotlib, etc.) almost always
+# land seconds before delivery. Old system files (/etc/passwd, ~/.ssh/id_rsa,
+# stray credentials) have mtimes measured in days or months — well outside this
+# window — so prompt-injection paths pointing at pre-existing host files are
+# still rejected.
+_MEDIA_DELIVERY_TRUST_RECENT_DEFAULT_SECONDS = 600
+
+# Hard denylist applied even when a path would otherwise pass recency trust.
+# These prefixes hold credentials, system state, or process introspection that
+# should never be uploaded as a gateway attachment, regardless of how new the
+# file looks. The cache-dir allowlist still beats this — an operator-configured
+# allowed root can intentionally live under one of these prefixes (rare, but
+# their choice).
+_MEDIA_DELIVERY_DENIED_PREFIXES = (
+    "/etc",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/root",
+    "/boot",
+    "/var/log",
+    "/var/lib",
+    "/var/run",
+)
+
+# Within $HOME we additionally deny common credential / config directories.
+# Resolved at check time against the live $HOME so containers and alt-home
+# setups work correctly.
+_MEDIA_DELIVERY_DENIED_HOME_SUBPATHS = (
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".config",
+    ".azure",
+    ".gcloud",
+    "Library/Keychains",  # macOS
+)
+
+
+def _media_delivery_allowed_roots() -> List[Path]:
+    """Return roots from which model-emitted local media may be delivered."""
+    roots = [Path(root) for root in MEDIA_DELIVERY_SAFE_ROOTS]
+    extra_roots = os.environ.get(MEDIA_DELIVERY_ALLOW_DIRS_ENV, "")
+    for chunk in extra_roots.split(os.pathsep):
+        for raw_root in chunk.split(","):
+            raw_root = raw_root.strip()
+            if not raw_root:
+                continue
+            root = Path(os.path.expanduser(raw_root))
+            if root.is_absolute():
+                roots.append(root)
+    return roots
+
+
+def _media_delivery_recency_seconds() -> float:
+    """Return the recency window for trusting freshly-produced files.
+
+    0 disables recency-based trust entirely (pure-allowlist mode).
+    """
+    raw = os.environ.get(MEDIA_DELIVERY_TRUST_RECENT_ENV, "1").strip().lower()
+    if raw in ("0", "false", "no", "off", ""):
+        return 0.0
+    try:
+        custom = os.environ.get(MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV, "").strip()
+        if custom:
+            seconds = float(custom)
+            return max(0.0, seconds)
+    except (TypeError, ValueError):
+        pass
+    return float(_MEDIA_DELIVERY_TRUST_RECENT_DEFAULT_SECONDS)
+
+
+def _media_delivery_strict_mode() -> bool:
+    """Return True when path validation should require allowlist/recency match.
+
+    Off by default. In non-strict mode, ``validate_media_delivery_path``
+    accepts any existing regular file that isn't under the credential /
+    system-path denylist — restoring the pre-#29523 behavior for the
+    single-user case. Strict mode preserves the original
+    allowlist+recency-window logic for operators running public-facing
+    gateways where prompt injection from one user shouldn't be able to
+    exfiltrate the host's secrets to that same user.
+    """
+    raw = os.environ.get(MEDIA_DELIVERY_STRICT_ENV, "0").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _media_delivery_denied_paths() -> List[Path]:
+    """Return absolute denylist paths under which delivery is never allowed."""
+    denied = [Path(p) for p in _MEDIA_DELIVERY_DENIED_PREFIXES]
+    home = Path(os.path.expanduser("~"))
+    for sub in _MEDIA_DELIVERY_DENIED_HOME_SUBPATHS:
+        denied.append(home / sub)
+    # The Hermes home itself contains credentials (auth.json, .env) and
+    # configuration (config.yaml) — only the cache subdirectories under it
+    # are explicitly allowlisted above.
+    denied.append(_HERMES_HOME / ".env")
+    denied.append(_HERMES_HOME / "auth.json")
+    denied.append(_HERMES_HOME / "credentials")
+    denied.append(_HERMES_HOME / "config.yaml")
+    return denied
+
+
+def _path_under_denied_prefix(resolved: Path) -> bool:
+    """Return True if ``resolved`` lives under a deny-listed system path."""
+    for denied in _media_delivery_denied_paths():
+        try:
+            resolved_denied = denied.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if _path_is_within(resolved, resolved_denied) or resolved == resolved_denied:
+            return True
+    return False
+
+
+def _file_is_recently_produced(resolved: Path, window_seconds: float) -> bool:
+    """Return True if the file's mtime is within ``window_seconds`` of now.
+
+    Used as a session-scoped trust signal: agents almost always produce
+    delivery artifacts within seconds of asking to send them, while
+    prompt-injection paths pointing at pre-existing host files (/etc/passwd,
+    ~/.ssh/id_rsa) have mtimes measured in days or months.
+    """
+    if window_seconds <= 0:
+        return False
+    try:
+        mtime = resolved.stat().st_mtime
+    except OSError:
+        return False
+    return (time.time() - mtime) <= window_seconds
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def validate_media_delivery_path(path: str) -> Optional[str]:
+    """Return a safe absolute file path for native media delivery, else None.
+
+    Default mode (single-user / private gateway): accept any existing regular
+    file that isn't under the credential / system-path denylist
+    (``_MEDIA_DELIVERY_DENIED_PREFIXES`` + ``~/.ssh``, ``~/.aws``, etc.).
+    This matches the symmetry of inbound delivery — Telegram/Discord/Slack
+    will hand the agent any file the user uploads, and the agent can hand
+    back any file that isn't a credential.
+
+    Strict mode (opt-in via ``gateway.strict`` in ``config.yaml`` or
+    ``HERMES_MEDIA_DELIVERY_STRICT=1``): the file MUST live under a
+    Hermes-managed cache, under an operator-allowlisted root
+    (``HERMES_MEDIA_ALLOW_DIRS``), or be freshly produced inside the
+    configured recency window. Suitable for public-facing bots where
+    prompt injection from one user shouldn't be able to exfiltrate the
+    host's secrets to that same user.
+
+    Symlinks are resolved before any containment / denylist check.
+    """
+    if not path:
+        return None
+
+    candidate = str(path).strip()
+    if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in "`\"'":
+        candidate = candidate[1:-1].strip()
+    candidate = candidate.lstrip("`\"'").rstrip("`\"',.;:)}]")
+    if not candidate:
+        return None
+
+    try:
+        expanded = Path(os.path.expanduser(candidate))
+    except (OSError, RuntimeError, ValueError):
+        # expanduser raises ValueError("embedded null byte") for a ~\x00 path.
+        return None
+    if not expanded.is_absolute():
+        return None
+
+    try:
+        resolved = expanded.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+    if not resolved.is_file():
+        return None
+
+    # Cache / operator allowlist is always honored — these are unconditionally
+    # trusted regardless of mode.
+    for root in _media_delivery_allowed_roots():
+        try:
+            resolved_root = root.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if _path_is_within(resolved, resolved_root):
+            return str(resolved)
+
+    # Non-strict mode (default): accept anything not on the denylist.
+    # The denylist still blocks /etc, /proc, ~/.ssh, ~/.aws, ~/.hermes/.env,
+    # ~/.hermes/auth.json, etc. — so the obvious prompt-injection sites
+    # (``MEDIA:/etc/passwd``, ``MEDIA:~/.ssh/id_rsa``) remain rejected.
+    if not _media_delivery_strict_mode():
+        if _path_under_denied_prefix(resolved):
+            return None
+        return str(resolved)
+
+    # Strict mode: fall back to recency-based trust for freshly-produced
+    # files (e.g. ``pandoc -o /tmp/report.pdf`` or
+    # ``write_file("/home/user/report.pdf", ...)``). System paths and
+    # credential locations remain blocked even when "recent" — see
+    # ``_MEDIA_DELIVERY_DENIED_PREFIXES`` for the denylist.
+    window = _media_delivery_recency_seconds()
+    if window > 0 and not _path_under_denied_prefix(resolved):
+        if _file_is_recently_produced(resolved, window):
+            return str(resolved)
+
+    return None
+
+
+# Neutralise control chars and the Unicode line separators (NEL, LS, PS) that
+# str.splitlines() / log aggregators treat as breaks, so a model-emitted path
+# can't forge a second log line. Truncated to keep records bounded.
+_LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
+
+
+def _log_safe_path(path: str) -> str:
+    """Return a single-line, length-bounded path for log output."""
+    return _LOG_UNSAFE_CHARS.sub("?", str(path))[:200]
+
 
 SUPPORTED_DOCUMENT_TYPES = {
     ".pdf": "application/pdf",
