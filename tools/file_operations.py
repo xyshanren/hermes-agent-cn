@@ -144,6 +144,36 @@ def _has_bom(text: Optional[str]) -> bool:
     return bool(text) and text.startswith(_UTF8_BOM)
 
 
+# UTF-8 byte order mark. Some Windows editors (Notepad, older Visual Studio,
+# some PowerShell redirects) prepend this invisible 3-byte marker
+# (EF BB BF == U+FEFF) to UTF-8 text files. It renders as nothing but is a
+# real character at the start of the decoded string, so without handling it:
+#   - read_file would surface a stray U+FEFF as the first character (the
+#     model sees a phantom char before `import ...`), and
+#   - patch matches against the true first line would miss, and write_file
+#     would silently drop or double the marker on rewrite.
+# We strip it on read so the model sees clean content, and restore it on
+# write when the original file had one — exactly mirroring the line-ending
+# preservation above (detect on disk, preserve across the edit).
+_UTF8_BOM = "\ufeff"
+
+
+def _strip_bom(text: str) -> tuple[str, bool]:
+    """Return (text-without-leading-BOM, had_bom).
+
+    Only a single leading BOM is stripped; a BOM appearing mid-content is
+    left alone (it's legitimate data there, not a file marker).
+    """
+    if text and text.startswith(_UTF8_BOM):
+        return text[len(_UTF8_BOM):], True
+    return text, False
+
+
+def _has_bom(text: Optional[str]) -> bool:
+    """True if ``text`` begins with a UTF-8 BOM."""
+    return bool(text) and text.startswith(_UTF8_BOM)
+
+
 def _is_write_denied(path: str) -> bool:
     """Return True if path is on the write deny list."""
     return _shared_is_write_denied(path)
