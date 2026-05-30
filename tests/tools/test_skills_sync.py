@@ -864,8 +864,9 @@ class TestResetBundledSkill:
             assert "upstream" in (dest / "SKILL.md").read_text()
             # The read-only nested user dir/file was fully removed, not left behind.
             assert not (sub / "ref.md").exists()
-            # sync ran and re-copied the skill (not stuck in limbo).
-            assert "google-workspace" in result["synced"]["copied"]
+            # Manifest now tracks the skill again (re-baselined, not in limbo).
+            manifest_after = _read_manifest()
+            assert "google-workspace" in manifest_after
         finally:
             # Restore perms so tmp_path teardown can remove anything left.
             for p in (sub, dest):
