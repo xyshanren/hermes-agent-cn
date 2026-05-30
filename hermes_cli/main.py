@@ -10214,12 +10214,7 @@ def _cmd_update_pip(args):
     print(f"→ Current version: {__version__}")
     print("→ Checking PyPI for updates...")
 
-    from hermes_cli.managed_uv import ensure_uv, update_managed_uv
-
-    # Keep managed uv current before using it.
-    update_managed_uv()
-
-    uv = ensure_uv()
+    uv = shutil.which("uv")
     in_venv = sys.prefix != sys.base_prefix
     # pipx-managed installs live under .../pipx/venvs/<name>/...
     pipx_managed = "pipx" in sys.prefix.split(os.sep)
@@ -10257,7 +10252,7 @@ def _cmd_update_pip(args):
 
     print(f"→ Running: {' '.join(cmd)}")
     run_kwargs = {}
-    if sys.prefix != sys.base_prefix:
+    if export_virtualenv:
         run_kwargs["env"] = {**os.environ, "VIRTUAL_ENV": sys.prefix}
     result = subprocess.run(cmd, **run_kwargs)
     if result.returncode != 0:
