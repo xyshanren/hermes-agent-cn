@@ -687,8 +687,28 @@ class SessionDB:
         # FTS5 setup (separate because CREATE VIRTUAL TABLE can't be in executescript with IF NOT EXISTS reliably)
         try:
             cursor.execute("SELECT * FROM messages_fts LIMIT 0")
-        except sqlite3.OperationalError:
-            cursor.executescript(FTS_SQL)
+            self._fts_enabled = True
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc).lower():
+                raise
+            try:
+                cursor.executescript(FTS_SQL)
+                self._fts_enabled = True
+            except sqlite3.OperationalError as fts_exc:
+                err = str(fts_exc).lower()
+                if "fts5" not in err and "no such module" not in err:
+                    raise
+                logger.warning(
+                    "SQLite FTS5 unavailable for %s; full-text session search "
+                    "disabled. This usually means Hermes is running on an "
+                    "unsupported install (e.g. a pip-installed or pip-managed "
+                    "Python whose bundled SQLite lacks FTS5) rather than a "
+                    "mainline install. Some features may be missing or behave "
+                    "differently. Install the supported way: "
+                    "https://hermes-agent.nousresearch.com (underlying error: %s)",
+                    self.db_path,
+                    fts_exc,
+                )
 
         # Trigram FTS5 for CJK/substring search
         try:
