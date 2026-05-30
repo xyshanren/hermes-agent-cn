@@ -204,21 +204,11 @@ def run_oneshot(
         except Exception:
             pass
 
-    if failure is not None:
-        # Re-raise control-flow exceptions so the parent handles them as usual
-        # (Ctrl-C / explicit sys.exit() inside the agent).
-        if isinstance(failure, (KeyboardInterrupt, SystemExit)):
-            raise failure
-        real_stderr.write(f"hermes -z: agent failed: {failure}\n")
-        real_stderr.flush()
-        return 1
-
     if not (response or "").strip():
-        real_stderr.write("hermes -z: no final response was produced; treating the run as failed.\n")
-        real_stderr.flush()
+        sys.stderr.write("hermes -z: no final response was produced; treating the run as failed.\n")
+        sys.stderr.flush()
         return 1
 
-    assert response is not None  # narrowed by the empty-response guard above
     real_stdout.write(response)
     if not response.endswith("\n"):
         real_stdout.write("\n")
