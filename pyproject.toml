@@ -115,7 +115,7 @@ modal = ["modal==1.3.4"]
 daytona = ["daytona==0.155.0"]
 vercel = ["vercel==0.5.7"]
 hindsight = ["hindsight-client==0.6.1"]
-dev = ["debugpy==1.8.20", "pytest==9.0.2", "pytest-asyncio==1.3.0", "pytest-timeout==2.4.0", "mcp==1.26.0", "ty==0.0.21", "ruff==0.15.10", "setuptools==82.0.1"]
+dev = ["debugpy==1.8.20", "pytest==9.0.2", "pytest-asyncio==1.3.0", "pytest-timeout==2.4.0", "mcp==1.26.0", "starlette==1.0.1", "ty==0.0.21", "ruff==0.15.10", "setuptools==82.0.1"]  # starlette: CVE-2026-48710
 messaging = ["python-telegram-bot[webhooks]==22.6", "discord.py[voice]==2.7.1", "aiohttp==3.13.3", "brotlicffi==1.2.0.1", "slack-bolt==1.27.0", "slack-sdk==3.40.1", "qrcode==7.4.2"]
 cron = []  # croniter is now a core dependency; this extra kept for back-compat
 slack = ["slack-bolt==1.27.0", "slack-sdk==3.40.1", "aiohttp==3.13.3"]
@@ -140,12 +140,6 @@ pty = [
   "pywinpty==2.0.15; sys_platform == 'win32'",
 ]
 honcho = ["honcho-ai==2.0.1"]
-# Image resize recovery for the vision tools. Pillow is now a CORE dependency
-# (see the main `dependencies` list) since the byte/pixel shrink paths are on
-# the default vision-embed path and the mid-session lazy install deadlocked the
-# CLI under prompt_toolkit (#40490). This extra is kept as a no-op back-compat
-# alias so existing `pip install hermes-agent[vision]` invocations still resolve.
-vision = []
 # CVE-2026-48710 (BadHost): Starlette is pulled transitively by mcp's
 # sse-starlette / HTTP-SSE stack (and by fastapi in the `web` extra). Before
 # 1.0.1, a malformed Host header makes `request.url.path` desync from the path
@@ -154,14 +148,13 @@ vision = []
 # extra that exposes a Starlette-backed server surface so pip/uv can't resolve
 # a vulnerable pre-1.0.1 transitive. Bump in lockstep with uv.lock.
 mcp = ["mcp==1.26.0", "starlette==1.0.1"]  # starlette: CVE-2026-48710
-nemo-relay = ["nemo-relay==0.3"]
 homeassistant = ["aiohttp==3.13.3"]
 sms = ["aiohttp==3.13.3"]
 # Computer use — macOS background desktop control via cua-driver (MCP stdio).
 # The cua-driver binary itself is installed via `hermes tools` post-setup
 # (curl install script); this extra just pins the MCP client used to talk
 # to it, which is already provided by the `mcp` extra.
-computer-use = ["mcp==1.26.0"]
+computer-use = ["mcp==1.26.0", "starlette==1.0.1"]  # starlette: CVE-2026-48710
 acp = ["agent-client-protocol==0.9.0"]
 # mistral: extra REMOVED 2026-05-12 — `mistralai` PyPI project quarantined
 # after malicious 2.4.6 release (Mini Shai-Hulud worm). Every version of
@@ -221,7 +214,9 @@ youtube = [
   "youtube-transcript-api==1.2.4",
 ]
 # `hermes dashboard` (localhost SPA + API).  Not in core to keep the default install lean.
-web = ["fastapi==0.133.1", "uvicorn[standard]==0.41.0"]
+# starlette==1.0.1 pinned for CVE-2026-48710 (BadHost) — fastapi pulls Starlette
+# transitively and pre-1.0.1 is the vulnerable range. See the mcp extra above.
+web = ["fastapi==0.133.1", "uvicorn[standard]==0.41.0", "starlette==1.0.1"]
 all = [
   # Policy (2026-05-12): `[all]` includes only extras that genuinely
   # CAN'T be lazy-installed via `tools/lazy_deps.py` — i.e. things every
