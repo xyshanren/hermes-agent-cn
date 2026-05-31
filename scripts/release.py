@@ -1388,43 +1388,6 @@ AUTHOR_MAP = {
     # batch salvage PR #35758 (perf micro-fixes)
     "116212274+amathxbt@users.noreply.github.com": "amathxbt",  # PR #22155 (cache tool_output_limits)
     "takis312@hotmail.com": "ErnestHysa",  # PRs #32636/#32708 (MCP asyncio.sleep + O(n^2) watcher drain)
-    "me@simontaggart.com": "SiTaggart",  # PR #35583 (docker_forward_env empty-secret .env fallback)
-    "2663402852@qq.com": "x1am1",  # PR #35098 (chown root-owned top-level HERMES_HOME state files)
-    "nicsequenzy@gmail.com": "polnikale",  # PR #35717 (discover Playwright headless_shell browser)
-    "wasdhkzk@gmail.com": "whyhkzk",  # PR #32407 (sandbox-mirror inner-container guard; commits authored as whyhkzk + zhukun)
-    "leonard@sellem.me": "leonardsellem",  # PR #37405 (desktop WS origin guard on remote/Tailscale binds)
-    "42903577+ohMyJason@users.noreply.github.com": "ohMyJason",  # PR #29810 (discover_models in custom_providers section 4)
-    "singhsanidhya741@gmail.com": "sanidhyasin",  # PR #40403 salvage (model.default_headers for custom OpenAI-compatible providers, #40033)
-    "josephjohnson.joel@gmail.com": "JoelJJohnson",  # PR #39913 salvage (Windows ConPTY dashboard chat bridge)
-    "andreas@schwarz-ketsch.de": "Nea74",  # PR #40022 co-author credit (same Windows ConPTY bridge design)
-    "chanhokyim@gmail.com": "joel611",  # PR #33958 salvage (DISCORD_ALLOWED_ROLES role_authorized gateway flag)
-    "desg38@gmail.com": "dschnurbusch",  # PR #42373 salvage (archive compressed conversation lineages)
-    "bsmith@bramarstrategicservices.com": "bcsmith528",  # PR #20589 salvage (register_slack_action_handler plugin API)
-    "sunsky.lau@gmail.com": "liuhao1024",  # PR #45494 salvage (claim session slot before auto-resume task; #45456)
-    "andrewdmwalker@gmail.com": "capt-marbles",  # PR #38440 salvage (resolve xAI OAuth credentials across profiles; #43589)
-    "infinitycrew39@gmail.com": "infinitycrew39",  # PR #47945 salvage (scope langfuse trace state by turn/request ids; #48292)
-    "eurekaxun@163.com": "huangxun375-stack",  # PR #37251 / #48894 structured OpenViking sync
-    "218421507+Sahil-SS9@users.noreply.github.com": "Sahil-SS9",  # PR #48466/#44919/#44909/#42209 salvage (cron/checkpoint/kanban/skill)
-    # v0.17.0 additions
-    "2081789787@qq.com": "pengyuyanITYU",  # PR #43618 (harden local file tree paths)
-    "adalsteinni@gmail.com": "AIalliAI",  # PR #44159 (desktop hover-reveal inset)
-    "ameobius@local.host": "ameobius",  # PR #44383 co-author (discord gateway task recovery)
-    "andyfieb@gmail.com": "mollusk",  # PR #44493 (desktop assistant-ui recovery)
-    "drmani215@gmail.com": "bionicbutterfly13",  # direct email match
-    "enesilhaydin@gmail.com": "enesilhaydin",  # direct email match
-    "evisolpxe@gmail.com": "Evisolpxe",  # direct email match
-    "fyzan.shaik@gmail.com": "fyzanshaik",  # direct email match
-    "info@amik.co": "AMIK-coorporations",  # PR #40578 (Urdu README) co-author
-    "info@amikchat.site": "AMIK-coorporations",  # PR #40578 (Urdu README)
-    "kyssta69@gmail.com": "kyssta-exe",  # PR #44282 (Windows dashboard re-exec)
-    "loongfay@foxmail.com": "loongfay",  # PR #43508 (Yuanbao wechat forward msg)
-    "maplestoryjuni222@gmail.com": "BROCCOLO1D",  # PR #42733 (lazy-parse docker env config)
-    "marvin@photon.codes": "underthestars-zhy",  # PR #46907 co-author (Photon Spectrum project ids)
-    "omar@kostudios.io": "OmarB97",  # PR #43977 (desktop session model metadata)
-    "omarbaradei21@gmail.com": "OmarB97",  # PR #43977 (desktop session model metadata)
-    "philip.a.dsouza@gmail.com": "PhilipAD",  # direct email match
-    "qs2816661685@gmail.com": "qingshan89",  # PR #46895 co-author (desktop remote artifact download)
-    "yspdev@gmail.com": "AJ",  # PR #44510 co-author (desktop named-profile boot loop)
 }
 
 
