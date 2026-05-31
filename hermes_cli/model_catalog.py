@@ -64,7 +64,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_CATALOG_URL = (
     "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json"
 )
-DEFAULT_TTL_HOURS = 24
+# Fallback fetch chain. The Docusaurus site is served through Vercel, which
+# occasionally returns HTTP 403 + x-vercel-mitigated: challenge for non-
+# browser clients (urllib, curl). When that happens the disk cache goes
+# stale and new model releases never reach the picker. The raw GitHub URL
+# is the same manifest published from the same repo and is not bot-gated,
+# so we fall through to it whenever the primary URL fails.
+DEFAULT_CATALOG_FALLBACK_URLS: tuple[str, ...] = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/website/static/api/model-catalog.json",
+)
+DEFAULT_TTL_HOURS = 1
 DEFAULT_FETCH_TIMEOUT = 8.0
 SUPPORTED_SCHEMA_VERSION = 1
 
