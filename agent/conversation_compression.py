@@ -556,6 +556,12 @@ def try_shrink_image_parts_in_messages(api_messages: list) -> bool:
     # even when the byte budget is fine.
     max_dimension = 8000
     changed_count = 0
+    # Track parts that are over the target but could NOT be shrunk under it.
+    # If any survive, retrying is pointless — the same oversized payload will
+    # be re-sent and rejected again, wasting the single retry budget.  We only
+    # report success (caller retries) when every over-threshold image was
+    # actually brought under the target.
+    unshrinkable_oversized = 0
 
     def _shrink_data_url(url: str) -> Optional[str]:
         """Return a smaller data URL, or None if shrink can't help."""
@@ -644,17 +650,34 @@ def try_shrink_image_parts_in_messages(api_messages: list) -> bool:
                 if resized:
                     image_value["url"] = resized
                     changed_count += 1
+                elif isinstance(url, str) and url.startswith("data:") \
+                        and len(url) > target_bytes:
+                    unshrinkable_oversized += 1
             elif isinstance(image_value, str):
                 resized = _shrink_data_url(image_value)
                 if resized:
                     part["image_url"] = resized
                     changed_count += 1
+                elif image_value.startswith("data:") \
+                        and len(image_value) > target_bytes:
+                    unshrinkable_oversized += 1
 
     if changed_count:
         logger.info(
             "image-shrink recovery: re-encoded %d image part(s) to fit under %.0f MB",
             changed_count, target_bytes / (1024 * 1024),
         )
+    if unshrinkable_oversized:
+        # At least one oversized image could not be shrunk under the target.
+        # Retrying would re-send it and fail identically, so signal "no
+        # progress" even if other parts shrank — the caller will surface the
+        # original error rather than burning its single retry on a no-op.
+        logger.warning(
+            "image-shrink recovery: %d oversized image part(s) could not be "
+            "shrunk under %.0f MB — not retrying (would re-send rejected payload)",
+            unshrinkable_oversized, target_bytes / (1024 * 1024),
+        )
+        return False
     return changed_count > 0
 
 
