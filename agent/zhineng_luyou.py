@@ -81,6 +81,66 @@ CN_CLOUD_PROVIDERS: List[Tuple[str, str, List[str], int]] = [
 CLOUD_FAILOVER_THRESHOLD = 2          # 连续失败次数触发熔断
 CLOUD_FAILOVER_COOLDOWN = 120         # 熔断冷却时间 (秒, =2分钟)
 
+# 默认成本估算参数
+COST_AVG_INPUT_TOKENS = 1500          # 平均每次请求输入 token 数 (用于估算)
+COST_AVG_OUTPUT_TOKENS = 500          # 平均每次请求输出 token 数 (用于估算)
+
+# -- 国产模型成本数据库 (CN, 单位: ¥/1M tokens) --------------------------------
+#
+# 格式: "provider:model" -> (input_price, output_price, context_window, supports_vision)
+# input_price: 每 1M 输入 tokens 价格 (¥)
+# output_price: 每 1M 输出 tokens 价格 (¥)
+# context_window: 最大上下文窗口大小
+# supports_vision: 是否支持视觉输入
+#
+# 价格来源: 各厂商官网公开定价 (2025-07 快照)
+CN_MODEL_COSTS: Dict[str, Tuple[float, float, int, bool]] = {
+    # ---- DeepSeek (https://api-docs.deepseek.com/quick_start/pricing) ----
+    "deepseek:deepseek-chat":       (1.0,   2.0,   65536,   False),
+    "deepseek:deepseek-reasoner":   (4.0,   16.0,  65536,   False),
+
+    # ---- 阿里百炼 (https://help.aliyun.com/zh/model-studio/getting-started/models) ----
+    "alibaba:qwen-turbo":           (0.3,   0.6,   1048576, True),
+    "alibaba:qwen-plus":            (0.8,   2.0,   131072,  True),
+    "alibaba:qwen-max":             (20.0,  60.0,  32768,   True),
+    "alibaba:qwen-long":            (0.5,   2.0,   1048576, True),
+    "alibaba:qwq-plus":             (1.0,   2.0,   131072,  False),
+
+    # ---- MiniMax (https://platform.minimaxi.com/document) ----
+    "minimax:minimax-m2":           (2.0,   8.0,   131072,  True),
+    "minimax:minimax-t1":           (2.0,   8.0,   131072,  False),
+
+    # ---- 智谱 (https://open.bigmodel.cn/pricing) ----
+    "zai:glm-4-flash":              (0.1,   0.1,   131072,  True),
+    "zai:glm-4-air":                (1.0,   1.0,   131072,  True),
+    "zai:glm-4-plus":               (2.0,   8.0,   131072,  True),
+    "zai:glm-5.1":                  (2.0,   8.0,   131072,  True),
+
+    # ---- 阶跃星辰 (https://platform.stepfun.com/docs/overview) ----
+    "stepfun:step-1-8k":            (5.0,   5.0,   8192,    False),
+    "stepfun:step-2-16k":           (5.0,   15.0,  16384,   False),
+
+    # ---- Kimi / 月之暗面 ----
+    "kimi-for-coding:kimi-k2":      (2.0,   8.0,   131072,  True),
+    "kimi-for-coding:kimi-k1.5":    (2.0,   8.0,   131072,  True),
+
+    # ---- 小米 ----
+    "xiaomi:mi-1.5b":               (0.4,   0.8,   4096,    False),
+
+    # ---- 火山引擎 (https://www.volcengine.com/docs/82379) ----
+    "volcengine:deepseek-r1":       (4.0,   16.0,  65536,   False),
+    "volcengine:deepseek-v3":       (2.0,   8.0,   65536,   False),
+    "volcengine:doubao-pro":        (5.0,   9.0,   131072,  False),
+}
+
+# 成本路由策略枚举值
+COST_STRATEGY_OFF = "off"          # 按优先级选 (默认行为, M1 兼容)
+COST_STRATEGY_BALANCED = "balanced"  # 能力足够的前提下选最便宜的
+COST_STRATEGY_STRICT = "strict"    # 始终选最便宜的
+COST_STRATEGY_QUALITY = "quality"  # 复杂任务选能力更强, 简单任务选便宜
+VALID_COST_STRATEGIES = (COST_STRATEGY_OFF, COST_STRATEGY_BALANCED,
+                         COST_STRATEGY_STRICT, COST_STRATEGY_QUALITY)
+
 
 # -- 后端类型枚举 ------------------------------------------------------------
 
@@ -743,6 +803,18 @@ class SmartRouter:
         self.ollama_config = routing.get("ollama", {})
         self.embedded_config = routing.get("embedded", {})
 
+        # M2: 成本感知路由配置
+        raw_cost_strategy = routing.get("cost_mode", COST_STRATEGY_OFF)
+        if raw_cost_strategy not in VALID_COST_STRATEGIES:
+            logger.warning("未知 cost_mode '%s', 使用 'off'", raw_cost_strategy)
+            raw_cost_strategy = COST_STRATEGY_OFF
+        self.cost_mode: str = raw_cost_strategy
+        # 用户自定义定价覆盖 (config.yaml → routing.cost_table)
+        self._cost_user_overrides = routing.get("cost_table", {})
+        # 合并后的成本表 (CN_MODEL_COSTS + 用户覆盖)
+        self._cost_table: Dict[str, Tuple[float, float, int, bool]] = {}
+        self._init_cost_table()
+
         # 用户自定义云提供商优先级（可选）
         self._user_cloud_order = routing.get("cloud_providers", [])
 
@@ -844,6 +916,143 @@ class SmartRouter:
             return True
 
         return False
+
+    # -- 成本路由 -------------------------------------------------------------
+
+    def _init_cost_table(self) -> None:
+        """初始化成本表: 从 CN_MODEL_COSTS 加载 + 用户覆盖合并。"""
+        self._cost_table = dict(CN_MODEL_COSTS)
+
+        # 应用用户自定义覆盖
+        for key, overrides in self._cost_user_overrides.items():
+            if key in self._cost_table:
+                curr = list(self._cost_table[key])
+            else:
+                curr = [0.0, 0.0, 0, False]
+
+            if isinstance(overrides, dict):
+                if "input_price" in overrides:
+                    curr[0] = float(overrides["input_price"])
+                if "output_price" in overrides:
+                    curr[1] = float(overrides["output_price"])
+                if "context_window" in overrides:
+                    curr[2] = int(overrides["context_window"])
+                if "supports_vision" in overrides:
+                    curr[3] = bool(overrides["supports_vision"])
+
+            self._cost_table[key] = (curr[0], curr[1], curr[2], curr[3])
+
+        logger.debug("成本表已初始化: %d 个模型条目 (%d 用户覆盖)",
+                     len(self._cost_table), len(self._cost_user_overrides))
+
+    def _get_model_cost_info(self, provider: str, model: str
+                             ) -> Optional[Tuple[float, float, int, bool]]:
+        """获取模型成本信息。
+
+        Returns:
+            (input_price, output_price, context_window, supports_vision) 或 None。
+        """
+        # 精确匹配
+        key = f"{provider}:{model}"
+        if key in self._cost_table:
+            return self._cost_table[key]
+
+        # 先找 provider: 后缀匹配 (用户可能在 config 中用 full model name)
+        if self._cost_user_overrides:
+            for ukey, uval in self._cost_user_overrides.items():
+                if ukey.startswith(f"{provider}:") and model in ukey:
+                    if isinstance(uval, dict):
+                        inp = float(uval.get("input_price", 0))
+                        out = float(uval.get("output_price", 0))
+                        ctx = int(uval.get("context_window", 0))
+                        vis = bool(uval.get("supports_vision", False))
+                        return (inp, out, ctx, vis)
+
+        # 回退: 通过 provider 默认模型找
+        for pid, mid, _env_vars, _prio in CN_CLOUD_PROVIDERS:
+            if pid == provider:
+                fkey = f"{pid}:{mid}"
+                if fkey in self._cost_table:
+                    return self._cost_table[fkey]
+
+        return None
+
+    def _estimate_model_cost(self, provider: str, model: str,
+                             input_tokens: int = COST_AVG_INPUT_TOKENS,
+                             output_tokens: int = COST_AVG_OUTPUT_TOKENS) -> float:
+        """估算单次请求的模型使用成本 (¥)。
+
+        根据成本表中 input_price / output_price 计算。
+        如果成本表中没有该模型, 返回 0 (未知价格, 视作免费)。
+        """
+        info = self._get_model_cost_info(provider, model)
+        if not info:
+            return 0.0
+
+        input_price, output_price, _ctx, _vis = info
+        # 价格单位: ¥/1M tokens
+        cost = (input_price * input_tokens + output_price * output_tokens) / 1_000_000
+        return round(cost, 6)
+
+    def _cost_sorted_providers(self, req: Optional[TaskRequirements] = None
+                               ) -> List[Tuple[str, str, int]]:
+        """按成本策略对云提供商排序。
+
+        Returns:
+            排序后的 (provider, model, priority) 列表 [最优优先]。
+        """
+        if not self._detected_clouds:
+            return []
+
+        if self.cost_mode == COST_STRATEGY_OFF:
+            # 按优先级排序 (M1 兼容)
+            return sorted(self._detected_clouds, key=lambda x: x[2])
+
+        # 计算每个 provider:model 的估算成本
+        scored = []
+        for pid, mid, prio in self._detected_clouds:
+            cost = self._estimate_model_cost(pid, mid)
+
+            # balanced / quality 模式: 检查能力匹配
+            capability_match = True
+            if req and self.cost_mode in (COST_STRATEGY_BALANCED, COST_STRATEGY_QUALITY):
+                info = self._get_model_cost_info(pid, mid)
+                if info:
+                    _inp, _out, ctx, vis = info
+                    # 视觉任务: 跳过无视觉支持的
+                    if req.needs_vision and not vis:
+                        capability_match = False
+
+            scored.append((pid, mid, prio, cost, capability_match))
+
+        if self.cost_mode == COST_STRATEGY_STRICT:
+            # 纯价格优先 (不考虑能力)
+            scored.sort(key=lambda x: (x[3], x[2]))  # cost asc, priority asc
+        elif self.cost_mode == COST_STRATEGY_BALANCED:
+            # 能力满足时选便宜的; 都不满足时按优先级
+            matched = [s for s in scored if s[4]]
+            unmatched = [s for s in scored if not s[4]]
+            matched.sort(key=lambda x: (x[3], x[2]))
+            unmatched.sort(key=lambda x: x[2])
+            scored = matched + unmatched
+        elif self.cost_mode == COST_STRATEGY_QUALITY:
+            # 复杂任务 (req.min_capability 高) 选能力更强; 简单任务选便宜
+            if req and req.min_capability >= 7:
+                # 复杂任务: 按能力排序 (用 price / context 做粗略代理)
+                matched = [s for s in scored if s[4]]
+                matched.sort(key=lambda x: (-x[3], x[2]))  # 贵的模型能力通常更强
+                unmatched = [s for s in scored if not s[4]]
+                unmatched.sort(key=lambda x: x[2])
+                scored = matched + unmatched
+            else:
+                # 简单任务: 便宜的优先
+                matched = [s for s in scored if s[4]]
+                unmatched = [s for s in scored if not s[4]]
+                matched.sort(key=lambda x: (x[3], x[2]))
+                unmatched.sort(key=lambda x: x[2])
+                scored = matched + unmatched
+
+        return [(pid, mid, prio) for pid, mid, prio, _cost, _match in scored]
 
     def record_cloud_failure(self, provider: str) -> None:
         """记录云提供商调用失败，自动熔断检测。
@@ -1058,29 +1267,34 @@ class SmartRouter:
         best = self.backend_hub.get_best_for_task(req)
         return best.name if best else None
 
-    def _select_cloud_model(self) -> str:
-        """选择云端模型 (自动 failover: 跳过熔断中的提供商)。
+    def _select_cloud_model(self,
+                             task_req: Optional[TaskRequirements] = None
+                             ) -> str:
+        """选择云端模型 (支持 cost-aware failover)。
 
-        依次检查 detected_clouds 中每个提供商:
-          1. 有 API Key (已在 _detect_cloud_providers 中确认)
-          2. 未熔断 (健康检查正常)
-        返回第一个符合条件的 provider:model。
+        策略:
+          1. cost_mode=off: 按优先级排序 (M1 兼容)
+          2. cost_mode=balanced: 能力足够下最便宜
+          3. cost_mode=strict: 始终最便宜
+          4. cost_mode=quality: 复杂任务能力优先, 简单任务便宜优先
 
-        如果所有提供商都熔断, 返回优先级最高的作为降级恢复探测。
+        熔断: 跳过 _is_cloud_healthy() 返回 False 的提供商。
         """
         if not self._detected_clouds:
             self._detect_cloud_providers()
 
+        # 按成本策略排序候选列表
+        candidates = self._cost_sorted_providers(task_req)
+
         # 第一遍：跳过已熔断的提供商
-        for pid, mid, _prio in self._detected_clouds:
+        for pid, mid, _prio in candidates:
             if self._is_cloud_healthy(pid):
                 return f"{pid}:{mid}"
 
         # 全部熔断：返回第一个（让调用方触发降级逻辑）
-        if self._detected_clouds:
-            logger.warning("所有云提供商均已熔断, 降级使用 %s",
-                          self._detected_clouds[0][0])
-            return f"{self._detected_clouds[0][0]}:{self._detected_clouds[0][1]}"
+        if candidates:
+            logger.warning("所有云提供商均已熔断, 降级使用 %s", candidates[0][0])
+            return f"{candidates[0][0]}:{candidates[0][1]}"
 
         return "deepseek:deepseek-chat"
 
@@ -1157,7 +1371,7 @@ class SmartRouter:
         # 强制云端
         if force_tier == ModelTier.CLOUD or self.routing_mode == "cloud-only":
             if self.check_cloud():
-                cloud_sel = self._select_cloud_model()
+                cloud_sel = self._select_cloud_model(task_req=req)
                 provider, _, model = cloud_sel.partition(":")
                 result = RouteResult(
                     provider=provider, model=model,
@@ -1196,7 +1410,7 @@ class SmartRouter:
 
         # 本地模型不满足需求或无本地后端 → 云端
         if self.check_cloud():
-            cloud_sel = self._select_cloud_model()
+            cloud_sel = self._select_cloud_model(task_req=req)
             provider, _, model = cloud_sel.partition(":")
             reason = "云端介入"
             if self.backend_hub.get_all_models():
@@ -1511,7 +1725,7 @@ class SmartRouter:
                 entry["raw_details"] = m.raw_details
             model_list.append(entry)
 
-        # 云端状态（含 failover 信息）
+        # 云端状态（含 failover + cost 信息）
         cloud_available = self.check_cloud()
         cloud_health = {}
         for pid, mid, prio in self._detected_clouds:
@@ -1522,6 +1736,18 @@ class SmartRouter:
             }
             hc = self._cloud_health.get(pid, {})
             h["failures"] = hc.get("failures", 0)
+            # M2: 成本估算
+            cost_info = self._get_model_cost_info(pid, mid)
+            if cost_info:
+                inp_p, out_p, ctx, vis = cost_info
+                est = self._estimate_model_cost(pid, mid)
+                h["cost"] = {
+                    "input_price": inp_p,
+                    "output_price": out_p,
+                    "context_window": ctx,
+                    "supports_vision": vis,
+                    "estimated_per_request": est,  # ¥
+                }
             cloud_health[pid] = h
 
         result = {
@@ -1531,6 +1757,7 @@ class SmartRouter:
             "embedded": {"available": self.check_embedded()},
             "routing_mode": self.routing_mode,
             "health": self.health_tracker.get_status(),
+            "cost_mode": self.cost_mode,
         }
 
         if verbose:
@@ -1599,7 +1826,22 @@ class SmartRouter:
             for pid, info in providers.items():
                 icon = "✅" if info["healthy"] else "⛔"
                 fail_str = f" (失败{info['failures']}次)" if info["failures"] else ""
-                lines.append(f"  {icon} {pid} → {info['model']} p{info['priority']}{fail_str}")
+                cost_info = info.get("cost")
+                if cost_info:
+                    ctx = f"{cost_info['context_window'] // 1024}K" if cost_info['context_window'] else "?"
+                    est = cost_info['estimated_per_request']
+                    cost_str = f" ¥{cost_info['input_price']}/{cost_info['output_price']} ctx={ctx}"
+                    if est:
+                        cost_str += f" ~¥{est*1000:.2f}‰"
+                else:
+                    cost_str = ""
+                lines.append(f"  {icon} {pid} → {info['model']} p{info['priority']}{fail_str}{cost_str}")
+        # 成本模式
+        cost_mode = status.get("cost_mode", "off")
+        if cost_mode != "off":
+            mode_labels = {"balanced": "均衡 (满足需求最便宜)", "strict": "最便宜优先",
+                           "quality": "复杂任务能力优先", "off": "按优先级"}
+            lines.append(f"  💰 成本模式: {mode_labels.get(cost_mode, cost_mode)}")
         lines.append(f"▸ 嵌入式模型: {'✅ 可用' if status['embedded']['available'] else '❌ 未安装'}")
 
         # Health
