@@ -2403,12 +2403,11 @@ install_desktop() {
     # (--include-desktop / 'desktop' stage), so a missing toolchain is a hard
     # failure, not a silent skip — a silent skip yields a "complete" install
     # with no app and a confusing "couldn't find a built desktop" at launch.
-    # Always re-resolve Node here. Stages run in separate processes, so we can't
-    # trust an earlier check; more importantly check_node now enforces the build
-    # floor (^20.19 || >=22.12) and prepends the Hermes-managed Node to PATH, so
-    # the build never runs on a too-old system Node — the cause of the opaque
-    # "Build desktop app … exit code 1" failure (Vite crashes on old Node).
-    check_node
+    # Try the Hermes-managed Node first (check_node adds $HERMES_HOME/node/bin
+    # to PATH or installs it) before giving up.
+    if ! command -v npm >/dev/null 2>&1; then
+        check_node
+    fi
     if ! command -v npm >/dev/null 2>&1; then
         log_error "Cannot build desktop app: Node.js / npm unavailable"
         log_info "Install Node.js and retry: cd $desktop_dir && npm run pack"
