@@ -740,6 +740,65 @@ from tools.browser_tool import _emergency_cleanup_all_sessions as _cleanup_all_b
 _cleanup_done = False
 # Weak reference to the active AIAgent for memory provider shutdown at exit
 _active_agent_ref = None
+_deferred_agent_startup_done = False
+# Set True once the TUI's prompt_toolkit app starts (which enables focus
+# reporting + mouse tracking). Gates the on-exit terminal reset so non-TUI
+# one-shot CLI runs — which also register _run_cleanup via atexit — don't emit
+# escape codes for modes they never enabled (#36823).
+_tui_input_modes_active = False
+
+
+def _mark_tui_input_modes_active() -> None:
+    """Record that the TUI app started, so _run_cleanup resets input modes."""
+    global _tui_input_modes_active
+    _tui_input_modes_active = True
+
+
+def _prepare_deferred_agent_startup() -> None:
+    """Run Termux-deferred agent discovery before the first real agent turn."""
+    global _deferred_agent_startup_done
+    if _deferred_agent_startup_done:
+        return
+    if os.environ.get("HERMES_DEFER_AGENT_STARTUP") != "1":
+        return
+    _deferred_agent_startup_done = True
+    _accept_hooks = os.environ.get("HERMES_ACCEPT_HOOKS", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    try:
+        from hermes_cli.plugins import discover_plugins
+
+        discover_plugins()
+    except Exception:
+        logger.warning(
+            "plugin discovery failed at deferred CLI startup",
+            exc_info=True,
+        )
+    try:
+        from hermes_cli.mcp_startup import start_background_mcp_discovery
+
+        start_background_mcp_discovery(
+            logger=logger,
+            thread_name="termux-cli-mcp-discovery",
+        )
+    except Exception:
+        logger.debug(
+            "MCP tool discovery failed at deferred CLI startup",
+            exc_info=True,
+        )
+    try:
+        from agent.shell_hooks import register_from_config
+        from hermes_cli.config import load_config
+
+        register_from_config(load_config(), accept_hooks=_accept_hooks)
+    except Exception:
+        logger.debug(
+            "shell-hook registration failed at deferred CLI startup",
+            exc_info=True,
+        )
 
 def _run_cleanup():
     """Run resource cleanup exactly once."""
@@ -747,6 +806,12 @@ def _run_cleanup():
     if _cleanup_done:
         return
     _cleanup_done = True
+
+    # Reset terminal input modes first, before the slower resource teardown
+    # below (MCP / browser / memory shutdown can take seconds). On Ctrl+C the
+    # user's terminal becomes usable immediately, and a later step raising
+    # can't skip the reset (#36823). No-op unless the TUI actually ran.
+    _reset_terminal_input_modes_on_exit()
 
     try:
         _cleanup_all_terminals()
@@ -789,6 +854,50 @@ def _run_cleanup():
                 _active_agent_ref.shutdown_memory_provider(_session_msgs)
             else:
                 _active_agent_ref.shutdown_memory_provider()
+    except Exception:
+        pass
+
+
+def _reset_terminal_input_modes_on_exit() -> None:
+    """Best-effort: disable focus reporting + mouse tracking on TUI exit so they
+    don't leak into the next shell session sharing the tab.
+
+    prompt_toolkit restores these on a clean teardown, but Ctrl+C, SIGTERM /
+    SIGHUP and crashes can bypass its unwind, leaving the modes enabled. The
+    terminal then emits raw ``ESC[I`` / ``ESC[O`` focus events and fragmented
+    SGR mouse reports as visible text in whatever runs next in the same tab
+    (#36823). Called from ``_run_cleanup`` (atexit-registered + invoked on the
+    normal / EOF / interrupt exit paths) this covers normal quit, Ctrl+C and
+    SIGTERM/SIGHUP. ``kill -9`` is uncatchable, and the kanban worker's
+    ``os._exit(0)`` path bypasses ``atexit``; neither runs this — but both are
+    non-TTY / non-TUI, so there is nothing to reset there.
+
+    Gated on ``_tui_input_modes_active`` so one-shot non-TUI CLI runs (which
+    share ``_run_cleanup`` via ``atexit``) never emit these codes. Writes to the
+    controlling terminal directly: by exit, prompt_toolkit's own output is torn
+    down, so ``sys.stdout`` is the real fd; falls back to ``/dev/tty`` when
+    stdout is redirected away from the terminal.
+    """
+    global _tui_input_modes_active
+    if not _tui_input_modes_active:
+        return
+    # About to disable the modes — clear the flag so a re-armed _run_cleanup (or
+    # a long-lived process that reuses it) doesn't re-emit them.
+    _tui_input_modes_active = False
+    # Prefer stdout when it's the terminal; otherwise the TUI may have driven
+    # /dev/tty while stdout was redirected — reset there instead of nowhere.
+    try:
+        stream = sys.stdout
+        if stream is not None and stream.isatty():
+            stream.write(_TERMINAL_INPUT_MODE_RESET_SEQ)
+            stream.flush()
+            return
+    except Exception:
+        pass
+    try:
+        with open("/dev/tty", "w", encoding="ascii") as tty:
+            tty.write(_TERMINAL_INPUT_MODE_RESET_SEQ)
+            tty.flush()
     except Exception:
         pass
 
@@ -15078,6 +15187,9 @@ class HermesCLI:
                     pass  # No running loop -- nothing to patch
                 except Exception:
                     pass
+                # The app enables focus reporting + mouse tracking; record that
+                # so _run_cleanup resets them on exit (#36823).
+                _mark_tui_input_modes_active()
                 app.run()
         except (EOFError, KeyboardInterrupt, BrokenPipeError):
             pass
