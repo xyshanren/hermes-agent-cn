@@ -62,6 +62,25 @@ DEFAULT_BACKEND_PORTS = {
 ROUTE_LOG_MAX_LINES = 5000           # 路由日志最大行数 (超过自动截断)
 ROUTE_LOG_TRUNCATE_TO = 3000         # 截断后保留行数
 
+# -- 云端模型提供商数据库 (CN) -----------------------------------------------
+
+# (provider_id, default_model, [env_var_names], priority)
+# priority 越小优先级越高
+CN_CLOUD_PROVIDERS: List[Tuple[str, str, List[str], int]] = [
+    ("deepseek", "deepseek-chat", ["DEEPSEEK_API_KEY"], 10),
+    ("alibaba", "qwen-plus", ["ALIBABA_API_KEY", "DASHSCOPE_API_KEY"], 20),
+    ("minimax", "minimax-m2", ["MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"], 30),
+    ("zai", "glm-5.1", ["GLM_API_KEY", "ZHIPU_API_KEY"], 40),
+    ("stepfun", "step-2-16k", ["STEPFUN_API_KEY"], 50),
+    ("kimi-for-coding", "kimi-k2", ["KIMI_API_KEY"], 60),
+    ("xiaomi", "mi-1.5b", ["XIAOMI_API_KEY"], 70),
+    ("volcengine", "deepseek-r1", ["ARK_API_KEY"], 80),
+]
+
+# 云端熔断参数
+CLOUD_FAILOVER_THRESHOLD = 2          # 连续失败次数触发熔断
+CLOUD_FAILOVER_COOLDOWN = 120         # 熔断冷却时间 (秒, =2分钟)
+
 
 # -- 后端类型枚举 ------------------------------------------------------------
 
@@ -711,14 +730,21 @@ class SmartRouter:
 
         # v2: 多后端管理
         self.backend_hub = BackendHub(config)
-        # v2: 熔断管理
+        # v2: 熔断管理（本地+云端共用）
         self.health_tracker = HealthTracker()
+
+        # 云端 failover 追踪
+        self._cloud_health: Dict[str, Dict[str, Any]] = {}  # provider -> {"failures": int, "last_failure": float, "last_success": float}
+        self._detected_clouds: List[Tuple[str, str, int]] = []  # (provider, model, priority)
 
         # 加载路由配置
         routing = self.config.get("routing", self.config.get("agent", {}).get("routing", {}))
         self.routing_mode: str = routing.get("mode", "auto")
         self.ollama_config = routing.get("ollama", {})
         self.embedded_config = routing.get("embedded", {})
+
+        # 用户自定义云提供商优先级（可选）
+        self._user_cloud_order = routing.get("cloud_providers", [])
 
         # Fallback 链
         self.fallback_providers = self.config.get("fallback_providers", [])
@@ -733,14 +759,19 @@ class SmartRouter:
                 else:
                     fm = fm[0]  # string list -> take first entry
             if isinstance(fm, str) and fm:
+                # fm = "provider:model" 格式
+                p, _, m = fm.partition(":")
                 self.fallback_providers = [{
-                    "provider": provider or "deepseek",
-                    "model": model or "deepseek-chat",
+                    "provider": p or "deepseek",
+                    "model": m or "deepseek-chat",
                 }]
 
-        logger.debug("SmartRouter v2 初始化完成, mode=%s, backends=%d",
+        # 初始化时自动探测云提供商
+        self._detect_cloud_providers()
+        logger.debug("SmartRouter v2 初始化完成, mode=%s, backends=%d, clouds=%d",
                     self.routing_mode,
-                    len(self.backend_hub.get_registered_backends()))
+                    len(self.backend_hub.get_registered_backends()),
+                    len(self._detected_clouds))
 
     # -- 缓存管理 -------------------------------------------------------------
 
@@ -756,6 +787,106 @@ class SmartRouter:
     def _invalidate_cache(self):
         """清除所有缓存。"""
         self._cache.clear()
+
+    # -- 云端提供商探测与 failover -------------------------------------------
+
+    def _detect_cloud_providers(self) -> List[Tuple[str, str, int]]:
+        """自动探测所有已配置 API KEY 的国产云提供商。
+
+        优先级规则:
+            1. 用户自定义 `cloud_providers` 配置 (config.yaml → routing.cloud_providers)
+            2. CN_CLOUD_PROVIDERS 默认优先级
+
+        Returns:
+            [(provider, model, priority), ...] 按优先级排序。
+        """
+        from hermes_cli.config import get_env_value
+
+        # 使用用户自定义优先级
+        if self._user_cloud_order:
+            detected = []
+            for entry in self._user_cloud_order:
+                if isinstance(entry, dict):
+                    pid = entry.get("provider", "")
+                    mid = entry.get("model", "")
+                    prio = entry.get("priority", 999)
+                else:
+                    pid, _, mid = str(entry).partition(":")
+                    prio = 999
+                if pid and self._provider_has_key(pid):
+                    detected.append((pid, mid, prio))
+            self._detected_clouds = sorted(detected, key=lambda x: x[2])
+            return self._detected_clouds
+
+        # 使用默认优先级探测
+        detected = []
+        for pid, mid, env_vars, priority in CN_CLOUD_PROVIDERS:
+            if self._provider_has_key(pid):
+                detected.append((pid, mid, priority))
+
+        self._detected_clouds = detected  # 已按 priority 排序
+        return self._detected_clouds
+
+    def _provider_has_key(self, provider_id: str) -> bool:
+        """检查某个 Provider 是否配置了 API Key。"""
+        from hermes_cli.config import get_env_value
+
+        # 从 CN_CLOUD_PROVIDERS 查找环境变量
+        for pid, mid, env_vars, prio in CN_CLOUD_PROVIDERS:
+            if pid == provider_id:
+                for env_var in env_vars:
+                    if get_env_value(env_var):
+                        return True
+
+        # 从 config.providers 检查
+        user_providers = self.config.get("providers", {})
+        if isinstance(user_providers, dict) and provider_id in user_providers:
+            return True
+
+        return False
+
+    def record_cloud_failure(self, provider: str) -> None:
+        """记录云提供商调用失败，自动熔断检测。
+
+        连续失败达到 CLOUD_FAILOVER_THRESHOLD 次后，
+        该提供商在 CLOUD_FAILOVER_COOLDOWN 秒内被跳过。
+        """
+        now = time.time()
+        entry = self._cloud_health.setdefault(provider, {
+            "failures": 0,
+            "last_failure": 0.0,
+            "last_success": now,
+        })
+        entry["failures"] = entry.get("failures", 0) + 1
+        entry["last_failure"] = now
+        logger.debug("云提供商 %s 失败 (%d/%d)", provider,
+                    entry["failures"], CLOUD_FAILOVER_THRESHOLD)
+
+    def record_cloud_success(self, provider: str) -> None:
+        """记录云提供商调用成功，重置熔断计数。"""
+        now = time.time()
+        entry = self._cloud_health.setdefault(provider, {
+            "failures": 0,
+            "last_failure": 0.0,
+            "last_success": now,
+        })
+        entry["failures"] = 0
+        entry["last_success"] = now
+
+    def _is_cloud_healthy(self, provider: str) -> bool:
+        """检查云提供商是否健康（未熔断）。"""
+        entry = self._cloud_health.get(provider)
+        if not entry:
+            return True
+        if entry.get("failures", 0) < CLOUD_FAILOVER_THRESHOLD:
+            return True
+        # 熔断冷却期检查
+        cooldown = time.time() - entry.get("last_failure", 0)
+        if cooldown > CLOUD_FAILOVER_COOLDOWN:
+            # 冷却结束，自动恢复
+            entry["failures"] = 0
+            return True
+        return False
 
     # -- 任务分析 v2 ----------------------------------------------------------
 
@@ -888,36 +1019,18 @@ class SmartRouter:
         return result
 
     def check_cloud(self) -> bool:
-        """检查是否有可用的云端 Provider。"""
+        """检查是否有可用的云端 Provider（使用 CN_CLOUD_PROVIDERS 数据库）。"""
         cached = self._get_cached("cloud_available")
         if cached is not None:
             return cached
 
-        cloud_providers = ["deepseek", "minimax", "minimax-cn", "kimi-for-coding", "zai"]
-        provider_env_map = {
-            "deepseek": "DEEPSEEK_API_KEY",
-            "minimax": "MINIMAX_API_KEY",
-            "minimax-cn": "MINIMAX_CN_API_KEY",
-            "kimi-for-coding": "KIMI_API_KEY",
-            "zai": "GLM_API_KEY",
-        }
+        # 使用已探测云提供商列表
+        if not self._detected_clouds:
+            self._detect_cloud_providers()
+        available = len(self._detected_clouds) > 0
 
-        from hermes_cli.config import get_env_value
-        for pid in cloud_providers:
-            env_var = provider_env_map.get(pid, "")
-            if env_var and get_env_value(env_var):
-                self._set_cache("cloud_available", True)
-                return True
-
-        user_providers = self.config.get("providers", {})
-        if isinstance(user_providers, dict):
-            for pid in cloud_providers:
-                if pid in user_providers:
-                    self._set_cache("cloud_available", True)
-                    return True
-
-        self._set_cache("cloud_available", False)
-        return False
+        self._set_cache("cloud_available", available)
+        return available
 
     def check_embedded(self) -> bool:
         """检查嵌入式推理是否可用。"""
@@ -946,25 +1059,28 @@ class SmartRouter:
         return best.name if best else None
 
     def _select_cloud_model(self) -> str:
-        """选择云端模型 (取第一个可用的)。"""
-        cloud_models = [
-            ("deepseek", "deepseek-chat"),
-            ("minimax", "minimax-m2"),
-            ("kimi-for-coding", "kimi-k2"),
-            ("zai", "glm-5.1"),
-        ]
+        """选择云端模型 (自动 failover: 跳过熔断中的提供商)。
 
-        from hermes_cli.config import get_env_value
-        for pid, mid in cloud_models:
-            env_var = f"{pid.upper().replace('-', '_')}_API_KEY"
-            if get_env_value(env_var):
+        依次检查 detected_clouds 中每个提供商:
+          1. 有 API Key (已在 _detect_cloud_providers 中确认)
+          2. 未熔断 (健康检查正常)
+        返回第一个符合条件的 provider:model。
+
+        如果所有提供商都熔断, 返回优先级最高的作为降级恢复探测。
+        """
+        if not self._detected_clouds:
+            self._detect_cloud_providers()
+
+        # 第一遍：跳过已熔断的提供商
+        for pid, mid, _prio in self._detected_clouds:
+            if self._is_cloud_healthy(pid):
                 return f"{pid}:{mid}"
 
-        user_providers = self.config.get("providers", {})
-        if isinstance(user_providers, dict):
-            for pid, mid in cloud_models:
-                if pid in user_providers:
-                    return f"{pid}:{mid}"
+        # 全部熔断：返回第一个（让调用方触发降级逻辑）
+        if self._detected_clouds:
+            logger.warning("所有云提供商均已熔断, 降级使用 %s",
+                          self._detected_clouds[0][0])
+            return f"{self._detected_clouds[0][0]}:{self._detected_clouds[0][1]}"
 
         return "deepseek:deepseek-chat"
 
@@ -1395,10 +1511,23 @@ class SmartRouter:
                 entry["raw_details"] = m.raw_details
             model_list.append(entry)
 
+        # 云端状态（含 failover 信息）
+        cloud_available = self.check_cloud()
+        cloud_health = {}
+        for pid, mid, prio in self._detected_clouds:
+            h = {
+                "model": mid,
+                "priority": prio,
+                "healthy": self._is_cloud_healthy(pid),
+            }
+            hc = self._cloud_health.get(pid, {})
+            h["failures"] = hc.get("failures", 0)
+            cloud_health[pid] = h
+
         result = {
             "local_backends": backends,
             "local_models": model_list,
-            "cloud": {"available": self.check_cloud()},
+            "cloud": {"available": cloud_available, "providers": cloud_health},
             "embedded": {"available": self.check_embedded()},
             "routing_mode": self.routing_mode,
             "health": self.health_tracker.get_status(),
@@ -1410,6 +1539,8 @@ class SmartRouter:
                 "probe_cooldown": PROBE_COOLDOWN,
                 "circuit_breaker_threshold": CIRCUIT_BREAKER_THRESHOLD,
                 "circuit_breaker_cooldown": CIRCUIT_BREAKER_COOLDOWN,
+                "cloud_failover_threshold": CLOUD_FAILOVER_THRESHOLD,
+                "cloud_failover_cooldown": CLOUD_FAILOVER_COOLDOWN,
                 "default_backend_ports": DEFAULT_BACKEND_PORTS,
             }
 
@@ -1463,6 +1594,12 @@ class SmartRouter:
 
         # 云端
         lines.append(f"\n▸ 云端 API: {'✅ 可用' if status['cloud']['available'] else '❌ 未配置'}")
+        providers = status["cloud"].get("providers", {})
+        if providers:
+            for pid, info in providers.items():
+                icon = "✅" if info["healthy"] else "⛔"
+                fail_str = f" (失败{info['failures']}次)" if info["failures"] else ""
+                lines.append(f"  {icon} {pid} → {info['model']} p{info['priority']}{fail_str}")
         lines.append(f"▸ 嵌入式模型: {'✅ 可用' if status['embedded']['available'] else '❌ 未安装'}")
 
         # Health
