@@ -4,6 +4,26 @@
 
 ---
 
+## v0.14.0+cn.3 (2026-06-02) — toolsets.py 语法修复 + 版本更新
+
+### Bug 修复
+
+- **`toolsets.py` 残留片段导致 SyntaxError**：拉取上游更新后，`toolsets.py` 第 379-381 行残留了三个孤立的代码片段（`],` `"includes": []` `},`），不属于任何 toolset 定义，导致 `hermes --version` 等命令因 import 失败而报 `SyntaxError`。修复：删除残留的垃圾代码。
+
+### 版本更新
+
+- `hermes_cli/__init__.py`、`pyproject.toml` 版本号从 `0.14.0+cn.0` 更新至 `0.14.0+cn.3`，与 CHANGELOG 已有的 cn.1/cn.2 条目保持一致。
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `toolsets.py` | 删除第 379-381 行残留片段 |
+| `hermes_cli/__init__.py` | 版本号 `cn.0` → `cn.3` |
+| `pyproject.toml` | 版本号 `cn.0` → `cn.3` |
+
+---
+
 ## v0.14.0+cn.2 (2026-05-29) — 双路由统一 + openrouter_min_coding_score 修复
 
 ### Bug 修复
@@ -836,8 +856,8 @@ model_routing:
 
 ### 当前版本
 
-- **上游合并**：NousResearch v0.12.0+（2026-05-03）
-- **中文版本**：v0.12.0-cn.1（2026-05-03）
+- **上游合并**：NousResearch v0.14.0（2026-05-23）
+- **中文版本**：v0.14.0+cn.3（2026-06-02）
 - **汉化完成度**：8/12 核心文件
 
 ### 待汉化项目
