@@ -1,4 +1,4 @@
-"""Shared fixtures for gateway e2e tests (Telegram, Discord).
+"""Shared fixtures for gateway e2e tests.
 
 These tests exercise the full async message flow:
     adapter.handle_message(event)
@@ -113,17 +113,6 @@ def _ensure_slack_mock():
         sys.modules.setdefault(name, mod)
 
 
-_ensure_telegram_mock()
-_ensure_discord_mock()
-_ensure_slack_mock()
-
-import discord  # noqa: E402 — mocked above
-from gateway.platforms.telegram import TelegramAdapter  # noqa: E402
-from gateway.platforms.discord import DiscordAdapter  # noqa: E402
-
-import gateway.platforms.slack as _slack_mod  # noqa: E402
-_slack_mod.SLACK_AVAILABLE = True
-from gateway.platforms.slack import SlackAdapter  # noqa: E402
 
 
 # Platform-generic factories
@@ -242,17 +231,18 @@ def make_adapter(platform: Platform, runner=None):
 
     config = PlatformConfig(enabled=True, token="e2e-test-token")
 
-    if platform == Platform.DISCORD:
-        from gateway.platforms.helpers import ThreadParticipationTracker
-        with patch.object(ThreadParticipationTracker, "_load", return_value=set()):
-            adapter = DiscordAdapter(config)
-        platform_key = Platform.DISCORD
-    elif platform == Platform.SLACK:
-        adapter = SlackAdapter(config)
-        platform_key = Platform.SLACK
+    if platform == Platform.DINGTALK:
+        from gateway.platforms.dingtalk import DingtalkAdapter
+        adapter = DingtalkAdapter(config)
+        platform_key = Platform.DINGTALK
+    elif platform == Platform.WEIXIN:
+        from gateway.platforms.weixin import WeixinAdapter
+        adapter = WeixinAdapter(config)
+        platform_key = Platform.WEIXIN
     else:
-        adapter = TelegramAdapter(config)
-        platform_key = Platform.TELEGRAM
+        from gateway.platforms.dingtalk import DingtalkAdapter
+        adapter = DingtalkAdapter(config)
+        platform_key = Platform.DINGTALK
 
     adapter.send = AsyncMock(return_value=SendResult(success=True, message_id="e2e-resp-1"))
     adapter.send_typing = AsyncMock()
@@ -273,7 +263,7 @@ async def send_and_capture(adapter, text: str, platform: Platform, **event_kwarg
 
 
 # Parametrized fixtures for platform-generic tests
-@pytest.fixture(params=[Platform.TELEGRAM, Platform.DISCORD, Platform.SLACK], ids=["telegram", "discord", "slack"])
+@pytest.fixture(params=[Platform.DINGTALK], ids=["dingtalk"])
 def platform(request):
     return request.param
 

@@ -89,17 +89,7 @@ TOOLSETS = {
         "includes": []
     },
 
-    "x_search": {
-        "description": (
-            "Search X (Twitter) posts and threads via xAI's built-in "
-            "x_search Responses tool. Available when xAI credentials are "
-            "configured (SuperGrok OAuth or XAI_API_KEY). Off by default; "
-            "enable in `hermes tools` → X (Twitter) Search."
-        ),
-        "tools": ["x_search"],
-        "includes": []
-    },
-    
+
     "vision": {
         "description": "Image analysis and vision tools",
         "tools": ["vision_analyze"],
@@ -258,17 +248,6 @@ TOOLSETS = {
         "includes": [],
     },
 
-    "discord": {
-        "description": "Discord read and participate tools (fetch messages, search members, create threads)",
-        "tools": ["discord"],
-        "includes": [],
-    },
-
-    "discord_admin": {
-        "description": "Discord server management (list channels/roles, pin messages, assign roles)",
-        "tools": ["discord_admin"],
-        "includes": [],
-    },
 
     "yuanbao": {
         "description": "Yuanbao platform tools - group info, member queries, DM, stickers",
@@ -397,17 +376,6 @@ TOOLSETS = {
         "includes": []
     },
 
-    "hermes-telegram": {
-        "description": "Telegram bot toolset - full access for personal use (terminal has safety checks)",
-        "tools": _HERMES_CORE_TOOLS,
-        "includes": []
-    },
-    
-    "hermes-discord": {
-        "description": "Discord bot toolset - full access (terminal has safety checks via dangerous command approval)",
-        "tools": _HERMES_CORE_TOOLS + [
-            "discord",
-            "discord_admin",
         ],
         "includes": []
     },

@@ -20,7 +20,7 @@ Free tier: 60-minute tunnels, random subdomain, no signup. Pro tier ($3/mo) is a
 ## When to Use
 
 - User asks to "expose this locally", "share my dev server", "make this URL public", "tunnel port N", "get a public URL for a webhook"
-- Need to receive a webhook callback during a local task (Stripe, GitHub, Discord, AgentMail)
+- Need to receive a webhook callback during a local task (GitHub, 微信支付)
 - Sharing a one-off HTTP demo (MCP server, Ollama/vLLM endpoint, dashboard) with a remote party
 - The host has SSH but no `cloudflared` / `ngrok` binary, and installing one would be overkill
 
@@ -182,7 +182,7 @@ Composite patterns combining a local origin with a Pinggy tunnel. Each recipe is
 
 ### Recipe 1 — Receive a webhook callback
 
-Use this when an external service (Stripe, GitHub, Discord, AgentMail, etc.) needs to POST to a publicly reachable URL during a local task.
+Use this when an external service (GitHub webhook, 微信支付回调, etc.) needs to POST to a publicly reachable URL during a local task.
 
 ```bash
 # 1. Tiny capturing server: every request gets appended to /tmp/webhook-hits.log
