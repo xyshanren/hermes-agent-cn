@@ -32,21 +32,29 @@ INSTALL_DIR="/opt/hermes"
 # is a no-op if the dir already exists. (#18482, salvages #18488)
 mkdir -p "$HERMES_HOME"
 
-# Numeric UID/GID validation: must be digits only, non-root, 1-65534.
-# NAS hosts such as Unraid commonly use low non-root IDs (99:100).
+# Numeric UID/GID validation: must be digits only, 1000-65534
 validate_uid_gid() {
     case "$1" in
         ''|*[!0-9]*) return 1 ;;
-        *) [ "$1" -ge 1 ] && [ "$1" -le 65534 ] ;;
+        *) [ "$1" -ge 1000 ] && [ "$1" -le 65534 ] ;;
     esac
 }
 
 # --- UID/GID remap ---
-if [ -n "${HERMES_UID:-}" ] && [ "$HERMES_UID" != "$(id -u hermes)" ]; then
+# Accept PUID/PGID as aliases for HERMES_UID/HERMES_GID.  NAS users (UGOS,
+# Synology, unRAID) expect the LinuxServer.io PUID/PGID convention and
+# bind-mount /opt/data from a host directory owned by their own UID; without
+# this alias those vars are silently ignored and the s6-setuidgid drop to
+# UID 10000 leaves the runtime unable to read the volume.  HERMES_UID/
+# HERMES_GID still win when both are set.  See #15290, salvages #25872.
+HERMES_UID="${HERMES_UID:-${PUID:-}}"
+HERMES_GID="${HERMES_GID:-${PGID:-}}"
+
+if [ -n "${HERMES_UID:-}" ] && validate_uid_gid "$HERMES_UID" && [ "$HERMES_UID" != "$(id -u hermes)" ]; then
     echo "[stage2] Changing hermes UID to $HERMES_UID"
     usermod -u "$HERMES_UID" hermes
 fi
-if [ -n "${HERMES_GID:-}" ] && [ "$HERMES_GID" != "$(id -g hermes)" ]; then
+if [ -n "${HERMES_GID:-}" ] && validate_uid_gid "$HERMES_GID" && [ "$HERMES_GID" != "$(id -g hermes)" ]; then
     echo "[stage2] Changing hermes GID to $HERMES_GID"
     # -o allows non-unique GID (e.g. macOS GID 20 "staff" may already
     # exist as "dialout" in the Debian-based container image).
