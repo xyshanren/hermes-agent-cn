@@ -334,8 +334,63 @@ export function StatusRule({
       ? `${fmtK(usage.total)} tok`
       : ''
 
-  const bar = usage.context_max ? ctxBar(pct) : ''
-  const leftWidth = Math.max(12, cols - cwdLabel.length - 3)
+  const bar = !segs.compactCtx && usage.context_max ? ctxBar(pct) : ''
+  const modelText = modelLabel(model, modelReasoningEffort, modelFast)
+
+  // Width of the must-keep left segments (indicator + model + context). They
+  // are pinned (never shrink) and reserved so the cwd/branch on the right
+  // yields first. The busy face width depends on the active /indicator style
+  // (kaomoji is wide + verb; unicode is a bare 1-col spinner).
+  const essentialWidth =
+    stringWidth('─ ') +
+    (busy ? busyIndicatorWidth(indicatorStyle, turnStartedAt != null) : stringWidth(status)) +
+    stringWidth(' │ ') +
+    stringWidth(modelText) +
+    (ctxLabel ? stringWidth(' │ ') + stringWidth(ctxLabel) : 0)
+
+  const { leftWidth, rightWidth, separatorWidth } = statusRuleWidths(cols, cwdLabel, essentialWidth)
+
+  // Whole-segment progressive disclosure for the tail: a segment renders only
+  // if it fits in the space left after the pinned essentials, evaluated in
+  // descending priority order — bar, duration, compressions, voice, session
+  // count, bg, cost. Lower-priority segments drop first and nothing truncates
+  // mid-segment, so status/model/context are never crushed.
+  const SEP = stringWidth(' │ ')
+  let tailBudget = Math.max(0, leftWidth - essentialWidth)
+  const fits = (w: number) => {
+    if (tailBudget >= w) {
+      tailBudget -= w
+
+      return true
+    }
+
+    return false
+  }
+
+  const sessionCountText = liveSessionCount > 0 ? statusSessionCountLabel(liveSessionCount) : ''
+  const compressions = typeof usage.compressions === 'number' ? usage.compressions : 0
+  const costText = typeof usage.cost_usd === 'number' ? `$${usage.cost_usd.toFixed(4)}` : ''
+
+  const showBar = !!bar && fits(SEP + stringWidth(`[${bar}] ${pct != null ? `${pct}%` : ''}`))
+  const showDuration = segs.duration && !!sessionStartedAt && fits(SEP + MAX_DURATION_WIDTH)
+  const showCompressions = segs.compressions && compressions > 0 && fits(SEP + stringWidth(`cmp ${compressions}`))
+  const showVoice = segs.voice && !!voiceLabel && fits(SEP + stringWidth(voiceLabel))
+  const showSessionCount = !!sessionCountText && fits(SEP + stringWidth(sessionCountText))
+  const showBg = segs.bg && bgCount > 0 && fits(SEP + stringWidth(`${bgCount} bg`))
+  const showCostSeg = segs.cost && showCost && !!costText && fits(SEP + stringWidth(costText))
+
+  const handleSessionCountClick = (event: { stopImmediatePropagation?: () => void }) => {
+    event.stopImmediatePropagation?.()
+    onSessionCountClick?.()
+  }
+
+  const sessionCountNode = onSessionCountClick ? (
+    <Box flexShrink={0} onClick={handleSessionCountClick}>
+      <Text color={t.color.accent}> │ {sessionCountText}</Text>
+    </Box>
+  ) : (
+    <Text color={t.color.muted}> │ {sessionCountText}</Text>
+  )
 
   return (
     <Box height={1}>
@@ -360,31 +415,36 @@ export function StatusRule({
               {' │ '}
               <SessionDuration startedAt={sessionStartedAt} />
             </Text>
-          ) : null}
-          {typeof usage.compressions === 'number' && usage.compressions > 0 ? (
-            <Text color={t.color.muted}>
-              {' │ '}
-              <Text color={usage.compressions >= 10 ? t.color.error : usage.compressions >= 5 ? t.color.warn : t.color.muted}>
-                cmp {usage.compressions}
-              </Text>
-            </Text>
-          ) : null}
-          <SpawnHud t={t} />
-          {voiceLabel ? (
-            <Text
-              color={
-                voiceLabel.startsWith('●') ? t.color.error : voiceLabel.startsWith('◉') ? t.color.warn : t.color.muted
-              }
-            >
-              {' │ '}
-              {voiceLabel}
-            </Text>
-          ) : null}
-          {bgCount > 0 ? <Text color={t.color.muted}> │ {bgCount} bg</Text> : null}
-          {showCost && typeof usage.cost_usd === 'number' ? (
-            <Text color={t.color.muted}> │ ${usage.cost_usd.toFixed(4)}</Text>
-          ) : null}
-        </Text>
+          </Text>
+        ) : null}
+        {showVoice ? (
+          <Text
+            color={
+              voiceLabel!.startsWith('●') ? t.color.error : voiceLabel!.startsWith('◉') ? t.color.warn : t.color.muted
+            }
+            wrap="truncate-end"
+          >
+            {' │ '}
+            {voiceLabel}
+          </Text>
+        ) : null}
+        {showSessionCount ? sessionCountNode : null}
+        {showBg ? (
+          <Text color={t.color.muted} wrap="truncate-end">
+            {' │ '}
+            {bgCount} bg
+          </Text>
+        ) : null}
+        {showCostSeg ? (
+          <Text color={t.color.muted} wrap="truncate-end">
+            {' │ '}
+            {costText}
+          </Text>
+        ) : null}
+        {/* SpawnHud isn't part of the tail budget (its width is dynamic), so it
+            renders last — any overflow truncates the HUD itself rather than the
+            budgeted segments before it. It self-hides when no delegation runs. */}
+        <SpawnHud t={t} />
       </Box>
 
       <Text color={t.color.border}> ─ </Text>
