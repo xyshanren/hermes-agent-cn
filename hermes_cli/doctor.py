@@ -1014,6 +1014,88 @@ def run_doctor(args):
         check_warn("配置兼容性检测模块不可用", "(quickstart 模块未加载)")
 
     # =========================================================================
+    # D8: GPU / CUDA environment (本地模型运行环境检测)
+    # =========================================================================
+    _section_summary()
+    print()
+    print(color("◆ GPU / CUDA 环境", Colors.CYAN, Colors.BOLD))
+    _section_reset()
+
+    _gpu_found = False
+
+    # 1. 操作系统检测
+    import platform as _pf
+    _os = _pf.system()
+    if _os == "Windows":
+        # 原生 Windows 不支持 GPU 推理 (llama-cpp-python CUDA 仅限 WSL2)
+        check_warn("原生 Windows GPU 检测", "(Hermes GPU 推理需在 WSL2 中运行)")
+    elif "microsoft" in _pf.release().lower() or "WSL" in _pf.release():
+        _wsl_version = ""
+        try:
+            _proc_version = Path("/proc/version").read_text().lower()
+            if "wsl2" in _proc_version or "microsoft" in _proc_version:
+                _wsl_version = "WSL2"
+            elif "wsl1" in _proc_version or "wsl" in _proc_version:
+                _wsl_version = "WSL"
+            check_ok(f"运行环境: {_os} ({_wsl_version})", "GPU 推理可用")
+        except Exception:
+            check_ok(f"运行环境: {_os}", "(可能为 WSL2)")
+    else:
+        check_ok(f"运行环境: {_os}", "(Linux - GPU 推理可用)")
+
+    # 2. nvidia-smi 检测
+    try:
+        import subprocess as _sp
+        _nvsmi = _sp.run(["nvidia-smi", "--query-gpu=name,temperature.gpu,memory.total",
+                          "--format=csv,noheader"], capture_output=True, text=True, timeout=10)
+        if _nvsmi.returncode == 0 and _nvsmi.stdout.strip():
+            _gpu_found = True
+            for _line in _nvsmi.stdout.strip().splitlines():
+                _parts = [p.strip() for p in _line.split(",")]
+                _gpu_name = _parts[0] if len(_parts) > 0 else "?"
+                _gpu_temp = _parts[1] if len(_parts) > 1 else "?"
+                _gpu_mem = _parts[2] if len(_parts) > 2 else "?"
+                check_ok(f"NVIDIA GPU: {_gpu_name}", f"温度: {_gpu_temp} / 显存: {_gpu_mem}")
+        else:
+            check_warn("NVIDIA GPU 不可用", "(nvidia-smi 未找到 — 本地模型将使用 CPU 运行)")
+    except FileNotFoundError:
+        check_warn("NVIDIA GPU 不可用", "(nvidia-smi 未安装 — 本地模型将使用 CPU 运行)")
+    except Exception as _e:
+        check_warn("GPU 检测失败", str(_e))
+
+    # 3. CUDA 版本检测
+    if _gpu_found:
+        try:
+            import subprocess as _sp
+            _nvcc = _sp.run(["nvcc", "--version"], capture_output=True, text=True, timeout=5)
+            if _nvcc.returncode == 0:
+                _ver_line = _nvcc.stdout.splitlines()[-1] if _nvcc.stdout.splitlines() else "(unknown)"
+                check_ok("CUDA Toolkit 已安装", _ver_line.strip())
+            else:
+                check_warn("CUDA Toolkit 未安装",
+                           "(可通过 conda install cudatoolkit 或 apt install nvidia-cuda-toolkit 安装)")
+        except FileNotFoundError:
+            check_warn("CUDA Toolkit 未安装", "(nvcc 未找到 — 可通过 conda install cudatoolkit 安装)")
+
+    # 4. PyTorch GPU 检测
+    try:
+        import torch as _torch
+        if _torch.cuda.is_available():
+            _cuda_ver = _torch.version.cuda or "?"
+            _device_count = _torch.cuda.device_count()
+            _devices = []
+            for _i in range(_device_count):
+                _devices.append(_torch.cuda.get_device_name(_i))
+            check_ok("PyTorch GPU: 可用", f"(CUDA {_cuda_ver}, {_device_count} 个设备: {', '.join(_devices)})")
+        else:
+            check_warn("PyTorch GPU: 不可用",
+                       "(torch.cuda.is_available()=False — 本地模型推理将使用 CPU)")
+    except ImportError:
+        pass  # PyTorch not installed — not a requirement
+    except Exception as _e:
+        check_warn("PyTorch GPU 检测异常", str(_e))
+
+    # =========================================================================
     # Check: Submodules (tinker-atropos RL training backend)
     # =========================================================================
     _section_summary()
@@ -1036,7 +1118,7 @@ def run_doctor(args):
             check_warn("tinker-atropos requires Python 3.11+", f"(current: {py_version.major}.{py_version.minor})")
     else:
         check_warn("tinker-atropos not found", "(run: git submodule update --init --recursive)")
-    
+
     # =========================================================================
     # Check: Tool Availability
     # =========================================================================
