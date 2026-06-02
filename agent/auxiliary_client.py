@@ -3786,6 +3786,52 @@ def get_available_vision_backends() -> List[str]:
     return available
 
 
+def _try_vision_fallback_config(
+    provider: Optional[str],
+    model: Optional[str],
+    base_url: Optional[str],
+    api_key: Optional[str],
+) -> Optional[Tuple[str, Any, str]]:
+    """Try auxiliary.vision.fallback_* config when primary vision fails.
+
+    Returns (fallback_provider, client, fallback_model) or None.
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        aux_vision = cfg.get("auxiliary", {}).get("vision", {})
+        if not isinstance(aux_vision, dict):
+            return None
+
+        fallback_provider = aux_vision.get("fallback_provider", "")
+        fallback_model = aux_vision.get("fallback_model", "")
+        if not fallback_provider or not fallback_model:
+            return None
+
+        fallback_base_url = aux_vision.get("fallback_base_url", "")
+        fallback_api_key = aux_vision.get("fallback_api_key", "")
+
+        # 如果 fallback 跟当前 provider 一样，说明不是真的 fallback
+        if fallback_provider == provider and fallback_model == model:
+            return None
+
+        provider, client, resolved_model = resolve_vision_provider_client(
+            provider=fallback_provider,
+            model=fallback_model,
+            base_url=fallback_base_url or None,
+            api_key=fallback_api_key or None,
+        )
+        if client:
+            logger.info(
+                "Vision fallback: %s → %s/%s", provider or "?", fallback_provider, fallback_model,
+            )
+            return (provider, client, resolved_model)
+    except Exception as e:
+        logger.debug("Vision fallback config failed: %s", e)
+    return None
+
+
 def resolve_vision_provider_client(
     provider: Optional[str] = None,
     model: Optional[str] = None,
@@ -4622,15 +4668,22 @@ def call_llm(
             async_mode=False,
         )
         if client is None and resolved_provider != "auto" and not resolved_base_url:
-            logger.warning(
-                "Vision provider %s unavailable, falling back to auto vision backends",
-                resolved_provider,
+            # 先尝试配置中指定的 fallback（auxiliary.vision.fallback_*）
+            _fallback_ok = _try_vision_fallback_config(
+                resolved_provider, resolved_model, resolved_base_url, resolved_api_key,
             )
-            effective_provider, client, final_model = resolve_vision_provider_client(
-                provider="auto",
-                model=resolved_model,
-                async_mode=False,
-            )
+            if _fallback_ok:
+                effective_provider, client, final_model = _fallback_ok
+            else:
+                logger.warning(
+                    "Vision provider %s unavailable, falling back to auto vision backends",
+                    resolved_provider,
+                )
+                effective_provider, client, final_model = resolve_vision_provider_client(
+                    provider="auto",
+                    model=resolved_model,
+                    async_mode=False,
+                )
         if client is None:
             raise RuntimeError(
                 f"No LLM provider configured for task={task} provider={resolved_provider}. "

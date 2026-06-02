@@ -1521,7 +1521,8 @@ class SmartRouter:
     # -- 规则匹配 (原 run_agent.py AIAgent._match_rule) -----------------------
 
     @staticmethod
-    def _match_rule(match: dict, has_image: bool, text_lower: str, text_length: int) -> bool:
+    def _match_rule(match: dict, has_image: bool, text_lower: str,
+                    text_length: int, complexity: Optional[str] = None) -> bool:
         """检查路由规则是否匹配。
 
         Returns True when ALL specified conditions are satisfied.
@@ -1529,6 +1530,11 @@ class SmartRouter:
         # has_image condition
         if "has_image" in match:
             if bool(match["has_image"]) != has_image:
+                return False
+
+        # complexity condition (simple / medium / complex)
+        if "complexity" in match and complexity:
+            if match["complexity"] != complexity:
                 return False
 
         # keywords condition (any keyword triggers by default)
@@ -1577,13 +1583,18 @@ class SmartRouter:
         text_lower = user_message.lower() if user_message else ""
         text_length = len(user_message) if user_message else 0
 
+        # 分析消息复杂度 (支持 `match.complexity` 规则)
+        _complexity = analyze_complexity(user_message).value if user_message else ""
+        _complexity_str: Optional[str] = _complexity if _complexity else None
+
         # 阶段1: 规则匹配 (新格式 rules)
         if rules:
             for rule in rules:
                 match = rule.match or {}
                 if not match:
                     continue  # 无条件规则暂不匹配, 最后兜底
-                if self._match_rule(match, has_image, text_lower, text_length):
+                if self._match_rule(match, has_image, text_lower, text_length,
+                                    complexity=_complexity_str):
                     logger.debug(
                         "route_with_rules: rule '%s' matched → %s",
                         rule.name, rule.model,
