@@ -4407,23 +4407,20 @@ class TestPtyWebSocket:
             def __init__(self):
                 self.sent: list[str] = []
 
-            async def send_text(self, payload: str) -> None:
-                self.sent.append(payload)
-
-        app = ws_mod.app
-
-        async def _run():
-            sub_a1 = _FakeSub()
-            sub_a2 = _FakeSub()
-            sub_other = _FakeSub()
-            frame = '{"type":"tool.start","payload":{"tool_id":"t1"}}'
-
-            event_channels, event_lock = ws_mod._get_event_state(app)
-            # Register two subscribers on the target channel and one on a
-            # different channel, exactly as the /api/events handler does.
-            async with event_lock:
-                event_channels.setdefault("broadcast-test", set()).update(
-                    {sub_a1, sub_a2}
+        with self.client.websocket_connect(sub_path) as sub:
+            # Wait for the subscriber to be registered on the server side.
+            # websocket_connect returns when ws.accept() completes, but the
+            # server adds us to ``_event_channels`` in a follow-up await,
+            # so a publish immediately after connect can race ahead of the
+            # subscriber registration and the message is dropped.
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                if ws_mod.app.state.event_channels.get("broadcast-test"):
+                    break
+                time.sleep(0.01)
+            else:
+                raise AssertionError(
+                    "subscriber did not register on channel within 5s"
                 )
                 event_channels.setdefault("other-channel", set()).add(sub_other)
             try:
