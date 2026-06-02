@@ -4,6 +4,48 @@
 
 ---
 
+## v0.14.0+cn.4 (2026-06-03) — SmartRouter Phase 5 + 多项增强
+
+### SmartRouter Phase 5
+
+| 功能 | 内容 | 提交 |
+|------|------|------|
+| **跨 Provider 路由** | `RoutingRule` 支持 `provider` 字段，规则可指定目标 provider | `bdabb2d` |
+| **复杂度感知路由** | `complexity` 匹配条件（simple/medium/complex），`_match_rule` 自动判断 | `bdabb2d` |
+| **Vision fallback** | `auxiliary.vision` 支持 `fallback_provider/model/base_url`，主 vision 失败时自动降级 | `bdabb2d` |
+
+### 语义防火墙
+
+| 里程碑 | 状态 | 提交 |
+|--------|------|------|
+| **M1** 规则热加载 | ✅ 惰性检测 config hash，自动重载规则 | `795004b` |
+| **M2** 审计日志 + CLI | ✅ 拦截事件输出 JSONL，`hermes firewall {log\|status\|reload}` | `241568` |
+
+### Quickstart 增强
+
+| 修复项 | 提交 |
+|--------|------|
+| **云端/本地主力选择** — 同时有云端 API 和本地模型时让用户选择 | `4aa261d` |
+| **云端视觉模型** — `auxiliary.vision` 优先检测云端 Provider 中的视觉模型 | `ba0159c` |
+| **Fallback 读配置模型** — 不再用硬编码默认值，读取用户配置 | `ba0159c` |
+| **model_routing 云端兼容** — 云端主力时不引用本地模型名 | `7a460d6` |
+| **配置自动整理** — `_cleanup_config()` 清理空段/容器默认值 | `4aa261d` |
+| **国产服务商 M1-M4** — 百度千帆/阿里百炼/火山引擎/网络诊断 | `fe85dbb` |
+
+### Doctor 增强
+
+| 检查项 | 内容 | 提交 |
+|--------|------|------|
+| **D6** 网络连通性 | 8 个国产 API 端点可达性检测 | `66d96d4` |
+| **D7** 配置兼容性 | yaml 与 .env 冲突检测 | `66d96d4` |
+| **D8** GPU/CUDA | GPU 驱动/CUDA Toolkit/PyTorch GPU 检测 | `66d96d4` |
+
+### 浏览器工具 CN 网络兼容
+
+`_check_chromium_download_available()` 检测 `storage.googleapis.com` 是否可达，被墙时跳过安装并提示改用 Lightpanda 引擎。提交 `6566490`。
+
+---
+
 ## v0.14.0+cn.3 (2026-06-02) — toolsets.py 语法修复 + 版本更新
 
 ### Bug 修复

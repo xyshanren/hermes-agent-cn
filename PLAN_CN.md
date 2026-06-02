@@ -18,6 +18,16 @@ SmartRouter 的自动检测 + 国产 API 兼容特性是目前 cn 分支最核�
 | **M3** ✅ quickstart 自动检测同步 | 让 SmartRouter 和 quickstart 的检测结果保持一致 | 1 天 (✅ 已提交 38122938) |
 | **M4** 向上游提交 PR | 抽离路由通用设计，向上游提交 | 待定 |
 
+### ✅ SmartRouter Phase 5（2026-06-03）
+
+| 功能 | 内容 | 
+|------|------|
+| **跨 Provider 路由** | `RoutingRule` 支持 `provider` 字段，规则可指定目标 provider |
+| **复杂度感知路由** | `complexity` 匹配条件（simple/medium/complex），`_match_rule` 自动判断 |
+| **Vision fallback** | `auxiliary.vision` 支持 `fallback_provider/model/base_url`，主 vision 失败时自动降级 |
+
+### ✅ Quickstart 增强（2026-06-02 修复批）
+
 ### ✅ Quickstart 增强（2026-06-02 修复批）
 
 | 修复项 | 内容 | 
@@ -28,6 +38,38 @@ SmartRouter 的自动检测 + 国产 API 兼容特性是目前 cn 分支最核�
 | **配置自动整理** | `_cleanup_config()` 清理空段/容器默认值；`_cleanup_env()` 去重 |
 | **Fallback 读配置模型** | fallback 链不再用硬编码默认值，改为读取用户实际配置的模型 |
 | **model_routing 云端兼容** | 云端主力时规则只引用云端模型名，不引用 Ollama 本地模型，避免 400 错误 |
+
+### ✅ 语义防火墙增强（2026-06-03）
+
+| 里程碑 | 内容 | 状态 |
+|--------|------|------|
+| **M1** ✅ 规则热加载 | 不需重启 Agent，检测到防火墙规则变更后自动重载 | ✅ `795004b7e` |
+| **M2** ✅ 审计日志 | 防火墙拦截/告警事件输出到文件，方便事后排查 | ✅ `241568159` |
+| **M3** 向上游提交 PR | 抽出 5 层纵深防御设计，向上游提交 | 待定 |
+
+### ✅ Quickstart 国产服务商扩展（2026-06-03）
+
+| 里程碑 | 内容 | 状态 |
+|--------|------|------|
+| **M1** ✅ 百度千帆 | quickstart 集成百度千帆 API 检测 (QIANFAN_API_KEY) | ✅ `fe85dbb7a` |
+| **M2** ✅ 阿里百炼 | quickstart 集成阿里百炼 API 检测 (DASHSCOPE_API_KEY) | ✅ `fe85dbb7a` |
+| **M3** ✅ 火山引擎 | quickstart 集成火山引擎 API 检测 (ARK_API_KEY) | ✅ `fe85dbb7a` |
+| **M4** ✅ 网络诊断 | quickstart 检测常见国产 API 端点可达性 | ✅ `fe85dbb7a` |
+
+### ✅ Doctor 诊断扩展（2026-06-03）
+
+| 里程碑 | 内容 | 状态 |
+|--------|------|------|
+| **D6** ✅ 网络连通性 | 常见国产 API 端点可访问性检测（8个端点）| ✅ `66d96d40f` |
+| **D7** ✅ 配置兼容性 | yaml 与 .env 冲突检测（8个 Provider 一致性） | ✅ `66d96d40f` |
+| **D8** ✅ GPU/CUDA | GPU 驱动/CUDA Toolkit/PyTorch GPU 检测 | ✅ `66d96d40f` |
+
+### ✅ 浏览器工具兼容性修复（2026-06-03）
+
+| 修复 | 内容 |
+|------|------|
+| **CN 网络检测** | `_check_chromium_download_available()` 检测国内防火墙阻断，跳过安装 |
+| **中文提示** | 被墙时跳过 Chromium 下载并提示改为 Lightpanda 引擎 |
 
 ### 2. 语义防火墙增强 — P1
 
