@@ -674,6 +674,22 @@ def _run_cua_driver_installer(label: str = "Installing", verbose: bool = True) -
         return False
 
 
+def _check_chromium_download_available() -> bool:
+    """检测 Chromium 下载源 (storage.googleapis.com) 是否可达。
+
+    可用于判断是否在国内防火墙环境并提前给出中文提示。
+    """
+    import socket
+    try:
+        from urllib.parse import urlparse
+        host = "storage.googleapis.com"
+        sock = socket.create_connection((host, 443), timeout=5)
+        sock.close()
+        return True
+    except Exception:
+        return False
+
+
 def _run_post_setup(post_setup_key: str):
     """Run post-setup hooks for tools that need extra installation steps."""
     import shutil
@@ -750,6 +766,14 @@ def _run_post_setup(post_setup_key: str):
 
         _print_info("    Installing Chromium (~170MB one-time download)...")
         import subprocess
+
+        # 检测 Chromium 下载源是否可达（国内防火墙阻断 storage.googleapis.com）
+        if not _check_chromium_download_available():
+            _print_warning("    Chromium download source blocked (storage.googleapis.com)")
+            _print_info("    Suggestion: switch to Lightpanda engine (lighter, no screenshots)")
+            _print_info("      Edit ~/.hermes/config.yaml → browser.engine: lightpanda")
+            _print_info("      Or run manually with mirror: npx agent-browser install --with-deps")
+            return
         # Prefer the bundled agent-browser install subcommand so the
         # version of Chromium matches the CLI. Fall back to npx shim on
         # setups where the local bin stub isn't present.
