@@ -475,7 +475,181 @@ def _find_local_vision_model(
     return visions[0][0]
 
 
-# ── 配置写入函数 ──
+# ── 配置清理函数 ──
+
+
+def _cleanup_config() -> list[str]:
+    """整理简化 config.yaml，返回变更列表。
+
+    处理项：
+    - 删除空 dict / list 段落（providers, fallback_providers, credential_pool_strategies 等）
+    - 删除默认 Docker/容器 terminal 配置（日常用不到）
+    - 统一 fallback 格式（fallback_providers → fallback_model）
+    - 删除空字符串值
+    """
+    from hermes_cli.config import load_config, save_config
+
+    changes: list[str] = []
+    try:
+        cfg = load_config()
+        original = str(cfg)
+
+        # 1. 删除空值段落
+        for key in list(cfg.keys()):
+            val = cfg[key]
+            if isinstance(val, dict) and not val:
+                cfg.pop(key, None)
+                changes.append(f"删除空段落: {key}")
+            elif isinstance(val, list) and not val:
+                cfg.pop(key, None)
+                changes.append(f"删除空列表: {key}")
+            elif val == "":
+                cfg.pop(key, None)
+                changes.append(f"删除空值: {key}")
+
+        # 2. 清理 agent 中的空默认值
+        agent = cfg.get("agent", {})
+        if isinstance(agent, dict):
+            for k in ("service_tier",):
+                if agent.get(k) in ("", None):
+                    agent.pop(k, None)
+                    changes.append(f"清理 agent.{k} 空值")
+            # 清理空 dict 的子段落
+            for sk in list(agent.keys()):
+                sv = agent[sk]
+                if isinstance(sv, dict) and not sv:
+                    agent.pop(sk, None)
+                    changes.append(f"清理 agent.{sk} 空段")
+
+        # 3. 清理 terminal 中的 Docker/容器默认配置
+        terminal = cfg.get("terminal", {})
+        if isinstance(terminal, dict):
+            container_defaults = (
+                "docker_image", "docker_forward_env", "docker_env",
+                "singularity_image", "modal_image", "daytona_image",
+                "vercel_runtime", "container_cpu", "container_memory",
+                "container_disk",
+            )
+            for ck in container_defaults:
+                if ck in terminal and terminal[ck] is not None:
+                    terminal.pop(ck, None)
+                    changes.append(f"清理 terminal.{ck} (容器默认)")
+
+        # 4. 统一 fallback 格式：fallback_providers → fallback_model
+        if "fallback_model" in cfg and "fallback_providers" in cfg:
+            cfg.pop("fallback_providers", None)
+            changes.append("统一 fallback: fallback_providers → fallback_model")
+
+        if str(cfg) != original:
+            save_config(cfg)
+        return changes
+    except Exception as e:
+        logger.warning("config 清理失败: %s", e)
+        return changes
+
+
+def _cleanup_env() -> list[str]:
+    """整理简化 ~/.hermes/.env 文件。
+
+    处理项：
+    - 删除重复 KEY（保留最后出现的值）
+    - 删除明显无用的空 KEY
+    """
+    import re
+    from pathlib import Path
+
+    changes: list[str] = []
+    env_path = Path.home() / ".hermes" / ".env"
+    try:
+        if not env_path.exists():
+            return changes
+
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        new_lines: list[str] = []
+        seen_keys: set[str] = set()
+        duplicate_keys: set[str] = set()
+        key_line_indices: dict[str, int] = {}
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # 保留注释和空行
+            if not stripped or stripped.startswith("#"):
+                new_lines.append(line)
+                continue
+
+            # 解析 KEY=VALUE
+            if "=" in stripped:
+                key = stripped.split("=", 1)[0].strip()
+                if key in seen_keys:
+                    duplicate_keys.add(key)
+                seen_keys.add(key)
+                key_line_indices[key] = len(new_lines)
+                new_lines.append(line)
+            else:
+                new_lines.append(line)
+
+        # 删除重复 KEY（保留最后出现的行）
+        if duplicate_keys:
+            for key in duplicate_keys:
+                last_idx = key_line_indices[key]
+                # 找到之前出现的该 KEY 的行并删除
+                new_lines2: list[str] = []
+                remove_next = False
+                for idx, line in enumerate(new_lines):
+                    if idx == last_idx:
+                        remove_next = False
+                        new_lines2.append(line)
+                        continue
+                    stripped = line.strip()
+                    if "=" in stripped and stripped.split("=", 1)[0].strip() == key and idx < last_idx:
+                        remove_next = True
+                        changes.append(f"删除重复 KEY: {key} (保留第 {last_idx} 行)")
+                        continue
+                    new_lines2.append(line)
+                new_lines = new_lines2
+
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        return changes
+    except Exception as e:
+        logger.warning(".env 清理失败: %s", e)
+        return changes
+
+
+def _prompt_primary_strategy(
+    has_cloud: bool, has_local: bool,
+    current_label: str,
+) -> str:
+    """提示用户选择主力推理策略。
+
+    Returns:
+        "cloud" | "local"
+    """
+    from hermes_cli.colors import Colors, color
+    from hermes_cli.tools_config import _prompt_choice
+
+    if not has_cloud and not has_local:
+        return "auto"
+    if has_cloud and not has_local:
+        return "cloud"   # 只有云端，没得选
+    if has_local and not has_cloud:
+        return "local"   # 只有本地，没得选
+
+    # 两者都有 → 让用户选
+    print()
+    print(f"  {color('ℹ', Colors.BLUE)} 检测到多种推理资源:")
+    if has_cloud:
+        print(f"     云端: {current_label or 'API Key 已配置'}")
+    if has_local:
+        print(f"     本地: Ollama/LM Studio 等本地模型可用")
+    print()
+    print("  请选择主力推理方式：")
+    print("    1. 云端主力 — 云端 API 做主力推理，本地模型作为兜底")
+    print("       (推荐：云端模型更强大，适合复杂任务)")
+    print("    2. 本地优先 — 本地模型做主力推理，云端 API 作为兜底")
+    print("       (适合需要离线使用或节省 API 费用的场景)")
+    print()
+    choice = _prompt_choice("你的选择", ["云端主力", "本地优先"], default=0)
+    return "cloud" if choice == 0 else "local"
 
 def _configure_provider(provider: dict) -> bool:
     """将检测到的 Provider 写入 config.yaml 和 ~/.hermes/.env。"""
@@ -1295,27 +1469,38 @@ def cmd_quickstart(args) -> int:
             print()
         return result
 
-    # ── Step 2: 确定主力提供商 ──
+    # ── Step 1.5: 配置整理（自动执行）──
+    config_changes = _cleanup_config()
+    env_changes = _cleanup_env()
+    total_changes = config_changes + env_changes
+    if total_changes:
+        print(f"  {color('ℹ', Colors.BLUE)} 自动整理配置文件: {len(total_changes)} 项")
+        for c in total_changes:
+            print(f"      · {c}")
+        print()
+
+    # ── Step 2: 确定主力推理方式 ──
     print(f"  ⚙ Step 2/3: 配置智能路由...")
 
-    # 检查是否已有配置
+    has_cloud = bool(api_providers)
+    has_local = bool(ollama_info) or bool(local_server_infos)
     current_label = _get_current_provider_label()
-    downgrade_old = False
 
     if current_label:
         print(f"  {color('ℹ', Colors.BLUE)} 当前主力: {current_label}")
-        downgrade_old = _prompt_yes_no(
-            f"将现有配置降为回退模型？",
-            default=True,
-        )
-        print()
 
-    # 确定主力提供商：Ollama > LM Studio > llama.cpp > 云端 API > 嵌入式
+    primary_strategy = _prompt_primary_strategy(has_cloud, has_local, current_label)
+    print()
+
+    # 根据策略选择主力提供商
     primary_id = ""
     primary_model = ""
     primary_local_info = None
 
-    if ollama_info:
+    if primary_strategy == "cloud" and api_providers:
+        primary_id = api_providers[0]["id"]
+        primary_model = api_providers[0]["default_model"]
+    elif ollama_info:
         primary_id = "ollama"
         primary_model = ollama_info["default_model"]
     elif local_server_infos:
@@ -1338,46 +1523,6 @@ def cmd_quickstart(args) -> int:
         api_providers, ollama_info, has_embedded, primary_id,
         local_server_infos=local_server_infos,
     )
-
-    # 如果用户选择降级旧配置，将旧配置插入 fallback 链
-    if downgrade_old and current_label:
-        try:
-            from hermes_cli.config import load_config
-            cfg = load_config()
-            old_model_cfg = cfg.get("model", {})
-            if isinstance(old_model_cfg, dict):
-                old_provider = old_model_cfg.get("provider", "")
-                old_default = old_model_cfg.get("default", "")
-                old_base_url = old_model_cfg.get("base_url", "").rstrip("/")
-                
-                # 获取新主力的 base_url
-                new_base_url = ""
-                if primary_local_info:
-                    new_base_url = primary_local_info.get("base_url", "").rstrip("/")
-                
-                # 同 base_url = 同一服务，不重复加
-                same_service = bool(
-                    old_base_url and new_base_url
-                    and old_base_url == new_base_url
-                )
-                
-                if (
-                    old_provider and old_default
-                    and old_provider != primary_id
-                    and not same_service
-                ):
-                    old_entry = {"provider": old_provider, "model": old_default}
-                    if old_base_url:
-                        old_entry["base_url"] = old_base_url
-                    # 去重（provider+model）
-                    existing_entries = {
-                        (f.get("provider"), f.get("model"))
-                        for f in fallback_chain
-                    }
-                    if (old_provider, old_default) not in existing_entries:
-                        fallback_chain.insert(0, old_entry)
-        except Exception:
-            pass
 
     # 写入配置
     if primary_id == "ollama":

@@ -15,7 +15,7 @@ SmartRouter 的自动检测 + 国产 API 兼容特性是目前 cn 分支最核�
 |--------|------|-----------|
 | **M1** ✅ 国产 API 统一 failover | 云端健康检测、自动熔断 failover、熔断恢复探测 | 2-3 天 (✅ 已提交 ebbf35b) |
 | **M2** ✅ Cost-aware routing | CN_MODEL_COSTS 数据库(21模型)、4 种成本策略(off/balanced/strict/quality) | 3-5 天 (✅ 已提交 ce19f4f) |
-| **M3** quickstart 自动检测同步 | 让 SmartRouter 和 quickstart 的检测结果保持一致 | 1 天 |
+| **M3** ✅ quickstart 自动检测同步 | 让 SmartRouter 和 quickstart 的检测结果保持一致 | 1 天 (✅ 已提交 38122938) |
 | **M4** 向上游提交 PR | 抽离路由通用设计，向上游提交 | 待定 |
 
 ### 2. 语义防火墙增强 — P1
