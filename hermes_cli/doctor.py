@@ -953,13 +953,46 @@ def run_doctor(args):
         pass  # bedrock_adapter not available — skip silently
 
     # =========================================================================
+    # D6: Network connectivity (国产 API 端点可达性检测)
+    _section_summary()
+    print()
+    print(color("◆ 网络连通性", Colors.CYAN, Colors.BOLD))
+    _section_reset()
+
+    try:
+        from hermes_cli.quickstart import _network_diagnostics
+
+        results = _network_diagnostics()
+        for r in results:
+            if r["reachable"]:
+                check_ok(f"{r['provider']} 可达", f"({r['endpoint']})")
+            else:
+                check_warn(f"{r['provider']} 不可达", f"({r['endpoint']} - 可能被墙或服务宕机)")
+    except ImportError:
+        check_warn("网络诊断模块不可用", "(quickstart 模块未加载)")
+
+    # =========================================================================
     # Check: Submodules
     # =========================================================================
     _section_summary()
     print()
-    print(color("◆ 子模块", Colors.CYAN, Colors.BOLD))
+    print(color("◆ 网络连通性", Colors.CYAN, Colors.BOLD))
     _section_reset()
-    
+
+    try:
+        from hermes_cli.quickstart import _network_diagnostics
+
+        results = _network_diagnostics()
+        for r in results:
+            if r["reachable"]:
+                check_ok(f"{r['provider']} 可达", f"({r['endpoint']})")
+            else:
+                check_warn(f"{r['provider']} 不可达", f"({r['endpoint']} - 可能被墙或服务宕机)")
+    except ImportError:
+        check_warn("网络诊断模块不可用", "(quickstart 模块未加载)")
+
+    # =========================================================================
+    # Check: Submodules
     # tinker-atropos (RL training backend)
     tinker_dir = PROJECT_ROOT / "tinker-atropos"
     if tinker_dir.exists() and (tinker_dir / "pyproject.toml").exists():
