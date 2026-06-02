@@ -37,7 +37,6 @@ import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { PluginSlot } from "@/plugins";
 import { useTheme } from "@/themes";
-import { useProfileScope } from "@/contexts/useProfileScope";
 
 function buildWsUrl(
   authParam: [string, string],

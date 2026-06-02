@@ -394,12 +394,8 @@ function applyTheme(theme: DashboardTheme) {
   // Terminal background — read by ChatPage via useTheme(); also available as CSS var.
   root.style.setProperty(
     "--theme-terminal-background",
-    theme.terminalBackground ?? "#000000",
+    theme.terminalBackground ?? "#0d2626",
   );
-
-  // Re-assert the font override last: theme application just rewrote
-  // --theme-font-sans/-display, so an active override has to win again.
-  applyFontOverride(_ACTIVE_FONT_OVERRIDE);
 }
 
 // ---------------------------------------------------------------------------
