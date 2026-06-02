@@ -94,7 +94,7 @@ _VISION_FAMILIES = (
 # 匹配家族但实际是编码专用模型的排除关键词
 # 注: 模型名会被 replace('-', ' ') 归一化，所以排除词也需考虑空格形式
 _VISION_FAMILY_EXCLUSIONS = (
-    "coder", "code ", "instruct-code", "deepseek", "yi-lightning",
+    "coder", "code ", "instruct-code", "deepseek", "yi-lightning", "ocr",
 )
 
 _OLLAMA_MODEL_INFO_CACHE = {}
@@ -183,9 +183,13 @@ def _classify_ollama_model(name: str) -> str:
         - Checks if chat template handles image content
 
     Returns:
-        "vision" | "reasoning" | "coding" | "text"
+        "vision" | "reasoning" | "coding" | "embedding" | "text"
     """
     name_lower = name.lower().split(":")[0]  # 去掉标签（如 :8b）
+
+    # L0: embedding 模型（不能用于 chat）
+    if "embed" in name_lower:
+        return "embedding"
 
     # L1: 关键词匹配
     if any(kw in name_lower for kw in _VISION_KEYWORDS):
@@ -220,9 +224,9 @@ def _pick_ollama_primary(models: list[str]) -> str:
         return "llama3.2"
 
     classified = [(name, _classify_ollama_model(name)) for name in models]
-    # 优先 text/reasoning，排除 vision 和 coding（编码模型不作为通用主力）
+    # 优先 text/reasoning，排除 vision、coding 和 embedding（不能作为通用主力）
     non_vision_non_coding = [
-        (name, t) for name, t in classified if t not in ("vision", "coding")
+        (name, t) for name, t in classified if t not in ("vision", "coding", "embedding")
     ]
 
     if non_vision_non_coding:
@@ -776,6 +780,7 @@ def _write_smart_routing(
         # 写入 fallback 链
         if fallback_chain:
             cfg["fallback_model"] = fallback_chain
+            cfg.pop("fallback_providers", None)  # 统一格式，避免 doctor 警告
         else:
             cfg.pop("fallback_model", None)
 
@@ -836,11 +841,6 @@ def _write_smart_routing(
             if not isinstance(routing, dict):
                 routing = {}
 
-            # 清除旧格式键（每次 quickstart 都重置，避免残留）
-            routing.pop("default", None)
-            routing.pop("vision", None)
-            routing.pop("reasoning", None)
-
             rules = []
 
             # vision 规则
@@ -897,10 +897,13 @@ def _write_smart_routing(
             })
 
             routing["rules"] = rules
-            # 清除旧格式键，避免新旧共存导致配置混乱
-            routing.pop("default", None)
-            routing.pop("vision", None)
-            routing.pop("reasoning", None)
+            # 同步旧格式键（doctor / run_agent 仍检查 model_routing.default/vision/reasoning）
+            for name in ("default", "vision", "reasoning"):
+                rule = next((r for r in rules if r["name"] == name), None)
+                if rule:
+                    routing[name] = {"model": rule["model"]}
+                else:
+                    routing.pop(name, None)
             cfg["model_routing"] = routing
             logger.info(
                 "自动生成 model_routing 规则: %d 条 (vision/reasoning%s%s/default)",
