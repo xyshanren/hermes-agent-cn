@@ -61,10 +61,24 @@ _PROVIDER_CHECKS = [
     },
     {
         "id": "alibaba",
-        "name": "阿里云通义千问",
+        "name": "阿里云通义千问（百炼）",
         "env_var": "DASHSCOPE_API_KEY",
         "default_model": "qwen-turbo-latest",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+    {
+        "id": "baidu",
+        "name": "百度千帆",
+        "env_var": "QIANFAN_API_KEY",
+        "default_model": "ernie-4.0-8k-latest",
+        "base_url": "https://qianfan.baidubce.com/v2",
+    },
+    {
+        "id": "volcengine",
+        "name": "火山引擎（豆包）",
+        "env_var": "ARK_API_KEY",
+        "default_model": "doubao-pro-32k",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
     },
     {
         "id": "xiaomi",
@@ -193,6 +207,49 @@ def _detect_api_key_providers() -> list[dict]:
         if key and len(key) > 4:
             found.append(p)
     return found
+
+
+def _check_endpoint(endpoint: str, timeout: float = 5.0) -> bool:
+    """检测 API 端点是否可连接。"""
+    import socket
+
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(endpoint)
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.close()
+        return True
+    except Exception:
+        return False
+
+
+def _network_diagnostics() -> list[dict]:
+    """检测常见国产 API 端点可达性，返回诊断结果列表。
+
+    每条结果: {"provider": str, "endpoint": str, "reachable": bool}
+    """
+    endpoints = [
+        ("DeepSeek", "https://api.deepseek.com"),
+        ("硅基流动", "https://api.siliconflow.cn"),
+        ("智谱 GLM", "https://open.bigmodel.cn"),
+        ("月之暗面 Kimi", "https://api.moonshot.cn"),
+        ("MiniMax", "https://api.minimax.chat"),
+        ("阿里云百炼", "https://dashscope.aliyuncs.com"),
+        ("百度千帆", "https://qianfan.baidubce.com"),
+        ("火山引擎", "https://ark.cn-beijing.volces.com"),
+    ]
+    results = []
+    from hermes_cli.colors import Colors, color
+
+    for name, url in endpoints:
+        ok = _check_endpoint(url)
+        icon = color("✓", Colors.GREEN) if ok else color("✗", Colors.RED)
+        results.append({"provider": name, "endpoint": url, "reachable": ok})
+        print(f"    {icon} {name:20s} {url}")
+    return results
 
 
 def _detect_ollama() -> Optional[dict]:
