@@ -976,101 +976,111 @@ def _write_smart_routing(
                 }
 
         # Phase 2-3: 自动生成 model_routing 规则
-        # 优先使用 Ollama 模型，其次使用其他本地服务模型
+        # 确定路由来源：Ollama > LM Studio > 无
+        is_cloud_primary = primary_provider_id not in ("ollama", "custom", "embedded", "")
         routing_source = ollama_info
         if not routing_source and local_server_infos:
             routing_source = local_server_infos[0]
 
-        if routing_source and len(routing_source.get("models", [])) >= 2:
+        routing = cfg.get("model_routing", {})
+        if not isinstance(routing, dict):
+            routing = {}
+
+        # 从路由来源（Ollama/本地服务）提取分类模型，用于视觉/编码规则
+        vision_models = []
+        text_models = []
+        coding_models = []
+        small_models = []
+        if routing_source:
             classified = routing_source.get("classified_models", [])
             vision_models = [m for m in classified if m.get("type") == "vision"]
             text_models = [m for m in classified if m.get("type") != "vision"]
-            reasoning_models = [m for m in classified if m.get("type") == "reasoning"]
             coding_models = [
                 m for m in classified
                 if any(kw in m.get("name", "").lower() for kw in ("coder", "code-"))
             ]
+            if text_models and not is_cloud_primary:
+                small_models = [
+                    m for m in text_models
+                    if _get_local_model_param_size(m["name"]) <= 8.0
+                    and m["name"] != primary_model
+                ]
 
-            routing = cfg.get("model_routing", {})
-            if not isinstance(routing, dict):
-                routing = {}
+        rules = []
 
-            rules = []
+        # 每个规则中的 model 名会由 SmartRouter 按当前 provider 解析。
+        # 云端主力时只用 primary_model，避免路由到本地模型名后错发到云端 API。
 
-            # vision 规则
-            if vision_models:
-                rules.append({
-                    "name": "vision",
-                    "match": {"has_image": True},
-                    "model": vision_models[0]["name"],
-                })
-
-            # reasoning 规则
+        # vision 规则
+        if vision_models:
             rules.append({
-                "name": "reasoning",
+                "name": "vision",
+                "match": {"has_image": True},
+                "model": vision_models[0]["name"],
+            })
+        elif is_cloud_primary and vision_provider and vision_model:
+            # 云端主力 + 云端视觉模型 → 用 auxiliary.vision 的模型名
+            rules.append({
+                "name": "vision",
+                "match": {"has_image": True},
+                "model": vision_model,
+            })
+
+        # reasoning 规则
+        rules.append({
+            "name": "reasoning",
+            "match": {
+                "keywords": ["分析", "推理", "思考", "证明"],
+            },
+            "model": primary_model,
+        })
+
+        # coding 规则（有编码专用模型时）
+        if coding_models:
+            rules.append({
+                "name": "coding",
                 "match": {
-                    "keywords": ["分析", "推理", "思考", "证明"],
+                    "keywords": [
+                        "写代码", "函数", "class", "debug",
+                        "实现一个", "编程", "refactor", "coding",
+                    ],
+                    "threshold": 1,
                 },
-                "model": reasoning_models[0]["name"] if reasoning_models else primary_model,
+                "model": coding_models[0]["name"] if not is_cloud_primary else primary_model,
             })
 
-            # coding 规则（阶段 2：有编码专用模型时自动生成）
-            if coding_models:
-                rules.append({
-                    "name": "coding",
-                    "match": {
-                        "keywords": [
-                            "写代码", "函数", "class", "debug",
-                            "实现一个", "编程", "refactor", "coding",
-                        ],
-                        "threshold": 1,
-                    },
-                    "model": coding_models[0]["name"],
-                })
-
-            # short_chat 规则（阶段 3：有小参数量模型时自动生成）
-            small_models = [
-                m for m in text_models
-                if _get_local_model_param_size(m["name"]) <= 8.0
-                and m["name"] != primary_model
-            ]
-            if small_models:
-                rules.append({
-                    "name": "short_chat",
-                    "match": {
-                        "max_length": 80,
-                        "exclude_keywords": ["bug", "报错", "crash", "fix", "error", "分析"],
-                    },
-                    "model": small_models[0]["name"],
-                })
-
-            # default 规则
+        # short_chat 规则（仅本地主力时生成，避免短消息路由到本地模型名后错发到云端）
+        if not is_cloud_primary and small_models:
             rules.append({
-                "name": "default",
-                "model": primary_model,
+                "name": "short_chat",
+                "match": {
+                    "max_length": 80,
+                    "exclude_keywords": ["bug", "报错", "crash", "fix", "error", "分析"],
+                },
+                "model": small_models[0]["name"],
             })
 
-            routing["rules"] = rules
-            # 同步旧格式键（doctor / run_agent 仍检查 model_routing.default/vision/reasoning）
-            for name in ("default", "vision", "reasoning"):
-                rule = next((r for r in rules if r["name"] == name), None)
-                if rule:
-                    routing[name] = {"model": rule["model"]}
-                else:
-                    routing.pop(name, None)
-            cfg["model_routing"] = routing
-            logger.info(
-                "自动生成 model_routing 规则: %d 条 (vision/reasoning%s%s/default)",
-                len(rules),
-                "/coding" if coding_models else "",
-                "/short_chat" if small_models else "",
-            )
-        else:
-            # 单模型或无模型场景: 清除旧 model_routing 防止残留
-            # 例如用户从 Ollama 多模型切换到 llama.cpp 单模型时,
-            # 旧规则仍引用 Ollama 模型名, 会被 _apply_model_routing 激活
-            cfg.pop("model_routing", None)
-            logger.info("无 model_routing 规则 (单模型场景), 已清除旧规则")
+        # default 规则（始终在最后）
+        rules.append({
+            "name": "default",
+            "model": primary_model,
+        })
+
+        routing["rules"] = rules
+        # 同步旧格式键（doctor / run_agent 仍检查 model_routing.default/vision/reasoning）
+        for name in ("default", "vision", "reasoning"):
+            rule = next((r for r in rules if r["name"] == name), None)
+            if rule:
+                routing[name] = {"model": rule["model"]}
+            else:
+                routing.pop(name, None)
+        cfg["model_routing"] = routing
+        logger.info(
+            "自动生成 model_routing 规则: %d 条 (vision/reasoning%s%s/default)",
+            len(rules),
+            "/coding" if coding_models else "",
+            "/short_chat" if small_models else "",
+        )
 
         save_config(cfg)
 
