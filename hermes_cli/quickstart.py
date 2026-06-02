@@ -765,6 +765,32 @@ def _configure_local_server(local_info: dict) -> bool:
         return False
 
 
+def _get_provider_model(cfg: dict, provider_id: str, default_model: str) -> str:
+    """从已保存的配置中读取该 provider 实际使用的模型。
+
+    检查顺序：
+    1. providers.<id>.models[0]（provider 注册模型列表）
+    2. model.default（当前主力模型，仅当 provider 匹配时）
+    3. fallback 回退 default_model
+    """
+    # 优先从 providers 段读取
+    all_providers = cfg.get("providers", {})
+    if isinstance(all_providers, dict):
+        p_cfg = all_providers.get(provider_id, {})
+        if isinstance(p_cfg, dict):
+            models = p_cfg.get("models", [])
+            if isinstance(models, list) and models:
+                return models[0]
+
+    # 其次检查 model 段（provider 匹配时）
+    model_cfg = cfg.get("model", {})
+    if isinstance(model_cfg, dict):
+        if model_cfg.get("provider") == provider_id and model_cfg.get("default"):
+            return model_cfg["default"]
+
+    return default_model
+
+
 # ── 智能路由配置 ──
 
 def _build_fallback_chain(
@@ -786,12 +812,18 @@ def _build_fallback_chain(
     chain: list[dict] = []
     local_server_infos = local_server_infos or []
 
-    # 云端 API providers（排除主力）
+    # 云端 API providers（排除主力），优先用用户已配置的模型
+    from hermes_cli.config import load_config
+    _existing_cfg = load_config()
+
     for p in api_providers:
         if p["id"] != primary_provider_id:
+            # 检测该 provider 是否有已配置的模型（非默认值）
+            provider_model = _get_provider_model(_existing_cfg, p["id"],
+                                                  p["default_model"])
             chain.append({
                 "provider": p["id"],
-                "model": p["default_model"],
+                "model": provider_model,
             })
 
     # Ollama（如果不是主力）
@@ -885,16 +917,37 @@ def _write_smart_routing(
             cfg.pop("fallback_model", None)
 
         # 自动配置 auxiliary.vision
-        # 先检查 Ollama，再检查本地服务（LM Studio / llama.cpp）
+        # 优先级：已存配置 > 云端 API 视觉模型 > Ollama > 本地服务
         vision_model = None
         vision_provider = None
         vision_base_url = None
 
-        if ollama_info:
-            vision_model = ollama_info.get("vision_model")
-            if vision_model:
-                vision_provider = "ollama"
-                vision_base_url = "http://localhost:11434/v1"
+        # 先检查是否已有有效配置（非 auto/ollama/custom 的不覆盖）
+        aux = cfg.setdefault("auxiliary", {})
+        if not isinstance(aux, dict):
+            aux = {}
+            cfg["auxiliary"] = aux
+        existing_vision = aux.get("vision", {})
+        existing_provider = str(existing_vision.get("provider", "")).strip()
+        if existing_provider not in ("", "auto", "ollama", "custom"):
+            # 已有云端视觉配置，保留不动
+            pass
+        else:
+            # 云端 API 视觉检测：检查已配置的云端 Provider 是否有视觉模型
+            if not vision_model and api_providers:
+                for p in api_providers:
+                    p_model = _get_provider_model(cfg, p["id"], p["default_model"])
+                    if any(kw in p_model.lower() for kw in ("vl", "vision", "llava")):
+                        vision_model = p_model
+                        vision_provider = p["id"]
+                        vision_base_url = p.get("base_url", "")
+                        break
+
+            if not vision_model and ollama_info:
+                vision_model = ollama_info.get("vision_model")
+                if vision_model:
+                    vision_provider = "ollama"
+                    vision_base_url = "http://localhost:11434/v1"
 
         if not vision_model and local_server_infos:
             for li in local_server_infos:
