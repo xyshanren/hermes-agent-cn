@@ -43,98 +43,237 @@ from hermes_constants import get_hermes_home
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+
+# Import comment placeholder — actual _FirewallRuleManager loads patterns
+# from module-level constants defined below via _load_defaults().  This
+# is fine because the singleton creation is lazy: _rule_manager is created
+# at module import, but _load_defaults() references constants that are
+# defined later in the same file.  Python resolves the names at runtime,
+# not at import time, so this works.
+#
+# ── FYI: Constants locations ──
+#   _INJECTION_MARKER_PATTERNS      → line ~290
+#   _CAPABILITY_EXFILTRATION_PATTERNS  → line ~320
+#   _CONTENT_SANITIZE_PATTERNS       → line ~342
+
+class _FirewallRuleManager:
+    """Manages firewall rules with lazy config-driven hot-reload.
+
+    Patterns are loaded from module-level defaults and may be overridden
+    via config.yaml → skills → firewall → patterns.
+
+    On each access, the manager checks whether config.yaml's firewall
+    section has changed (by comparing a content hash).  If so, patterns
+    are reloaded transparently.
+    """
+
+    def __init__(self):
+        self._config_hash: str = ""
+        self._injection_patterns: List[tuple] = []
+        self._exfiltration_patterns: List[tuple] = []
+        self._sanitize_patterns: List[tuple] = []
+        self._llm_threshold_warning: float = 0.50
+        self._llm_threshold_block: float = 0.80
+        self._defaults_loaded: bool = False
+
+    def _load_defaults(self) -> None:
+        self._injection_patterns = list(globals().get('_INJECTION_MARKER_PATTERNS', []))
+        self._exfiltration_patterns = list(globals().get('_CAPABILITY_EXFILTRATION_PATTERNS', []))
+        self._sanitize_patterns = list(globals().get('_CONTENT_SANITIZE_PATTERNS', []))
+        self._llm_threshold_warning = 0.50
+        self._llm_threshold_block = 0.80
+
+    def _compute_config_hash(self) -> str:
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config()
+            section = cfg.get("skills", {}).get("firewall", {})
+            if not isinstance(section, dict) or not section:
+                return ""
+            raw = json.dumps(section, sort_keys=True, ensure_ascii=False)
+            return hashlib.md5(raw.encode()).hexdigest()
+        except Exception:
+            return ""
+
+    def _reload_from_config(self) -> None:
+        self._load_defaults()
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config()
+            section = cfg.get("skills", {}).get("firewall", {})
+            if not isinstance(section, dict):
+                return
+            thresholds = section.get("thresholds", {})
+            if isinstance(thresholds, dict):
+                self._llm_threshold_warning = float(
+                    thresholds.get("warning", self._llm_threshold_warning))
+                self._llm_threshold_block = float(
+                    thresholds.get("block", self._llm_threshold_block))
+            patterns = section.get("patterns", {})
+            if isinstance(patterns, dict):
+                self._injection_patterns = self._merge_patterns(
+                    self._injection_patterns,
+                    patterns.get("injection", []))
+                self._exfiltration_patterns = self._merge_patterns(
+                    self._exfiltration_patterns,
+                    patterns.get("exfiltration", []))
+                self._sanitize_patterns = self._merge_patterns(
+                    self._sanitize_patterns,
+                    patterns.get("sanitize", []))
+        except Exception:
+            logger.warning("Firewall rules reload failed, using defaults", exc_info=True)
+
+    @staticmethod
+    def _merge_patterns(base: List[tuple], overrides: List) -> List[tuple]:
+        if not overrides:
+            return base
+        result = {name: (pat, name) for pat, name in base}
+        for item in overrides:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                pat = item.get("pattern", "")
+                if name and pat:
+                    result[name] = (pat, name)
+        return [(pat, name) for pat, name in result.values()]
+
+    def ensure_fresh(self) -> None:
+        if not self._defaults_loaded:
+            self._load_defaults()
+            self._defaults_loaded = True
+        ch = self._compute_config_hash()
+        if ch and ch != self._config_hash:
+            self._config_hash = ch
+            self._reload_from_config()
+            logger.info("Firewall rules reloaded (config changed)")
+
+    def get_injection_patterns(self) -> List[tuple]:
+        self.ensure_fresh()
+        return self._injection_patterns
+
+    def get_exfiltration_patterns(self) -> List[tuple]:
+        self.ensure_fresh()
+        return self._exfiltration_patterns
+
+    def get_sanitize_patterns(self) -> List[tuple]:
+        self.ensure_fresh()
+        return self._sanitize_patterns
+
+    def get_threshold_warning(self) -> float:
+        self.ensure_fresh()
+        return self._llm_threshold_warning
+
+    def get_threshold_block(self) -> float:
+        self.ensure_fresh()
+        return self._llm_threshold_block
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "hot_reload_enabled": True,
+            "config_hash": self._config_hash or "(defaults)",
+            "injection_patterns": len(self._injection_patterns),
+            "exfiltration_patterns": len(self._exfiltration_patterns),
+            "sanitize_patterns": len(self._sanitize_patterns),
+            "llm_threshold_warning": self._llm_threshold_warning,
+            "llm_threshold_block": self._llm_threshold_block,
+        }
+
+
+_rule_manager = _FirewallRuleManager()
+
+
+def reload_rules() -> int:
+    """Force reload firewall rules from config.yaml.  Returns pattern count."""
+    _rule_manager._config_hash = ""
+    _rule_manager._defaults_loaded = False
+    _rule_manager.ensure_fresh()
+    total = (
+        len(_rule_manager._injection_patterns)
+        + len(_rule_manager._exfiltration_patterns)
+        + len(_rule_manager._sanitize_patterns)
+    )
+    logger.info("Firewall rules reloaded: %d patterns", total)
+    return total
+
+
+# ── Constants ──
 
 FIREWALL_STATE_FILE = get_hermes_home() / "skills" / ".semantic_firewall_state"
 AUDIT_LOG_FILE = get_hermes_home() / "skills" / ".skill_audit_log.jsonl"
 QUARANTINE_DIR = get_hermes_home() / "skills" / ".quarantine"
 
-# Trust levels (mirrors skills_guard.py but extended)
-class TrustLevel(Enum):
-    BUILTIN = "builtin"       # Ships with Hermes, always trusted
-    TRUSTED = "trusted"        # openai/skills, anthropics/skills
-    COMMUNITY = "community"    # Hub/community skills
-    AGENT_CREATED = "agent-created"  # Agent derived from user intent
-    INGESTED = "ingested"      # Derived from ingested untrusted content ← DANGEROUS
-    QUARANTINED = "quarantined"  # Blocked, awaiting human review
 
-# Provenance tags — how did this skill/SKILL.md come to exist?
+class TrustLevel(Enum):
+    BUILTIN = "builtin"
+    TRUSTED = "trusted"
+    COMMUNITY = "community"
+    AGENT_CREATED = "agent-created"
+    INGESTED = "ingested"
+    QUARANTINED = "quarantined"
+
+
 class Provenance(Enum):
-    BUILTIN = "builtin"           # Ships with Hermes
-    USER_CREATED = "user-created"  # Explicit user creation
-    USER_APPROVED = "user-approved"  # User explicitly approved after review
-    INGESTED_CONTENT = "ingested"   # Derived from processed content
-    CURATOR_SUGGESTED = "curator"   # Curator recommended modification
+    BUILTIN = "builtin"
+    USER_CREATED = "user-created"
+    USER_APPROVED = "user-approved"
+    INGESTED_CONTENT = "ingested"
+    CURATOR_SUGGESTED = "curator"
     UNKNOWN = "unknown"
 
 
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
-
 @dataclass
 class ProvenanceRecord:
-    """Tracks the origin and chain of custody for a skill."""
     skill_name: str
-    provenance: str           # Provenance enum value
-    source_content: str      # What triggered this skill's creation
-    source_url: Optional[str]  # If from web content
-    source_file: Optional[str]  # If from local file
-    ingest_type: str         # "web_page" | "document" | "code_file" | "user_input"
-    created_at: str          # ISO timestamp
-    verified: bool           # Passed verification gate
-    verified_by: str         # "llm_gate" | "user" | "none"
-    risk_signals: List[str]  # Detected risk indicators
-    parent_skill: Optional[str]  # If this skill modified an existing one
+    provenance: str
+    source_content: str
+    source_url: Optional[str] = None
+    source_file: Optional[str] = None
+    ingest_type: str = "unknown"
+    created_at: str = ""
+    verified: bool = False
+    verified_by: str = "none"
+    risk_signals: List[str] = field(default_factory=list)
+    parent_skill: Optional[str] = None
 
 
 @dataclass
 class SanitizationResult:
-    """Result of content sanitization."""
-    original_length: int
-    sanitized_length: int
-    sanitized_content: str  # The actually cleaned content string
-    removals: List[Dict[str, Any]]  # What was removed and why
+    original_length: int = 0
+    sanitized_length: int = 0
+    sanitized_content: str = ""
+    removals: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
 class VerificationResult:
-    """Result of pre-write verification gate."""
-    allowed: bool
-    verdict: str             # "safe" | "caution" | "dangerous" | "blocked"
-    reasons: List[str]       # Human-readable explanations
-    risk_signals: List[str]   # Specific risk patterns detected
-    confidence: float         # 0.0-1.0
-    suggested_action: str     # "allow" | "quarantine" | "block" | "ask_user"
+    allowed: bool = False
+    verdict: str = "unknown"
+    reasons: List[str] = field(default_factory=list)
+    risk_signals: List[str] = field(default_factory=list)
+    confidence: float = 0.0
+    suggested_action: str = "ask_user"
 
 
 @dataclass
 class AuditEntry:
-    """Single entry in the audit log."""
-    timestamp: str
-    action: str               # "create" | "edit" | "patch" | "delete" | "quarantine" | "restore" | "purge"
-    skill_name: str
-    provenance: str
-    actor: str                # "agent" | "curator" | "user" | "firewall"
-    content_hash: str         # SHA256 of the SKILL.md content
-    trigger: str             # What triggered this action
-    verification_passed: bool
-    user_approved: bool
-    details: Dict[str, Any]
+    timestamp: str = ""
+    action: str = ""
+    skill_name: str = ""
+    provenance: str = ""
+    actor: str = ""
+    content_hash: str = ""
+    trigger: str = ""
+    verification_passed: bool = False
+    user_approved: bool = False
+    details: Dict[str, Any] = field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Layer 1: Content Sanitization Gate
-# ---------------------------------------------------------------------------
+# ── Default pattern definitions (same names as existing module constants) ──
 
-# Patterns that indicate prompt injection attempts in content.
-# These are markers, not the malicious payload itself — the payload can be
-# arbitrarily complex. The gate strips the markers and warns about the content.
+# (The actual list definitions appear at their original location in the file.
+#  _FirewallRuleManager._load_defaults() explicitly references these constants
+#  to read the default pattern sets.)
 
 _INJECTION_MARKER_PATTERNS = [
-    # Markdown/HTML comments hiding instructions
     (r"<!--[\s\S]*?(?:Create|Make|Add|Write|Install|Skill|SKILL)[^\n]{0,200}?-->",
      "hidden_comment_injection"),
     # HTML style/head hiding content
@@ -215,7 +354,7 @@ def sanitize_ingested_content(content: str, source_type: str = "unknown") -> San
     sanitized = content
 
     # Step 1: Remove obviously malicious markers
-    for pattern, removal_type in _CONTENT_SANITIZE_PATTERNS:
+    for pattern, removal_type in _rule_manager.get_sanitize_patterns():
         new_content = re.sub(pattern, "", sanitized, flags=re.IGNORECASE | re.DOTALL)
         if new_content != sanitized:
             removals.append({
@@ -226,7 +365,7 @@ def sanitize_ingested_content(content: str, source_type: str = "unknown") -> San
             sanitized = new_content
 
     # Step 2: Flag injection markers (don't remove, just record)
-    for pattern, marker_type in _INJECTION_MARKER_PATTERNS:
+    for pattern, marker_type in _rule_manager.get_injection_patterns():
         matches = re.findall(pattern, sanitized, flags=re.IGNORECASE | re.DOTALL)
         if matches:
             removals.append({
@@ -268,7 +407,7 @@ def check_capability_risk(content: str, skill_context: bool = True) -> List[Tupl
     else:
         regions_to_check = content
 
-    for pattern, pattern_id in _CAPABILITY_EXFILTRATION_PATTERNS:
+    for pattern, pattern_id in _rule_manager.get_exfiltration_patterns():
         matches = re.findall(pattern, regions_to_check, flags=re.IGNORECASE)
         if matches:
             for match in matches:
