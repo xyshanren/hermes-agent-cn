@@ -33,6 +33,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from agent.model_detection import infer_vision_support, is_embedding_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -360,10 +362,8 @@ def _estimate_params_from_api(model_info: Dict[str, Any]) -> int:
 
 
 def _infer_vision_support(model_name: str) -> bool:
-    """从模型名称推断是否支持视觉。"""
-    name_lower = model_name.lower()
-    vision_keywords = ["vl", "vision", "multimodal", "omni", "llava"]
-    return any(kw in name_lower for kw in vision_keywords)
+    """从模型名称推断是否支持视觉（复用 model_detection 的共享逻辑）。"""
+    return infer_vision_support(model_name)
 
 
 def _estimate_capability(params_b: int, context_length: int,
@@ -540,7 +540,8 @@ class BackendHub:
             if online and models_raw:
                 for m in models_raw:
                     lm = self._build_local_model(m, name, base_url, priority)
-                    all_models.append(lm)
+                    if lm:
+                        all_models.append(lm)
                 logger.debug("后端 %s: 在线, %d 个模型", name, len(models_raw))
             else:
                 logger.debug("后端 %s: 离线或无模型", name)
@@ -637,9 +638,15 @@ class BackendHub:
             return False, []
 
     def _build_local_model(self, raw: Dict, backend: str,
-                           base_url: str, priority: int) -> LocalModel:
+                           base_url: str, priority: int) -> Optional[LocalModel]:
         """从原始 API 返回构建 LocalModel 对象。"""
         name = raw.get("name", raw.get("id", "unknown"))
+
+        # 跳过 embedding 模型（nomic-embed-text, bge-* 等不适合用于 chat）
+        if is_embedding_model(name):
+            logger.debug("跳过 embedding 模型: %s", name)
+            return None
+
         params = _estimate_params_from_api(raw)
         context_length = self._estimate_context_length(raw, name)
         supports_vision = _infer_vision_support(name)
