@@ -18,6 +18,17 @@ SmartRouter 的自动检测 + 国产 API 兼容特性是目前 cn 分支最核�
 | **M3** ✅ quickstart 自动检测同步 | 让 SmartRouter 和 quickstart 的检测结果保持一致 | 1 天 (✅ 已提交 38122938) |
 | **M4** 向上游提交 PR | 抽离路由通用设计，向上游提交 | 待定 |
 
+### ✅ Quickstart 增强（2026-06-02 修复批）
+
+| 修复项 | 内容 | 
+|--------|------|
+| **模型检测统一** | 新建 `agent/model_detection.py`，quickstart 和 SmartRouter 共享一套分类逻辑 |
+| **云端/本地主力选择** | 同时有云端 API 和本地模型时，让用户选择主力策略 |
+| **云端视觉模型** | `auxiliary.vision` 优先检测云端 Provider 中的视觉模型，其次才是 Ollama |
+| **配置自动整理** | `_cleanup_config()` 清理空段/容器默认值；`_cleanup_env()` 去重 |
+| **Fallback 读配置模型** | fallback 链不再用硬编码默认值，改为读取用户实际配置的模型 |
+| **model_routing 云端兼容** | 云端主力时规则只引用云端模型名，不引用 Ollama 本地模型，避免 400 错误 |
+
 ### 2. 语义防火墙增强 — P1
 
 语义防火墙的 5 层纵深防御是另一个独立价值点（上游没有），已初步成型，值得增强。
