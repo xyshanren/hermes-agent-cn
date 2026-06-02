@@ -859,6 +859,15 @@ def _build_fallback_chain(
                 })
                 break  # 只加一个 Ollama fallback
 
+    # 嵌入式模型始终放最后（断网兜底）
+    if has_embedded:
+        chain.append({
+            "provider": "embedded",
+            "model": "qwen-0.5b",
+        })
+
+    return chain
+
 
 def _write_smart_routing(
     primary_provider_id: str,
@@ -1627,13 +1636,25 @@ def cmd_quickstart(args) -> int:
         status_text = "已就绪" if mcp_ok else "已启用（下次重启生效）"
         print(f"  🧠 知识库: MemPalace — {status_text}")
 
-    # auxiliary.vision 显示
-    vision_model = (ollama_info or {}).get("vision_model")
-    if not vision_model and local_server_infos:
-        vision_model = local_server_infos[0].get("vision_model")
-    if vision_model:
-        vision_label = "Ollama（本地）" if ollama_info and ollama_info.get("vision_model") else "本地服务"
-        print(f"  👁 视觉分析: {vision_label} — {vision_model} (auxiliary)")
+    # auxiliary.vision 显示 — 从已写入的配置中读取
+    from hermes_cli.config import load_config
+    _saved_cfg = load_config()
+    _aux_vision = _saved_cfg.get("auxiliary", {}).get("vision", {})
+    _vision_provider = str(_aux_vision.get("provider", "")).strip()
+    _vision_model = str(_aux_vision.get("model", "")).strip()
+    if _vision_model and _vision_provider:
+        _vision_label = {
+            "siliconflow": "硅基流动",
+            "deepseek": "DeepSeek",
+            "minimax": "MiniMax",
+            "kimi": "月之暗面 Kimi",
+            "zai": "智谱 AI",
+            "alibaba": "阿里云通义千问",
+            "ollama": "Ollama（本地）",
+            "custom": "本地服务",
+            "embedded": "嵌入式",
+        }.get(_vision_provider, _vision_provider)
+        print(f"  👁 视觉分析: {_vision_label} — {_vision_model} (auxiliary)")
 
     # coding 模型显示
     coding_models = [m for m in (ollama_info or {}).get("classified_models", []) if m.get("type") == "coding"]
