@@ -971,35 +971,63 @@ def run_doctor(args):
     except ImportError:
         check_warn("网络诊断模块不可用", "(quickstart 模块未加载)")
 
-    # =========================================================================
-    # Check: Submodules
-    # =========================================================================
-    _section_summary()
-    print()
-    print(color("◆ 网络连通性", Colors.CYAN, Colors.BOLD))
-    _section_reset()
-
-    try:
-        from hermes_cli.quickstart import _network_diagnostics
-
-        results = _network_diagnostics()
-        for r in results:
-            if r["reachable"]:
-                check_ok(f"{r['provider']} 可达", f"({r['endpoint']})")
-            else:
-                check_warn(f"{r['provider']} 不可达", f"({r['endpoint']} - 可能被墙或服务宕机)")
-    except ImportError:
         check_warn("网络诊断模块不可用", "(quickstart 模块未加载)")
 
     # =========================================================================
-    # Check: Submodules
-    # tinker-atropos (RL training backend)
+    # D7: Config compatibility (yaml 与 .env 冲突检测)
+    # =========================================================================
+    _section_summary()
+    print()
+    print(color("◆ 配置兼容性", Colors.CYAN, Colors.BOLD))
+    _section_reset()
+
+    try:
+        from hermes_cli.config import load_config, get_env_value
+
+        _cfg = load_config()
+        _issues = []
+
+        # 检查每个 Provider 的 API Key 是否配置
+        from hermes_cli.quickstart import _PROVIDER_CHECKS
+
+        for _p in _PROVIDER_CHECKS:
+            _env_val = os.environ.get(_p["env_var"], "")
+            if not _env_val:
+                _env_val = get_env_value(_p["env_var"])
+            _has_key = bool(_env_val and len(_env_val) > 4)
+
+            # 检查 providers 段中是否配置了该 provider
+            _providers_cfg = _cfg.get("providers", {})
+            _configured = isinstance(_providers_cfg, dict) and _p["id"] in _providers_cfg
+
+            if _has_key and not _configured:
+                _issues.append(f"{_p['name']}: .env 中有 {_p['env_var']}，但 config.yaml 未配置该 Provider")
+            elif _configured and not _has_key:
+                _issues.append(f"{_p['name']}: config.yaml 已配置，但 .env 中缺少 {_p['env_var']}")
+
+        if not _issues:
+            check_ok("配置一致性检查通过", "(8 个国产 Provider 均已校验)")
+        else:
+            for _issue in _issues:
+                check_warn(f"配置冲突", _issue)
+    except ImportError:
+        check_warn("配置兼容性检测模块不可用", "(quickstart 模块未加载)")
+
+    # =========================================================================
+    # Check: Submodules (tinker-atropos RL training backend)
+    # =========================================================================
+    _section_summary()
+    print()
+    print(color("◆ 子模块", Colors.CYAN, Colors.BOLD))
+    _section_reset()
+
     tinker_dir = PROJECT_ROOT / "tinker-atropos"
     if tinker_dir.exists() and (tinker_dir / "pyproject.toml").exists():
-        if py_version >= (3, 11):
+        py_version = sys.version_info
+        if py_version.major >= 3 and py_version.minor >= 11:
             try:
-                __import__("tinker_atropos")
-                check_ok("tinker-atropos", "(RL training backend)")
+                import tinker_atropos  # noqa: F401
+                check_ok("tinker-atropos 已安装", f"({tinker_dir})")
             except ImportError:
                 install_cmd = f"{_python_install_cmd()} -e ./tinker-atropos"
                 check_warn("tinker-atropos found but not installed", f"(run: {install_cmd})")
