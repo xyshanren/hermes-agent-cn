@@ -377,6 +377,8 @@ def sanitize_ingested_content(content: str, source_type: str = "unknown") -> San
 
     sanitized = sanitized.strip()
 
+    _log_sanitization_event("sanitize", content, removals)
+
     return SanitizationResult(
         original_length=original_length,
         sanitized_length=len(sanitized),
@@ -397,7 +399,6 @@ def check_capability_risk(content: str, skill_context: bool = True) -> List[Tupl
     Returns list of (pattern_id, matched_text) tuples.
     """
     risks = []
-
     # In skill context, scope detection to non-code-block regions only.
     # This avoids false positives on legitimate Python/SQL examples.
     if skill_context:
@@ -413,6 +414,8 @@ def check_capability_risk(content: str, skill_context: bool = True) -> List[Tupl
             for match in matches:
                 text = str(match)[:200] if isinstance(match, str) else str(match[0])[:200]
                 risks.append((pattern_id, text))
+
+    _log_risk_event("risk_detected", content, risks)
     return risks
 
 
@@ -918,6 +921,85 @@ def get_audit_log(limit: int = 100) -> List[AuditEntry]:
         return entries[-limit:]
     except OSError:
         return []
+
+
+def show_audit_log(limit: int = 20, action_filter: Optional[str] = None) -> int:
+    """Print formatted audit log entries.  Returns count printed.
+
+    Args:
+        limit: Max entries to show (most recent, default 20).
+        action_filter: If set, only show entries with this action
+                       (e.g. "sanitize", "risk", "quarantine", "create").
+    """
+    entries = get_audit_log(limit=limit * 5)  # read more, then filter
+    if action_filter:
+        entries = [e for e in entries if e.action == action_filter]
+
+    count = 0
+    for e in entries[-limit:]:
+        ts = e.timestamp.split("T")[0] if "T" in e.timestamp else e.timestamp[:10]
+        src = e.trigger[:60] if e.trigger else e.skill_name
+        signals = e.details.get("risk_signals", []) if isinstance(e.details, dict) else []
+        signal_str = f" [{', '.join(signals[:3])}]" if signals else ""
+        print(f"  {ts} | {e.action:12s} | {'✅' if e.verification_passed else '⚠' if e.action in ('sanitize','risk','quarantine') else '—'} | {src[:50]:50s}{signal_str}")
+        count += 1
+    return count
+
+
+def _log_sanitization_event(
+    action: str,
+    content: str,
+    removals: List[Dict[str, Any]],
+    verdict: str = "cleaned",
+) -> None:
+    """Log a sanitization event to the audit trail."""
+    if not removals:
+        return
+    entry = AuditEntry(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        action=action,
+        skill_name="(ingested)",
+        provenance="ingested",
+        actor="firewall",
+        content_hash=hashlib.sha256(content.encode()).hexdigest()[:16],
+        trigger=content[:200],
+        verification_passed=False,
+        user_approved=False,
+        details={
+            "verdict": verdict,
+            "removals": [
+                {"type": r.get("type"), "marker_type": r.get("marker_type", ""), "count": r.get("count")}
+                for r in removals[:10]
+            ],
+        },
+    )
+    _append_audit_log(entry)
+
+
+def _log_risk_event(
+    action: str,
+    content: str,
+    risks: List[Tuple[str, str]],
+) -> None:
+    """Log a risk detection event to the audit trail."""
+    if not risks:
+        return
+    entry = AuditEntry(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        action=action,
+        skill_name="(ingested)",
+        provenance="ingested",
+        actor="firewall",
+        content_hash=hashlib.sha256(content.encode()).hexdigest()[:16],
+        trigger=content[:200],
+        verification_passed=False,
+        user_approved=False,
+        details={
+            "risk_signals": [pid for pid, _ in risks],
+            "risk_count": len(risks),
+        },
+    )
+    _append_audit_log(entry)
 
 
 # ---------------------------------------------------------------------------

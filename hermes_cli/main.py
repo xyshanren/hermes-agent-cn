@@ -5715,10 +5715,34 @@ def cmd_route_status(args):
 
     if getattr(args, "json", False):
         import json as _json
-        status = router.status_dict(verbose=getattr(args, "verbose", False))
-        print(_json.dumps(status, ensure_ascii=False, indent=2))
+        print(_json.dumps(router._status_report(), ensure_ascii=False, indent=2))
     else:
-        print(router.print_status(verbose=getattr(args, "verbose", False)))
+        router.print_status(verbose=args.verbose, json_output=args.json)
+
+
+def cmd_firewall(args):
+    """查看语义防火墙状态和审计日志。"""
+    from agent.semantic_firewall import _rule_manager, show_audit_log, reload_rules
+
+    if getattr(args, "firewall_action", "") in ("log", "logs"):
+        limit = getattr(args, "limit", 20)
+        action_filter = getattr(args, "filter", None)
+        count = show_audit_log(limit=limit, action_filter=action_filter)
+        if count == 0:
+            print("  ℹ 审计日志为空（尚无防火墙拦截事件）")
+    elif getattr(args, "firewall_action", "") == "reload":
+        n = reload_rules()
+        print(f"  ✅ 防火墙规则已重载: {n} 条模式")
+    else:
+        status = _rule_manager.status()
+        print(f"\n  🔥 语义防火墙状态")
+        print(f"  {'=' * 40}")
+        print(f"  热加载: {'✅ 已启用' if status['hot_reload_enabled'] else '❌ 未启用'}")
+        print(f"  注入标记模式: {status['injection_patterns']} 条")
+        print(f"  能力泄露模式: {status['exfiltration_patterns']} 条")
+        print(f"  内容净化模式: {status['sanitize_patterns']} 条")
+        print(f"  LLM 阈值: 警告≥{status['llm_threshold_warning']:.2f} / 阻止≥{status['llm_threshold_block']:.2f}")
+        print()
 
 
 def cmd_dump(args):
@@ -10242,8 +10266,48 @@ def main():
     route_status_parser.set_defaults(func=cmd_route_status)
 
     # =========================================================================
-    # dump command
+    # firewall command
     # =========================================================================
+    firewall_parser = subparsers.add_parser(
+        "firewall",
+        help="查看语义防火墙状态和审计日志",
+        description="显示防火墙规则状态、重载规则、查看审计日志",
+    )
+    firewall_subparsers = firewall_parser.add_subparsers(dest="firewall_action")
+
+    firewall_log = firewall_subparsers.add_parser(
+        "log",
+        help="查看审计日志",
+        description="显示最近的防火墙拦截/告警事件",
+    )
+    firewall_log.add_argument(
+        "--limit", "-n", type=int, default=20,
+        help="显示条数（默认 20）",
+    )
+    firewall_log.add_argument(
+        "--filter", "-f",
+        help="按动作类型过滤: sanitize/risk_detected/quarantine/create",
+    )
+    firewall_log.set_defaults(func=cmd_firewall)
+
+    firewall_status = firewall_subparsers.add_parser(
+        "status",
+        help="查看防火墙规则状态",
+        description="显示当前加载的规则数、LLM 阈值、热加载状态",
+    )
+    firewall_status.set_defaults(func=cmd_firewall)
+
+    firewall_reload = firewall_subparsers.add_parser(
+        "reload",
+        help="强制重载防火墙规则",
+        description="从 config.yaml 重新加载防火墙规则和阈值",
+    )
+    firewall_reload.set_defaults(func=cmd_firewall)
+
+    firewall_parser.set_defaults(func=cmd_firewall)
+
+    # =========================================================================
+    # dump command
     dump_parser = subparsers.add_parser(
         "dump",
         help="Dump setup summary for support/debugging",
