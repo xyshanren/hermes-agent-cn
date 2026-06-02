@@ -821,25 +821,36 @@ def _build_fallback_chain(
             # 检测该 provider 是否有已配置的模型（非默认值）
             provider_model = _get_provider_model(_existing_cfg, p["id"],
                                                   p["default_model"])
+            # 跳过视觉专用模型（已配置在 auxiliary.vision，无需重复 fallback）
+            if any(kw in provider_model.lower() for kw in ("vl", "vision", "llava")):
+                continue
             chain.append({
                 "provider": p["id"],
                 "model": provider_model,
             })
 
-    # Ollama（如果不是主力）
+    # Ollama（如果不是主力）— 取参数规模最大的非 embedding 模型（含 vision）
     if ollama_info and primary_provider_id != "ollama":
-        chain.append({
-            "provider": "ollama",
-            "model": ollama_info["default_model"],
-            "base_url": "http://localhost:11434/v1",
-        })
+        all_models = ollama_info.get("models", [])
+        if all_models:
+            chat_models = [
+                m for m in all_models
+                if not any(kw in m.lower() for kw in ("embed",))
+            ]
+            if chat_models:
+                best = max(chat_models, key=_get_param_size)
+                chain.append({
+                    "provider": "ollama",
+                    "model": best,
+                    "base_url": "http://localhost:11434/v1",
+                })
     elif ollama_info and primary_provider_id == "ollama":
         # Ollama 是主力但有多个模型 — 将非 vision 非主力模型加入 fallback
         primary_model = ollama_info["default_model"]
         for m in ollama_info.get("models", []):
-            m_type = _classify_ollama_model(m)
             if "embed" in m.lower():
-                continue  # embedding 模型不能用于 chat
+                continue
+            m_type = _classify_ollama_model(m)
             if m != primary_model and m_type not in ("vision", "coding"):
                 chain.append({
                     "provider": "ollama",
@@ -847,25 +858,6 @@ def _build_fallback_chain(
                     "base_url": "http://localhost:11434/v1",
                 })
                 break  # 只加一个 Ollama fallback
-
-    # LM Studio / llama.cpp 本地服务 fallback
-    for local_info in local_server_infos:
-        local_id = local_info.get("provider_id", "")
-        if local_id != primary_provider_id and local_info.get("models"):
-            chain.append({
-                "provider": "custom",
-                "model": local_info["default_model"],
-                "base_url": local_info.get("base_url", ""),
-            })
-
-    # 嵌入式模型 — 断网兜底（始终放最后）
-    if has_embedded and primary_provider_id != "embedded":
-        chain.append({
-            "provider": "embedded",
-            "model": "qwen-0.5b",
-        })
-
-    return chain
 
 
 def _write_smart_routing(
