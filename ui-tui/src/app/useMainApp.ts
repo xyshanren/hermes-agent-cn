@@ -824,7 +824,10 @@ export function useMainApp(gw: GatewayClient) {
 
   const appStatus = useMemo(
     () => ({
-      cwdLabel: fmtCwdBranch(cwd, gitBranch),
+      // Cap the status-bar cwd/branch label tighter than the shared default so
+      // it doesn't dominate the bar; the status rule reserves the left-side
+      // essentials and truncates this further on narrow terminals.
+      cwdLabel: fmtCwdBranch(cwd, gitBranch, 28),
       goodVibesTick,
       sessionStartedAt: ui.sid ? sessionStartedAt : null,
       showStickyPrompt: !!stickyPrompt,
