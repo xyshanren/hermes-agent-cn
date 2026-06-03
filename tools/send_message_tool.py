@@ -606,7 +606,13 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
 
     last_result = None
     for chunk in chunks:
-        if platform == Platform.EMAIL:
+        if platform == Platform.SLACK:
+            result = await _send_slack(pconfig.token, chat_id, chunk, thread_ts=thread_id)
+        elif platform == Platform.WHATSAPP:
+            result = await _send_whatsapp(pconfig.extra, chat_id, chunk)
+        elif platform == Platform.SIGNAL:
+            result = await _send_signal(pconfig.extra, chat_id, chunk)
+        elif platform == Platform.EMAIL:
             result = await _send_email(pconfig.extra, chat_id, chunk)
         elif platform == Platform.DINGTALK:
             result = await _send_dingtalk(pconfig.extra, chat_id, chunk)
@@ -640,6 +646,473 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
         warnings.append(warning)
         last_result["warnings"] = warnings
     return last_result
+
+
+def _is_telegram_thread_not_found(error: Exception) -> bool:
+    """Check if a Telegram error is a thread-not-found failure.
+
+    Matches the gateway adapter's ``_is_thread_not_found_error`` for
+    the standalone ``_send_telegram`` path (issue #27012).
+    """
+    return "thread not found" in str(error).lower()
+
+
+async def _send_telegram(token, chat_id, message, media_files=None, thread_id=None, disable_link_previews=False, force_document=False):
+    """Send via Telegram Bot API (one-shot, no polling needed).
+
+    Applies markdown→MarkdownV2 formatting (same as the gateway adapter)
+    so that bold, links, and headers render correctly.  If the message
+    already contains HTML tags, it is sent with ``parse_mode='HTML'``
+    instead, bypassing MarkdownV2 conversion.
+    """
+    try:
+        from telegram import Bot
+        from telegram.constants import ParseMode
+
+        # Auto-detect HTML tags — if present, skip MarkdownV2 and send as HTML.
+        # Inspired by github.com/ashaney — PR #1568.
+        _has_html = bool(re.search(r'<[a-zA-Z/][^>]*>', message))
+
+        if _has_html:
+            formatted = message
+            send_parse_mode = ParseMode.HTML
+        else:
+            # Reuse the gateway adapter's format_message for markdown→MarkdownV2
+            try:
+                from gateway.platforms.telegram import TelegramAdapter
+                _adapter = TelegramAdapter.__new__(TelegramAdapter)
+                formatted = _adapter.format_message(message)
+            except Exception:
+                # Fallback: send as-is if formatting unavailable
+                formatted = message
+            send_parse_mode = ParseMode.MARKDOWN_V2
+
+        # Honour a configured proxy (telegram.proxy_url in config.yaml, exported
+        # as TELEGRAM_PROXY env var by load_gateway_config). Without this, the
+        # standalone send path bypasses the proxy and times out in regions
+        # where api.telegram.org is blocked. The in-gateway adapter does the
+        # same thing in gateway/platforms/telegram.py.
+        try:
+            from gateway.platforms.base import resolve_proxy_url
+            _tg_proxy = resolve_proxy_url("TELEGRAM_PROXY", target_hosts=["api.telegram.org"])
+        except Exception:
+            _tg_proxy = None
+        if _tg_proxy:
+            try:
+                from telegram.request import HTTPXRequest
+                logger.info("send_message: standalone Telegram send routed through proxy %s", _tg_proxy)
+                bot = Bot(
+                    token=token,
+                    request=HTTPXRequest(proxy=_tg_proxy),
+                    get_updates_request=HTTPXRequest(proxy=_tg_proxy),
+                )
+            except Exception as _proxy_err:
+                logger.warning("send_message: failed to attach Telegram proxy (%s), falling back to direct connection", _proxy_err)
+                bot = Bot(token=token)
+        else:
+            bot = Bot(token=token)
+        int_chat_id = int(chat_id)
+        media_files = media_files or []
+        thread_kwargs = {}
+        if thread_id is not None:
+            # Reuse the gateway adapter's General-topic mapping: in Telegram
+            # forum supergroups, the General topic is addressed as
+            # message_thread_id="1" on incoming updates, but Bot API
+            # sendMessage rejects message_thread_id=1 with "Message thread
+            # not found". The adapter's helper maps "1" to None for that
+            # reason; the send_message tool needs the same mapping or a
+            # send to a forum group's General topic always errors out
+            # (see issue #22267).
+            try:
+                from gateway.platforms.telegram import TelegramAdapter
+                effective_thread_id = TelegramAdapter._message_thread_id_for_send(
+                    str(thread_id)
+                )
+            except Exception:
+                # Fallback: explicit mapping in case the adapter import
+                # fails (e.g. python-telegram-bot missing in this venv).
+                effective_thread_id = (
+                    None if str(thread_id) == "1" else int(thread_id)
+                )
+            if effective_thread_id is not None:
+                thread_kwargs["message_thread_id"] = effective_thread_id
+        # disable_web_page_preview is only valid for send_message, not
+        # send_photo/send_video/etc.  Keep it separate so media sends
+        # don't inherit an invalid parameter (issue #27012).
+        text_kwargs = dict(thread_kwargs)
+        if disable_link_previews:
+            text_kwargs["disable_web_page_preview"] = True
+
+        last_msg = None
+        warnings = []
+
+        if formatted.strip():
+            try:
+                last_msg = await _send_telegram_message_with_retry(
+                    bot,
+                    chat_id=int_chat_id, text=formatted,
+                    parse_mode=send_parse_mode, **text_kwargs
+                )
+            except Exception as md_error:
+                # Thread not found — retry without message_thread_id so the
+                # message still delivers (matching the gateway adapter's
+                # fallback behaviour, issue #27012).
+                if _is_telegram_thread_not_found(md_error) and thread_kwargs:
+                    logger.warning(
+                        "Thread %s not found in _send_telegram, retrying without message_thread_id",
+                        thread_kwargs.get("message_thread_id"),
+                    )
+                    text_kwargs.pop("message_thread_id", None)
+                    last_msg = await _send_telegram_message_with_retry(
+                        bot,
+                        chat_id=int_chat_id, text=formatted,
+                        parse_mode=send_parse_mode, **text_kwargs
+                    )
+                elif "parse" in str(md_error).lower() or "markdown" in str(md_error).lower() or "html" in str(md_error).lower():
+                    logger.warning(
+                        "Parse mode %s failed in _send_telegram, falling back to plain text: %s",
+                        send_parse_mode,
+                        _sanitize_error_text(md_error),
+                    )
+                    if not _has_html:
+                        try:
+                            from gateway.platforms.telegram import _strip_mdv2
+                            plain = _strip_mdv2(formatted)
+                        except Exception:
+                            plain = message
+                    else:
+                        plain = message
+                    last_msg = await _send_telegram_message_with_retry(
+                        bot,
+                        chat_id=int_chat_id, text=plain,
+                        parse_mode=None, **text_kwargs
+                    )
+                else:
+                    raise
+
+        for media_path, is_voice in media_files:
+            if not os.path.exists(media_path):
+                warning = f"Media file not found, skipping: {media_path}"
+                logger.warning(warning)
+                warnings.append(warning)
+                continue
+
+            ext = os.path.splitext(media_path)[1].lower()
+            try:
+                with open(media_path, "rb") as f:
+                    media_kwargs = dict(thread_kwargs)
+                    try:
+                        if ext in _IMAGE_EXTS and not force_document:
+                            last_msg = await bot.send_photo(
+                                chat_id=int_chat_id, photo=f, **media_kwargs
+                            )
+                        elif ext in _VIDEO_EXTS:
+                            last_msg = await bot.send_video(
+                                chat_id=int_chat_id, video=f, **media_kwargs
+                            )
+                        elif ext in _VOICE_EXTS and is_voice:
+                            last_msg = await bot.send_voice(
+                                chat_id=int_chat_id, voice=f, **media_kwargs
+                            )
+                        elif ext in _TELEGRAM_SEND_AUDIO_EXTS:
+                            last_msg = await bot.send_audio(
+                                chat_id=int_chat_id, audio=f, **media_kwargs
+                            )
+                        else:
+                            last_msg = await bot.send_document(
+                                chat_id=int_chat_id, document=f, **media_kwargs
+                            )
+                    except Exception as media_err:
+                        if _is_telegram_thread_not_found(media_err) and media_kwargs.get("message_thread_id"):
+                            # Thread not found for media — retry without
+                            # message_thread_id (issue #27012).
+                            logger.warning(
+                                "Thread %s not found for media send, retrying without message_thread_id",
+                                media_kwargs["message_thread_id"],
+                            )
+                            # Re-seek the file since the first attempt consumed it
+                            f.seek(0)
+                            media_kwargs.pop("message_thread_id", None)
+                            if ext in _IMAGE_EXTS and not force_document:
+                                last_msg = await bot.send_photo(
+                                    chat_id=int_chat_id, photo=f, **media_kwargs
+                                )
+                            elif ext in _VIDEO_EXTS:
+                                last_msg = await bot.send_video(
+                                    chat_id=int_chat_id, video=f, **media_kwargs
+                                )
+                            elif ext in _VOICE_EXTS and is_voice:
+                                last_msg = await bot.send_voice(
+                                    chat_id=int_chat_id, voice=f, **media_kwargs
+                                )
+                            elif ext in _TELEGRAM_SEND_AUDIO_EXTS:
+                                last_msg = await bot.send_audio(
+                                    chat_id=int_chat_id, audio=f, **media_kwargs
+                                )
+                            else:
+                                last_msg = await bot.send_document(
+                                    chat_id=int_chat_id, document=f, **media_kwargs
+                                )
+                        else:
+                            raise
+            except Exception as e:
+                warning = _sanitize_error_text(f"Failed to send media {media_path}: {e}")
+                logger.error(warning)
+                warnings.append(warning)
+
+        if last_msg is None:
+            error = "No deliverable text or media remained after processing MEDIA tags"
+            if warnings:
+                return {"error": error, "warnings": warnings}
+            return {"error": error}
+
+        result = {
+            "success": True,
+            "platform": "telegram",
+            "chat_id": chat_id,
+            "message_id": str(last_msg.message_id),
+        }
+        if warnings:
+            result["warnings"] = warnings
+        return result
+    except ImportError:
+        return {"error": "python-telegram-bot not installed. Run: pip install python-telegram-bot"}
+    except Exception as e:
+        return _error(f"Telegram send failed: {e}")
+
+
+async def _send_slack(token, chat_id, message, thread_ts=None):
+    """Send via Slack Web API."""
+    try:
+        import aiohttp
+    except ImportError:
+        return {"error": "aiohttp not installed. Run: pip install aiohttp"}
+    try:
+        from gateway.platforms.base import resolve_proxy_url, proxy_kwargs_for_aiohttp
+        _proxy = resolve_proxy_url()
+        _sess_kw, _req_kw = proxy_kwargs_for_aiohttp(_proxy)
+        url = "https://slack.com/api/chat.postMessage"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), **_sess_kw) as session:
+            payload = {"channel": chat_id, "text": message, "mrkdwn": True}
+            if thread_ts:
+                payload["thread_ts"] = thread_ts
+            async with session.post(url, headers=headers, json=payload, **_req_kw) as resp:
+                data = await resp.json()
+                if data.get("ok"):
+                    return {"success": True, "platform": "slack", "chat_id": chat_id, "message_id": data.get("ts")}
+                return _error(f"Slack API error: {data.get('error', 'unknown')}")
+    except Exception as e:
+        return _error(f"Slack send failed: {e}")
+
+
+async def _send_whatsapp(extra, chat_id, message):
+    """Send via the local WhatsApp bridge HTTP API."""
+    try:
+        import aiohttp
+    except ImportError:
+        return {"error": "aiohttp not installed. Run: pip install aiohttp"}
+    try:
+        bridge_port = extra.get("bridge_port", 3000)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"http://localhost:{bridge_port}/send",
+                json={"chatId": chat_id, "message": message},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {
+                        "success": True,
+                        "platform": "whatsapp",
+                        "chat_id": chat_id,
+                        "message_id": data.get("messageId"),
+                    }
+                body = await resp.text()
+                return _error(f"WhatsApp bridge error ({resp.status}): {body}")
+    except Exception as e:
+        return _error(f"WhatsApp send failed: {e}")
+
+
+async def _send_signal(extra, chat_id, message, media_files=None):
+    """Send via signal-cli JSON-RPC API.
+
+    Supports both text-only and text-with-attachments (images/audio/documents).
+    Multi-attachment sends are chunked into batches of
+    SIGNAL_MAX_ATTACHMENTS_PER_MSG and metered by the process-wide
+    SignalAttachmentScheduler — same bucket the gateway adapter uses, so
+    sends from this tool and inbound-driven replies share rate-limit state.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return {"error": "httpx not installed"}
+
+    from gateway.platforms.signal_rate_limit import (
+        SIGNAL_BATCH_PACING_NOTICE_THRESHOLD,
+        SIGNAL_MAX_ATTACHMENTS_PER_MSG,
+        SIGNAL_RATE_LIMIT_MAX_ATTEMPTS,
+        _extract_retry_after_seconds,
+        _format_wait,
+        _is_signal_rate_limit_error,
+        _signal_send_timeout,
+        get_scheduler,
+    )
+
+    try:
+        http_url = extra.get("http_url", "http://127.0.0.1:8080").rstrip("/")
+        account = extra.get("account", "")
+        if not account:
+            return {"error": "Signal account not configured"}
+
+        valid_media = media_files or []
+        attachment_paths = []
+        for media_path, _is_voice in valid_media:
+            if os.path.exists(media_path):
+                attachment_paths.append(media_path)
+            else:
+                logger.warning("Signal media file not found, skipping: %s", media_path)
+
+        # Chunk attachments. With no attachments we still emit one batch
+        # (text only). With attachments, the text rides on batch #0 so the
+        # caption isn't repeated across every chunk.
+        if attachment_paths:
+            att_batches = [
+                attachment_paths[i:i + SIGNAL_MAX_ATTACHMENTS_PER_MSG]
+                for i in range(0, len(attachment_paths), SIGNAL_MAX_ATTACHMENTS_PER_MSG)
+            ]
+        else:
+            att_batches = [[]]
+
+        async def _post(batch_attachments, batch_message):
+            params = {"account": account, "message": batch_message}
+            if chat_id.startswith("group:"):
+                params["groupId"] = chat_id[6:]
+            else:
+                params["recipient"] = [chat_id]
+            if batch_attachments:
+                params["attachments"] = batch_attachments
+
+            payload = {
+                "jsonrpc": "2.0",
+                "method": "send",
+                "params": params,
+                "id": f"send_{int(time.time() * 1000)}",
+            }
+            timeout = _signal_send_timeout(len(batch_attachments) if batch_attachments else 0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(f"{http_url}/api/v1/rpc", json=payload)
+                resp.raise_for_status()
+                return resp.json()
+
+        async def _send_inline_notice(text: str) -> None:
+            """Best-effort one-shot RPC for a user-facing pacing notice."""
+            notice_params = {"account": account, "message": text}
+            if chat_id.startswith("group:"):
+                notice_params["groupId"] = chat_id[6:]
+            else:
+                notice_params["recipient"] = [chat_id]
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as _client:
+                    await _client.post(
+                        f"{http_url}/api/v1/rpc",
+                        json={
+                            "jsonrpc": "2.0",
+                            "method": "send",
+                            "params": notice_params,
+                            "id": f"notice_{int(time.time() * 1000)}",
+                        },
+                    )
+            except Exception as _e:
+                logger.warning("Signal: inline notice failed: %s", _e)
+
+        scheduler = get_scheduler()
+        logger.info(
+            "send_message Signal: scheduler state=%s, %d attachment(s) in %d batch(es)",
+            scheduler.state(), len(attachment_paths), len(att_batches),
+        )
+        failed_batches: list[int] = []
+        for idx, att_batch in enumerate(att_batches):
+            n = len(att_batch)
+            if n > 0:
+                estimated = scheduler.estimate_wait(n)
+                if estimated >= SIGNAL_BATCH_PACING_NOTICE_THRESHOLD:
+                    await _send_inline_notice(
+                        f"(More images coming — pausing ~{_format_wait(estimated)} "
+                        f"for Signal rate limit, batch {idx + 1}/{len(att_batches)}.)"
+                    )
+
+            batch_message = message if idx == 0 else ""
+
+            for attempt in range(1, SIGNAL_RATE_LIMIT_MAX_ATTEMPTS + 1):
+                try:
+                    await scheduler.acquire(n)
+                    _rpc_t0 = time.monotonic()
+                    data = await _post(att_batch, batch_message)
+                    _rpc_duration = time.monotonic() - _rpc_t0
+                    if "error" not in data:
+                        await scheduler.report_rpc_duration(_rpc_duration, n)
+                        break
+
+                    err = data["error"]
+
+                    if not _is_signal_rate_limit_error(err):
+                        return _error(f"Signal RPC error on batch {idx + 1}/{len(att_batches)}: {err}")
+
+                    server_retry_after = _extract_retry_after_seconds(err)
+                    scheduler.feedback(server_retry_after, n)
+
+                    if attempt >= SIGNAL_RATE_LIMIT_MAX_ATTEMPTS:
+                        failed_batches.append(idx + 1)
+                        logger.error(
+                            "Signal: rate-limit retries exhausted on batch %d/%d "
+                            "(%d attachments lost, server retry_after=%s)",
+                            idx + 1, len(att_batches), n,
+                            f"{server_retry_after:.0f}s" if server_retry_after else "unknown",
+                        )
+                        break
+                    logger.warning(
+                        "Signal: rate-limited on batch %d/%d "
+                        "(attempt %d/%d, server retry_after=%s); "
+                        "scheduler will pace the retry",
+                        idx + 1, len(att_batches),
+                        attempt, SIGNAL_RATE_LIMIT_MAX_ATTEMPTS,
+                        f"{server_retry_after:.0f}s" if server_retry_after else "unknown",
+                    )
+                except Exception as e:
+                    if attempt >= SIGNAL_RATE_LIMIT_MAX_ATTEMPTS:
+                        failed_batches.append(idx + 1)
+                        logger.error(
+                            "Signal: send error on batch %d/%d after %d attempts: %s",
+                            idx + 1, len(att_batches), attempt, str(e)
+                        )
+                        break
+                    logger.warning(
+                        "Signal: transient error on batch %d/%d (attempt %d/%d): %s; will retry",
+                        idx + 1, len(att_batches), attempt, SIGNAL_RATE_LIMIT_MAX_ATTEMPTS, str(e)
+                    )
+
+        warnings = []
+        if len(attachment_paths) < len(valid_media):
+            warnings.append("Some media files were skipped (not found on disk)")
+        if failed_batches:
+            warnings.append(
+                f"Signal rate-limited {len(failed_batches)} batch(es) "
+                f"(#{', #'.join(str(b) for b in failed_batches)})"
+            )
+
+        if failed_batches and len(failed_batches) == len(att_batches):
+            return _error(
+                f"Signal: every batch ({len(att_batches)}) hit rate limit; "
+                f"no attachments delivered"
+            )
+
+        result = {"success": True, "platform": "signal", "chat_id": chat_id}
+        if warnings:
+            result["warnings"] = warnings
+        return result
+    except Exception as e:
+        return _error(f"Signal send failed: {e}")
 
 
 async def _send_email(extra, chat_id, message):
