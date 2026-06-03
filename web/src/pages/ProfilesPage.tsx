@@ -144,6 +144,54 @@ export default function ProfilesPage() {
   // newer state when the user switches profiles or closes the editor.
   const activeSoulRequest = useRef<string | null>(null);
 
+  // Inline description editor state
+  const [editingDescFor, setEditingDescFor] = useState<string | null>(null);
+  const [descText, setDescText] = useState("");
+  const [descSaving, setDescSaving] = useState(false);
+  const [describing, setDescribing] = useState(false);
+  // Tracks the latest description request (save / auto-describe) so a late
+  // response can't overwrite state for a different, newly-opened editor.
+  const activeDescRequest = useRef<string | null>(null);
+  // Counts in-flight save / auto-describe requests so the saving indicator
+  // is only cleared when the last concurrent request settles.
+  const descSavingCount = useRef(0);
+  const describingCount = useRef(0);
+
+  // Inline model editor state
+  const [editingModelFor, setEditingModelFor] = useState<string | null>(null);
+  const [modelEditChoice, setModelEditChoice] = useState("");
+  const [modelSaving, setModelSaving] = useState(false);
+
+  // Per-profile "set active" in-flight name
+  const [settingActive, setSettingActive] = useState<string | null>(null);
+
+  const modelKey = (provider: string | null, model: string | null) =>
+    provider && model ? `${provider}\u0000${model}` : "";
+
+  const loadModelChoices = useCallback(() => {
+    if (modelChoices !== null || modelChoicesLoading.current) return;
+    modelChoicesLoading.current = true;
+    api
+      .getModelOptions()
+      .then((res) => {
+        const flat: { provider: string; model: string; label: string }[] = [];
+        for (const prov of res.providers ?? []) {
+          for (const m of prov.models ?? []) {
+            flat.push({
+              provider: prov.slug,
+              model: m,
+              label: `${prov.name} · ${m}`,
+            });
+          }
+        }
+        setModelChoices(flat);
+      })
+      .catch(() => setModelChoices([]))
+      .finally(() => {
+        modelChoicesLoading.current = false;
+      });
+  }, [modelChoices]);
+
   const load = useCallback(() => {
     api
       .getProfiles()
@@ -261,6 +309,144 @@ export default function ProfilesPage() {
       setSoulSaving(false);
     }
   };
+
+  const openDescEditor = useCallback(
+    (p: ProfileInfo) => {
+      if (editingDescFor === p.name) {
+        closeEditor();
+        return;
+      }
+      activeDescRequest.current = p.name;
+      setEditingSoulFor(null);
+      setEditingModelFor(null);
+      setEditingDescFor(p.name);
+      setDescText(p.description ?? "");
+    },
+    [closeEditor, editingDescFor],
+  );
+
+  const handleSaveDesc = async (name: string) => {
+    descSavingCount.current += 1;
+    setDescSaving(true);
+    activeDescRequest.current = name;
+    try {
+      const res = await api.updateProfileDescription(name, descText);
+      // Profile-list state always reflects the persisted result, but only
+      // touch the open editor if it's still showing this profile.
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.name === name
+            ? {
+                ...p,
+                description: res.description,
+                description_auto: res.description_auto,
+              }
+            : p,
+        ),
+      );
+      if (activeDescRequest.current === name) {
+        showToast(`${L.descriptionSaved}: ${name}`, "success");
+        setEditingDescFor(null);
+      }
+    } catch (e) {
+      if (activeDescRequest.current === name) {
+        showToast(`${t.status.error}: ${e}`, "error");
+      }
+    } finally {
+      descSavingCount.current -= 1;
+      if (descSavingCount.current === 0) setDescSaving(false);
+    }
+  };
+
+  const handleAutoDescribe = async (name: string) => {
+    describingCount.current += 1;
+    setDescribing(true);
+    activeDescRequest.current = name;
+    try {
+      const res = await api.describeProfileAuto(name);
+      const current = activeDescRequest.current === name;
+      if (res.ok && res.description != null) {
+        if (current) setDescText(res.description);
+        setProfiles((prev) =>
+          prev.map((p) =>
+            p.name === name
+              ? {
+                  ...p,
+                  description: res.description ?? "",
+                  description_auto: res.description_auto,
+                }
+              : p,
+          ),
+        );
+        if (current) showToast(`${L.descriptionSaved}: ${name}`, "success");
+      } else if (current) {
+        showToast(`${L.describeFailed}: ${res.reason}`, "error");
+      }
+    } catch (e) {
+      if (activeDescRequest.current === name) {
+        showToast(`${t.status.error}: ${e}`, "error");
+      }
+    } finally {
+      describingCount.current -= 1;
+      if (describingCount.current === 0) setDescribing(false);
+    }
+  };
+
+  const openModelEditor = useCallback(
+    (p: ProfileInfo) => {
+      if (editingModelFor === p.name) {
+        closeEditor();
+        return;
+      }
+      setEditingSoulFor(null);
+      setEditingDescFor(null);
+      setEditingModelFor(p.name);
+      setModelEditChoice(modelKey(p.provider, p.model));
+      loadModelChoices();
+    },
+    [closeEditor, editingModelFor, loadModelChoices],
+  );
+
+  const handleSaveModel = async (name: string) => {
+    const picked = modelEditChoice
+      ? modelChoices?.find(
+          (c) => `${c.provider}\u0000${c.model}` === modelEditChoice,
+        )
+      : undefined;
+    if (!picked) return;
+    setModelSaving(true);
+    try {
+      await api.setProfileModel(name, picked.provider, picked.model);
+      showToast(`${L.modelSaved}: ${picked.model}`, "success");
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.name === name
+            ? { ...p, model: picked.model, provider: picked.provider }
+            : p,
+        ),
+      );
+      setEditingModelFor(null);
+    } catch (e) {
+      showToast(`${t.status.error}: ${e}`, "error");
+    } finally {
+      setModelSaving(false);
+    }
+  };
+
+  // Exactly one editor is open at a time; derive which profile + kind so a
+  // single dialog can render the right body.
+  const editorName = editingModelFor ?? editingDescFor ?? editingSoulFor;
+  const editorKind: "model" | "desc" | "soul" | null = editingModelFor
+    ? "model"
+    : editingDescFor
+      ? "desc"
+      : editingSoulFor
+        ? "soul"
+        : null;
+  const editorModalRef = useModalBehavior({
+    open: editorName != null,
+    onClose: closeEditor,
+  });
 
   const handleCopyTerminalCommand = async (name: string) => {
     let cmd: string;
