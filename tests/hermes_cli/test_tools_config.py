@@ -563,7 +563,12 @@ def test_visible_providers_include_nous_subscription_when_logged_in(monkeypatch)
 
     providers = _visible_providers(TOOL_CATEGORIES["browser"], config)
 
-    assert providers[0]["name"].startswith("Nous Subscription")
+    # The managed Nous row is listed (not necessarily first — "Local Browser"
+    # sorts first so a fresh-install Enter lands on the free local backend).
+    assert any(p["name"].startswith("Nous Subscription") for p in providers)
+    # "Local Browser" must be the index-0 default so pressing Enter never
+    # walks a user into a paid Nous Portal login.
+    assert providers[0]["name"] == "Local Browser"
 
 
 def test_visible_providers_hide_nous_subscription_when_feature_flag_is_off(monkeypatch):
@@ -577,7 +582,40 @@ def test_visible_providers_hide_nous_subscription_when_feature_flag_is_off(monke
 
     providers = _visible_providers(TOOL_CATEGORIES["browser"], config)
 
-    assert all(not provider["name"].startswith("Nous Subscription") for provider in providers)
+    assert any(p["name"].startswith("Nous Subscription") for p in providers)
+
+
+def test_visible_providers_force_fresh_shows_nous_subscription_after_upgrade(monkeypatch):
+    calls = []
+
+    def fake_subscription_features(config, *, force_fresh=False):
+        calls.append(("features", force_fresh))
+        return SimpleNamespace(
+            nous_auth_present=True,
+            account_info=NousPortalAccountInfo(
+                logged_in=True,
+                source="account_api" if force_fresh else "jwt",
+                fresh=force_fresh,
+                paid_service_access=True if force_fresh else False,
+            ),
+            features={},
+        )
+
+    monkeypatch.setattr(
+        "hermes_cli.tools_config.get_nous_subscription_features",
+        fake_subscription_features,
+    )
+
+    providers = _visible_providers(
+        TOOL_CATEGORIES["browser"],
+        {"model": {"provider": "nous"}},
+        force_fresh=True,
+    )
+
+    # The managed Nous row reappears after the entitlement upgrade. It is no
+    # longer asserted to be first — "Local Browser" sorts first by design.
+    assert any(p["name"].startswith("Nous Subscription") for p in providers)
+    assert ("features", True) in calls
 
 
 def test_local_browser_provider_is_saved_explicitly(monkeypatch):
@@ -592,6 +630,33 @@ def test_local_browser_provider_is_saved_explicitly(monkeypatch):
     _configure_provider(local_provider, config)
 
     assert config["browser"]["cloud_provider"] == "local"
+
+
+def test_fresh_install_browser_default_is_free_local_not_paid_nous():
+    """On a fresh install the browser picker must default to the free local
+    backend, never the paid Nous Subscription gateway.
+
+    Regression: the Nous row used to sort first, so the menu cursor defaulted
+    to index 0 (Nous) and pressing Enter walked users straight into a Nous
+    Portal login for a paid offering (Javier's bug, June 2026).
+    """
+    from hermes_cli.tools_config import _detect_active_provider_index
+
+    providers = TOOL_CATEGORIES["browser"]["providers"]
+    assert providers[0]["name"] == "Local Browser"
+    assert providers[0]["browser_provider"] == "local"
+    # Nothing active/configured → cursor defaults to index 0 (the free local row).
+    assert _detect_active_provider_index(providers, {}) == 0
+
+
+def test_fresh_install_tts_default_is_free_edge_not_paid_nous():
+    """TTS picker defaults to the free Edge backend on a fresh install."""
+    from hermes_cli.tools_config import _detect_active_provider_index
+
+    providers = TOOL_CATEGORIES["tts"]["providers"]
+    assert providers[0]["name"] == "Microsoft Edge TTS"
+    assert providers[0]["tts_provider"] == "edge"
+    assert _detect_active_provider_index(providers, {}) == 0
 
 
 def test_reconfigure_lists_enabled_web_without_existing_provider_config(monkeypatch):
