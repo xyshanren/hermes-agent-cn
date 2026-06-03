@@ -2769,7 +2769,61 @@ def _run_portal_one_shot(config: dict) -> None:
     try:
         from hermes_cli.main import _model_flow_nous
 
-        _model_flow_nous(config)
+    if already_logged_in:
+        print_success("  Already logged into Nous Portal.")
+    else:
+        # Hand off to the shared auth wiring so the device-code flow is
+        # identical to `hermes auth add nous --type oauth`. SimpleNamespace
+        # mirrors the argparse Namespace contract that auth_add_command expects.
+        ns = SimpleNamespace(
+            provider="nous",
+            auth_type="oauth",
+            label=None,
+            api_key=None,
+            portal_url=None,
+            inference_url=None,
+            client_id=None,
+            scope=None,
+            no_browser=False,
+            timeout=None,
+            insecure=False,
+            ca_bundle=None,
+        )
+        try:
+            auth_add_command(ns)
+        except SystemExit as e:
+            print()
+            print_error(f"  Nous Portal login failed (exit {e.code}).")
+            print_info("  You can retry later with `hermes portal`.")
+            return
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print_info("  Setup cancelled.")
+            return
+        except Exception as exc:
+            print()
+            print_error(f"  Nous Portal login failed: {exc}")
+            print_info("  You can retry later with `hermes portal`.")
+            return
+
+    # Set provider → nous so the model picker, status surfaces, and
+    # managed-tool gating all light up. Leave model.model empty so the
+    # runtime picks Nous's default model; the user can change it later
+    # with `hermes model`.
+    model_cfg = config.get("model")
+    if not isinstance(model_cfg, dict):
+        model_cfg = {}
+        config["model"] = model_cfg
+    model_cfg["provider"] = "nous"
+    save_config(config)
+    print()
+    print_success("  Nous set as your inference provider.")
+
+    # Offer the Tool Gateway opt-in (single Y/n) — same flow that fires
+    # from `hermes model` after picking Nous.
+    print()
+    try:
+        prompt_enable_tool_gateway(config)
     except (KeyboardInterrupt, EOFError):
         print()
         print_info("  Setup cancelled.")
