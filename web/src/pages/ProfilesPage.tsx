@@ -168,8 +168,28 @@ export default function ProfilesPage() {
     }
     setCreating(true);
     try {
-      await api.createProfile({ name, clone_from_default: cloneFromDefault });
+      const cloning = cloneAll || cloneFromDefault;
+      const picked = modelChoice
+        ? modelChoices?.find(
+            (c) => `${c.provider}\u0000${c.model}` === modelChoice,
+          )
+        : undefined;
+      const res = await api.createProfile({
+        name,
+        clone_from_default: cloneAll ? false : cloneFromDefault,
+        clone_all: cloneAll,
+        no_skills: cloning ? false : noSkills,
+        description: newDescription.trim() || undefined,
+        provider: picked?.provider,
+        model: picked?.model,
+      });
       showToast(`${t.profiles.created}: ${name}`, "success");
+      if (picked && res.model_set === false) {
+        showToast(
+          `Profile created, but the model could not be saved — set it from the profile editor.`,
+          "error",
+        );
+      }
       setNewName("");
       setCreateModalOpen(false);
       load();
