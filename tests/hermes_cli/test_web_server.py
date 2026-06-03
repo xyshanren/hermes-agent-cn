@@ -4457,20 +4457,23 @@ class TestPtyWebSocket:
             def __init__(self):
                 self.sent: list[str] = []
 
-        with self.client.websocket_connect(sub_path) as sub:
-            # Wait for the subscriber to be registered on the server side.
-            # websocket_connect returns when ws.accept() completes, but the
-            # server adds us to ``_event_channels`` in a follow-up await,
-            # so a publish immediately after connect can race ahead of the
-            # subscriber registration and the message is dropped.
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline:
-                if ws_mod.app.state.event_channels.get("broadcast-test"):
-                    break
-                time.sleep(0.01)
-            else:
-                raise AssertionError(
-                    "subscriber did not register on channel within 5s"
+            async def send_text(self, payload: str) -> None:
+                self.sent.append(payload)
+
+        app = ws_mod.app
+
+        async def _run():
+            sub_a1 = _FakeSub()
+            sub_a2 = _FakeSub()
+            sub_other = _FakeSub()
+            frame = '{"type":"tool.start","payload":{"tool_id":"t1"}}'
+
+            event_channels, event_lock = ws_mod._get_event_state(app)
+            # Register two subscribers on the target channel and one on a
+            # different channel, exactly as the /api/events handler does.
+            async with event_lock:
+                event_channels.setdefault("broadcast-test", set()).update(
+                    {sub_a1, sub_a2}
                 )
                 event_channels.setdefault("other-channel", set()).add(sub_other)
             try:
@@ -4480,36 +4483,7 @@ class TestPtyWebSocket:
                     event_channels.pop("broadcast-test", None)
                     event_channels.pop("other-channel", None)
 
-            with self.client.websocket_connect(pub_path) as pub:
-                pub.send_text('{"type":"tool.start","payload":{"tool_id":"t1"}}')
-                # Yield control so the server-side broadcast handler can
-                # process the frame.  TestClient runs the ASGI app in a
-                # background thread; a small sleep gives that thread time
-                # to call _broadcast_event before we start blocking on
-                # receive_text().  Without this, under heavy CI load the
-                # receive can race the broadcast and hang until
-                # pytest-timeout kills us.
-                import queue, threading
-                recv_q: queue.Queue = queue.Queue()
-
-                def _recv():
-                    try:
-                        recv_q.put(sub.receive_text())
-                    except Exception as exc:
-                        recv_q.put(exc)
-
-                t = threading.Thread(target=_recv, daemon=True)
-                t.start()
-                try:
-                    received = recv_q.get(timeout=10.0)
-                except queue.Empty:
-                    raise AssertionError(
-                        "broadcast not received within 10s — server likely "
-                        "dropped the frame silently (see _broadcast_event "
-                        "except Exception: pass)"
-                    )
-                if isinstance(received, Exception):
-                    raise received
+            return sub_a1, sub_a2, sub_other, frame
 
         sub_a1, sub_a2, sub_other, frame = asyncio.run(_run())
 
