@@ -1147,38 +1147,13 @@ function Install-Repository {
                 # show as locally modified even though nobody touched them. A
                 # bare `git checkout` then aborts with "Your local changes would
                 # be overwritten by checkout", which is exactly the failure GUI
-                # users hit on update. Pin autocrlf=false so the dirt is never
-                # created in the first place.
+                # users hit on update. Two-part fix: (1) stop creating the dirt
+                # by pinning autocrlf=false on this clone, (2) discard any
+                # pre-existing dirt with a hard reset before the checkout. Safe
+                # because nothing here is user-authored.
                 git -c windows.appendAtomically=false config core.autocrlf false 2>$null
-                # Preserve any real local changes before the checkout instead of
-                # discarding them with `reset --hard HEAD`. The old hard reset
-                # silently destroyed agent-edited source on managed clones (the
-                # #38542 data-loss class). Stash + restore mirrors install.sh:
-                # nothing is lost, and a failed restore leaves the work in a
-                # git stash for manual recovery. Untracked files are included so
-                # agent-created dirs (e.g. tinker-atropos/) survive too.
-                $statusOut = git -c windows.appendAtomically=false status --porcelain 2>$null
-                if (-not [string]::IsNullOrWhiteSpace(($statusOut -join "`n"))) {
-                    # A previously interrupted update can leave the index with
-                    # unmerged entries. In that state `git stash` aborts with
-                    # "could not write index" and the following `git checkout`
-                    # aborts with "you need to resolve your current index first"
-                    # -- the GUI "git checkout main failed (exit 1)" install
-                    # failure. Clear the conflict markers with `git reset` first:
-                    # working-tree changes are kept (and stashed just below); only
-                    # the index conflict state is dropped. Mirrors the `hermes
-                    # update` path (#4735).
-                    $unmergedOut = git -c windows.appendAtomically=false ls-files --unmerged 2>$null
-                    if (-not [string]::IsNullOrWhiteSpace(($unmergedOut -join "`n"))) {
-                        Write-Info "Clearing unmerged index entries from a previous conflict..."
-                        git -c windows.appendAtomically=false reset -q 2>$null
-                    }
-                    $stashName = "hermes-install-autostash-" + (Get-Date -Format "yyyyMMdd-HHmmss")
-                    Write-Info "Local changes detected, stashing before update..."
-                    git -c windows.appendAtomically=false stash push --include-untracked -m "$stashName"
-                    if ($LASTEXITCODE -eq 0) { $autostashRef = "stash@{0}" }
-                }
-                git -c windows.appendAtomically=false fetch origin $Branch
+                git -c windows.appendAtomically=false reset --hard HEAD 2>$null
+                git -c windows.appendAtomically=false fetch origin
                 if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
                 # Precedence: Commit > Tag > Branch.  Commit and Tag check
                 # out as detached HEAD intentionally -- they're meant to be
