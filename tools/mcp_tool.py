@@ -3779,7 +3779,6 @@ def get_mcp_status() -> List[dict]:
                 "tools": len(server._registered_tool_names) if hasattr(server, "_registered_tool_names") else len(server._tools),
                 "connected": True,
                 "disabled": False,
-                "status": "connected",
             }
             if server._sampling:
                 entry["sampling"] = dict(server._sampling.metrics)
@@ -3816,13 +3815,15 @@ def get_mcp_status() -> List[dict]:
                 "error": connect_errors[name],
             })
         else:
+            # A server with enabled: false is intentionally not connected — it is
+            # disabled, not failed. Surface that distinction so consumers (banner,
+            # TUI) can render "disabled" rather than an alarming "failed".
             result.append({
                 "name": name,
                 "transport": transport,
                 "tools": 0,
                 "connected": False,
-                "disabled": False,
-                "status": "configured",
+                "disabled": not enabled,
             })
 
     return result
