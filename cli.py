@@ -14591,13 +14591,6 @@ class HermesCLI:
             style=style,
             full_screen=False,
             mouse_support=False,
-            # Read from display.cli_refresh_interval (default 0 = disabled).
-            # When non-zero, prompt_toolkit redraws the UI on this cadence
-            # during idle, keeping wall-clock status-bar read-outs ticking.
-            # Set to 0 to suppress background redraws entirely — avoids
-            # fighting terminal auto-scroll in non-fullscreen mode (Xshell,
-            # iTerm2, Windows Terminal). See #48309.
-            refresh_interval=float(CLI_CONFIG.get("display", {}).get("cli_refresh_interval", 0)),
             # Erase the live bottom chrome (status bar, input box, separator
             # rules) on exit instead of freezing a final copy into scrollback.
             # Without this, prompt_toolkit's render_as_done teardown repaints
