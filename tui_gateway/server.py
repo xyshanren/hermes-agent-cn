@@ -709,6 +709,78 @@ def _schedule_ws_orphan_reap(sid: str) -> None:
     timer.start()
 
 
+def _teardown_session(session: dict | None) -> None:
+    """Fully tear down a session: finalize, unregister, close agent + worker.
+
+    Shared by ``session.close`` and the orphaned-WS-session reaper so the
+    slash-worker subprocess is always closed exactly once via the same path.
+    Idempotent: the ``_finalized`` guard in ``_finalize_session`` and the
+    ``poll()`` guard in ``_SlashWorker.close`` make repeat calls harmless.
+    """
+    if not session:
+        return
+    _finalize_session(session)
+    try:
+        from tools.approval import unregister_gateway_notify
+
+        unregister_gateway_notify(session["session_key"])
+    except Exception:
+        pass
+    try:
+        agent = session.get("agent")
+        if agent and hasattr(agent, "close"):
+            agent.close()
+    except Exception:
+        pass
+    try:
+        worker = session.get("slash_worker")
+        if worker:
+            worker.close()
+    except Exception:
+        pass
+
+
+def _ws_session_is_orphaned(session: dict | None) -> bool:
+    """True if a WS session has no live transport and no in-flight turn.
+
+    After ``handle_ws`` detaches a disconnected client it points the session
+    at ``_stdio_transport``. In the dashboard's in-process gateway there is no
+    real stdio peer reading those frames, so a session left on the stdio
+    transport (and not mid-turn) is genuinely orphaned and safe to reap.
+    """
+    if not session or session.get("_finalized"):
+        return False
+    if session.get("running"):
+        return False
+    return session.get("transport") is _stdio_transport
+
+
+def _schedule_ws_orphan_reap(sid: str) -> None:
+    """After a grace window, reap session ``sid`` iff it's still orphaned.
+
+    Called from the WS-disconnect path. The grace window lets a transient
+    reconnect (or a ``session.resume`` that reattaches the transport) cancel
+    the reap by re-binding a live transport. Disabled when the grace is 0.
+    """
+    if _WS_ORPHAN_REAP_GRACE_S <= 0:
+        return
+
+    def _reap() -> None:
+        with _session_resume_lock:
+            session = _sessions.get(sid)
+            if not _ws_session_is_orphaned(session):
+                return
+            _sessions.pop(sid, None)
+        try:
+            _teardown_session(session)
+        except Exception:
+            pass
+
+    timer = threading.Timer(_WS_ORPHAN_REAP_GRACE_S, _reap)
+    timer.daemon = True
+    timer.start()
+
+
 def _shutdown_sessions() -> None:
     with _sessions_lock:
         snapshot = list(_sessions.values())
