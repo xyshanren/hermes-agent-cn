@@ -738,14 +738,11 @@ def run_doctor(args):
                         issues,
                     )
 
-            # Warn if model is set to a provider-prefixed name on a provider that doesn't use them.
-            # Vendor/model slugs are valid on aggregator-style providers and on any custom
-            # provider — bare "custom" or a named "custom:<name>" that fronts an OpenAI-compatible
-            # aggregator (e.g. custom:hpc-ai serving deepseek/deepseek-v4-flash) requires the prefix.
+            # Warn if model is set to a provider-prefixed name on a provider that doesn't use them
             provider_for_policy = runtime_provider or catalog_provider
-            provider_policy_id = str(provider_for_policy or "").strip().lower()
             providers_accepting_vendor_slugs = {
                 "openrouter",
+                "custom",
                 "auto",
                 "kilocode",
                 "opencode-zen",
@@ -753,16 +750,11 @@ def run_doctor(args):
                 "lmstudio",
                 "nous",
             }
-            provider_accepts_vendor_slug = (
-                provider_policy_id in providers_accepting_vendor_slugs
-                or provider_policy_id == "custom"
-                or provider_policy_id.startswith("custom:")
-            )
             if (
                 default_model
                 and "/" in default_model
-                and provider_policy_id
-                and not provider_accepts_vendor_slug
+                and provider_for_policy
+                and provider_for_policy not in providers_accepting_vendor_slugs
             ):
                 check_warn(
                     f"model.default '{default_model}' uses a vendor/model slug but provider is '{provider_raw}'",
@@ -1477,7 +1469,7 @@ def run_doctor(args):
             # For workspace-scoped audits run from PROJECT_ROOT the
             # node_modules check must use the workspace root; standalone dirs
             # (whatsapp-bridge) check their own node_modules.
-            check_dir = PROJECT_ROOT if audit_extra else npm_dir
+            check_dir = npm_dir if audit_extra else npm_dir
             if not (check_dir / "node_modules").exists():
                 continue
             try:
@@ -2048,15 +2040,7 @@ def run_doctor(args):
             _honcho_cfg_path = resolve_config_path()
 
             if not _honcho_cfg_path.exists():
-                # Config file missing — but env var fallback may have resolved it.
-                # Only warn if the config didn't actually resolve from env vars.
-                if hcfg.api_key or hcfg.base_url:
-                    check_ok(
-                        "Honcho configured via environment variables",
-                        f"config file {_honcho_cfg_path} not found, using HONCHO_API_KEY env var",
-                    )
-                else:
-                    check_warn("Honcho config not found", "run: hermes memory setup")
+                check_warn("Honcho config not found", "run: hermes memory setup")
             elif not hcfg.enabled:
                 check_info(f"Honcho disabled (set enabled: true in {_honcho_cfg_path} to activate)")
             elif not (hcfg.api_key or hcfg.base_url):
