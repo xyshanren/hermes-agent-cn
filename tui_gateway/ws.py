@@ -285,29 +285,32 @@ async def handle_ws(ws: Any) -> None:
     finally:
         reaped_sessions = 0
         detached_sessions = 0
+        reaped_scheduled = 0
         if transport is not None:
             transport.close()
 
-            # Reap sessions this transport owned (close_on_disconnect sidecar
-            # sessions) or detach the rest to the drop sentinel so later emits
-            # don't crash into a closed socket or fall through to desktop stdout
-            # logs. Detached sessions are handed to the grace-windowed WS-orphan
-            # reaper inside _close_sessions_for_transport (a quick reconnect /
-            # session.resume cancels it). This is the single WS-disconnect
-            # teardown path.
+            # Detach the transport from any sessions it owned so later emits
+            # fall back to stdio instead of crashing into a closed socket.
             #
-            # Offloaded: _close_session_by_id does a blocking worker.close()
-            # (terminate + waits) plus a synchronous DB write — inline that
-            # would freeze the uvicorn event loop for every other live
-            # connection.
-            try:
-                reaped_sessions, detached_sessions = await asyncio.to_thread(
-                    server._close_sessions_for_transport,
-                    transport,
-                    end_reason="ws_disconnect",
-                )
-            except Exception:
-                _log.exception("ws transport teardown failed peer=%s", peer)
+            # In the dashboard's in-process gateway that stdio fallback has no
+            # real reader, so a detached session would otherwise sit forever
+            # holding its _SlashWorker subprocess open (one leaked python proc
+            # per browser refresh — #38591 fallout). Schedule a grace-delayed
+            # reap; a quick reconnect / session.resume re-binds a live
+            # transport and cancels it (see _ws_session_is_orphaned).
+            for _sid, sess in list(server._sessions.items()):
+                if sess.get("transport") is transport:
+                    sess["transport"] = server._stdio_transport
+                    detached_sessions += 1
+                    try:
+                        server._schedule_ws_orphan_reap(_sid)
+                        reaped_scheduled += 1
+                    except Exception:
+                        _log.exception(
+                            "ws orphan-reap schedule failed peer=%s sid=%s",
+                            peer,
+                            _sid,
+                        )
         try:
             await ws.close()
         except Exception as exc:
