@@ -100,15 +100,20 @@ RUN cd web && npm run build && \
 # hermes_cli/main.py succeeds (see #18800). /opt/hermes/web is build-time
 # only (HERMES_WEB_DIST points at hermes_cli/web_dist) and is intentionally
 # not chowned here.
+# /opt/hermes/gateway is runtime-writable: Python may create __pycache__ and
+# gateway state artifacts beneath the package after services drop privileges,
+# especially when the hermes UID is remapped at boot (#27221).
 # The .venv MUST remain hermes-writable so lazy_deps.py can install
 # remaining optional platform packages and future pin bumps at first use.
 # Without this, `uv pip install` fails with EACCES and adapters silently
 # fail to load.  See tools/lazy_deps.py.
 USER root
 RUN chmod -R a+rX /opt/hermes && \
-    chown -R hermes:hermes /opt/hermes/.venv /opt/hermes/ui-tui /opt/hermes/node_modules
-# Start as root so the entrypoint can usermod/groupmod + gosu.
-# If HERMES_UID is unset, the entrypoint drops to the default hermes user (10000).
+    chown -R hermes:hermes /opt/hermes/.venv /opt/hermes/ui-tui /opt/hermes/gateway /opt/hermes/node_modules
+# Start as root so the s6-overlay stage2 hook can usermod/groupmod and chown
+# the data volume. Each supervised service then drops to the hermes user via
+# `s6-setuidgid hermes` in its run script. If HERMES_UID is unset, services
+# run as the default hermes user (UID 10000).
 
 # ---------- Link hermes-agent itself (editable) ----------
 # Deps are already installed in the cached layer above; `--no-deps` makes
