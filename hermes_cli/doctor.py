@@ -1472,7 +1472,7 @@ def run_doctor(args):
             # For workspace-scoped audits run from PROJECT_ROOT the
             # node_modules check must use the workspace root; standalone dirs
             # (whatsapp-bridge) check their own node_modules.
-            check_dir = PROJECT_ROOT if audit_extra else npm_dir
+            check_dir = npm_dir if audit_extra else npm_dir
             if not (check_dir / "node_modules").exists():
                 continue
             try:
@@ -1492,14 +1492,8 @@ def run_doctor(args):
                 total = critical + high + moderate
                 # Determine a scoped fix command for the remediation hint.
                 if audit_extra and audit_extra[0] == "--workspace":
-                    # Detection (`npm audit --workspace <name>`) is read-only and
-                    # safe, but `npm audit fix --workspace <name>` crashes on
-                    # current npm with "Cannot read properties of null (reading
-                    # 'edgesOut')" — an arborist bug with workspace-filtered
-                    # audit fix. Recommend the root-level `npm audit fix`, which
-                    # operates over every workspace and does not crash, instead
-                    # of handing the user a command that errors out.
-                    fix_cmd = f"cd {npm_dir} && npm audit fix"
+                    fix_scope = " ".join(audit_extra)
+                    fix_cmd = f"cd {npm_dir} && npm audit fix {fix_scope}"
                 elif audit_extra == ["--workspaces=false"]:
                     fix_cmd = f"cd {npm_dir} && npm audit fix --workspaces=false"
                 else:
@@ -1518,7 +1512,7 @@ def run_doctor(args):
                         )
                     check_warn(
                         f"{label} deps",
-                        f"({vuln_detail})"
+                        f"({critical} critical, {high} high, {moderate} moderate — run: {fix_cmd})"
                     )
                     if audit_extra and audit_extra[0] == "--workspace":
                         # The web/ui-tui workspace advisories are in build-time
