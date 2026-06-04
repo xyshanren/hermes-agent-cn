@@ -7,6 +7,7 @@ import pytest
 from hermes_cli.tools_config import (
     _DEFAULT_OFF_TOOLSETS,
     _apply_toolset_change,
+    _checklist_toolset_keys,
     _configure_provider,
     _reconfigure_provider,
     _get_platform_tools,
@@ -1221,3 +1222,178 @@ def test_reconfigure_provider_runs_post_setup_for_env_var_providers(
     _reconfigure_provider(provider, {})
 
     assert called == [post_setup_key]
+
+
+# ---------------------------------------------------------------------------
+# Inline Nous Portal login gate on managed-provider selection
+# ---------------------------------------------------------------------------
+
+
+def test_configure_managed_provider_blocks_when_not_entitled(monkeypatch):
+    """Selecting a Nous-managed backend without paid access writes no config."""
+    monkeypatch.setattr(
+        "hermes_cli.nous_subscription.ensure_nous_portal_access",
+        lambda **kwargs: False,
+    )
+    provider = {
+        "name": "Nous Subscription (Firecrawl)",
+        "web_backend": "firecrawl",
+        "managed_nous_feature": "web",
+        "env_vars": [],
+    }
+    config = {}
+
+    _configure_provider(provider, config)
+
+    # No use_gateway / backend written — the gate returned before any mutation.
+    assert "web" not in config
+
+
+def test_configure_managed_provider_enables_when_entitled(monkeypatch):
+    """Once entitled, selecting the managed backend sets use_gateway=True."""
+    monkeypatch.setattr(
+        "hermes_cli.nous_subscription.ensure_nous_portal_access",
+        lambda **kwargs: True,
+    )
+    provider = {
+        "name": "Nous Subscription (Firecrawl)",
+        "web_backend": "firecrawl",
+        "managed_nous_feature": "web",
+        "env_vars": [],
+    }
+    config = {}
+
+    _configure_provider(provider, config)
+
+    assert config["web"]["backend"] == "firecrawl"
+    assert config["web"]["use_gateway"] is True
+
+
+def test_configure_non_managed_provider_skips_portal_gate(monkeypatch):
+    """A self-hosted provider must never trigger the Nous Portal login gate."""
+    called = {"gate": False}
+
+    def _boom(**kwargs):
+        called["gate"] = True
+        return False
+
+    monkeypatch.setattr(
+        "hermes_cli.nous_subscription.ensure_nous_portal_access", _boom
+    )
+    provider = {"name": "Tavily", "web_backend": "tavily", "env_vars": []}
+    config = {}
+
+    _configure_provider(provider, config)
+
+    assert called["gate"] is False
+    assert config["web"]["backend"] == "tavily"
+    assert config["web"]["use_gateway"] is False
+
+
+def test_apply_provider_selection_web_sets_backend():
+    """Selecting a web provider persists the backend without prompting for keys."""
+    from hermes_cli.tools_config import apply_provider_selection
+
+    config = {}
+    apply_provider_selection("web", "Firecrawl Self-Hosted", config)
+
+    assert config["web"]["backend"] == "firecrawl"
+    assert config["web"]["use_gateway"] is False
+
+
+def test_apply_provider_selection_tts_sets_provider():
+    """Selecting a TTS provider persists tts.provider."""
+    from hermes_cli.tools_config import apply_provider_selection
+
+    config = {}
+    apply_provider_selection("tts", "Microsoft Edge TTS", config)
+
+    assert config["tts"]["provider"] == "edge"
+    assert config["tts"]["use_gateway"] is False
+
+
+def test_apply_provider_selection_unknown_provider_raises_keyerror():
+    from hermes_cli.tools_config import apply_provider_selection
+
+    with pytest.raises(KeyError):
+        apply_provider_selection("web", "No Such Provider", {})
+
+
+def test_apply_provider_selection_unknown_toolset_raises_keyerror():
+    from hermes_cli.tools_config import apply_provider_selection
+
+    with pytest.raises(KeyError):
+        apply_provider_selection("not_a_toolset", "whatever", {})
+
+
+def test_apply_provider_selection_does_not_prompt_or_post_setup(monkeypatch):
+    """The non-interactive selection must not invoke prompts or post-setup hooks."""
+    from hermes_cli import tools_config
+
+    monkeypatch.setattr(
+        tools_config, "_run_post_setup",
+        lambda *a, **k: pytest.fail("post-setup must not run on provider selection"),
+    )
+    monkeypatch.setattr(
+        tools_config, "_prompt",
+        lambda *a, **k: pytest.fail("env prompting must not run on provider selection"),
+    )
+    config = {}
+    tools_config.apply_provider_selection("tts", "Microsoft Edge TTS", config)
+    assert config["tts"]["provider"] == "edge"
+
+
+# ── Checklist diff scope: non-configurable toolsets (kanban) must not be
+#    reported as added/removed by `hermes tools` ──────────────────────────
+
+
+def test_checklist_toolset_keys_excludes_kanban():
+    """``kanban`` is check_fn-gated and never appears in the checklist, so it
+    must not be in the checklist's offered universe for any platform."""
+    for plat in ("cli", "telegram", "discord"):
+        keys = _checklist_toolset_keys(plat)
+        assert "kanban" not in keys
+        # Configurable toolsets that ARE offered must be present.
+        assert "web" in keys
+
+
+def test_kanban_not_reported_as_removed_in_diff():
+    """Reproduces the false-signal bug: `hermes tools` printed ``- kanban``
+    when saving a platform that resolves kanban as enabled, even though the
+    checklist never offered kanban as a toggle.
+
+    The printed diff must be scoped to ``_checklist_toolset_keys`` so a tool
+    the user could not deselect is never reported as removed. The persisted
+    config still keeps kanban (verified separately by _save_platform_tools).
+    """
+    config = {"platform_toolsets": {"telegram": ["kanban", "web", "terminal"]}}
+    current = _get_platform_tools(config, "telegram", include_default_mcp_servers=False)
+    assert "kanban" in current  # resolved as enabled at read time
+
+    # The checklist can only return configurable keys it was shown; kanban
+    # is never one of them.
+    universe = _checklist_toolset_keys("telegram")
+    new_enabled = {t for t in current if t != "kanban"}
+
+    # Unscoped (old, buggy) diff would surface kanban.
+    assert (current - new_enabled) == {"kanban"}
+    # Scoped (fixed) diff drops it.
+    assert ((current - new_enabled) & universe) == set()
+
+
+def test_real_configurable_changes_still_reported_in_diff():
+    """Scoping the diff to the checklist universe must NOT swallow genuine
+    add/remove of configurable toolsets."""
+    config = {"platform_toolsets": {"cli": ["kanban", "web", "terminal", "skills"]}}
+    current = _get_platform_tools(config, "cli", include_default_mcp_servers=False)
+    universe = _checklist_toolset_keys("cli")
+
+    # User unticks 'terminal' (configurable) — must still report as removed.
+    new_enabled = {t for t in current if t not in ("kanban", "terminal")}
+    assert ((current - new_enabled) & universe) == {"terminal"}
+
+    # User adds 'vision' (configurable) — must still report as added.
+    new_enabled2 = (current - {"kanban"}) | {"vision"}
+    assert ((new_enabled2 - current) & universe) == {"vision"}
+
+
