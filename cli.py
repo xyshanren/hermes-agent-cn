@@ -4918,6 +4918,7 @@ class HermesCLI:
                         f"[bold {_accent_hex()}]{_escape(title_part)}[/] "
                         f"({msg_count} user message{'s' if msg_count != 1 else ''}, {len(restored)} total messages)"
                     )
+                self._restore_session_cwd(session_meta, quiet=_quiet_mode)
             else:
                 if _quiet_mode:
                     print(
@@ -5166,7 +5167,7 @@ class HermesCLI:
             if quiet:
                 print(msg, file=sys.stderr)
             else:
-                self._console_print(f"[dim]{_escape(msg)}[/dim]")
+                self._console_print(f"[{_DIM}]{_escape(msg)}[/]")
             return
 
         try:
@@ -5176,7 +5177,7 @@ class HermesCLI:
             if quiet:
                 print(msg, file=sys.stderr)
             else:
-                self._console_print(f"[dim]{_escape(msg)}[/dim]")
+                self._console_print(f"[{_DIM}]{_escape(msg)}[/]")
             return
 
         # Retarget the terminal/code-exec tools to match the process cwd.
@@ -5186,7 +5187,7 @@ class HermesCLI:
         if quiet:
             print(msg, file=sys.stderr)
         else:
-            self._console_print(f"[dim]{_escape(msg)}[/dim]")
+            self._console_print(f"[{_DIM}]{_escape(msg)}[/]")
 
     def _preload_resumed_session(self) -> bool:
         """Load a resumed session's history from the DB early (before first chat).
@@ -5244,6 +5245,7 @@ class HermesCLI:
                 f"({msg_count} user message{'s' if msg_count != 1 else ''}, "
                 f"{len(restored)} total messages)[/]"
             )
+            self._restore_session_cwd(session_meta)
         else:
             accent_color = _accent_hex()
             self._console_print(
