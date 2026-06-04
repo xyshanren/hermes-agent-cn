@@ -1602,11 +1602,10 @@ class TestWebServerEndpoints:
         assert data.get("gateway_tools", []) == []
 
     def test_apply_main_model_assignment_base_url_and_context_reconcile(self):
-        """The shared main-slot assignment helper must persist a supplied
-        base_url, clear a stale base_url only when switching providers, preserve
-        it on same-provider re-assignment, and always drop a hardcoded
-        context_length override. Both POST /api/model/set and profile-model
-        writes route through this, so the contract is pinned here."""
+        """The shared main-slot assignment helper must persist base_url only for
+        custom providers, clear stale base_url for hosted ones, and always drop
+        a hardcoded context_length override. Both POST /api/model/set and
+        profile-model writes route through this, so the contract is pinned here."""
         from hermes_cli.web_server import _apply_main_model_assignment
 
         # Custom + base_url → persisted; stale context_length dropped.
@@ -1618,39 +1617,16 @@ class TestWebServerEndpoints:
         assert out["base_url"] == "http://127.0.0.1:8000/v1"
         assert "context_length" not in out
 
-        # Switching providers (custom → openrouter) → stale base_url cleared.
+        # Hosted provider → stale base_url cleared (no base_url supplied).
         out = _apply_main_model_assignment(
-            {"provider": "custom", "base_url": "http://127.0.0.1:8000/v1"},
-            "openrouter",
-            "anthropic/claude-opus-4.8",
+            {"base_url": "http://127.0.0.1:8000/v1"}, "openrouter", "anthropic/claude-opus-4.8"
         )
         assert out["provider"] == "openrouter"
         assert out["base_url"] == ""
 
-        # Same provider, no new base_url → existing custom endpoint preserved.
-        # Regression: picking a different MiMo model under xiaomi must NOT wipe a
-        # Token Plan base_url (https://token-plan-*.xiaomimimo.com/v1).
+        # Custom WITHOUT a base_url → don't invent one, clear any stale value.
         out = _apply_main_model_assignment(
-            {"provider": "xiaomi", "base_url": "https://token-plan-ams.xiaomimimo.com/v1"},
-            "xiaomi",
-            "mimo-v2.5-pro",
-        )
-        assert out["provider"] == "xiaomi"
-        assert out["default"] == "mimo-v2.5-pro"
-        assert out["base_url"] == "https://token-plan-ams.xiaomimimo.com/v1"
-
-        # A supplied base_url is honored for any provider, not just custom.
-        out = _apply_main_model_assignment(
-            {"provider": "xiaomi"},
-            "xiaomi",
-            "mimo-v2.5",
-            "https://token-plan-cn.xiaomimimo.com/v1",
-        )
-        assert out["base_url"] == "https://token-plan-cn.xiaomimimo.com/v1"
-
-        # Switching providers without a base_url → don't invent one, clear stale.
-        out = _apply_main_model_assignment(
-            {"provider": "openrouter", "base_url": "http://stale:1/v1"}, "custom", "m"
+            {"base_url": "http://stale:1/v1"}, "custom", "m"
         )
         assert out["base_url"] == ""
 
