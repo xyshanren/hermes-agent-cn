@@ -1518,9 +1518,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         if not os.environ.get("HERMES_QUIET"):
             print("Installing TUI dependencies…")
         npm_cwd = _workspace_root(tui_dir)
-        # --workspace ui-tui avoids resolving apps/desktop (Electron + node-pty).
-        # See #38772.
-        npm_workspace_args: tuple[str, ...] = ("--workspace", "ui-tui")
+        npm_workspace_args: tuple[str, ...] = ()
         if termux_startup:
             npm_cwd, npm_workspace_args = _termux_workspace_install_context(
                 tui_dir,
@@ -7074,11 +7072,7 @@ def _build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
                 _say(text)
 
     npm_cwd = _workspace_root(web_dir)
-    # Scope the install to the web workspace only so that the full workspace
-    # graph (including apps/desktop with its Electron + node-pty deps) is never
-    # resolved here.  Without --workspace the root package.json's apps/* glob
-    # would pull in desktop on every web build. See #38772.
-    npm_workspace_args: tuple[str, ...] = ("--workspace", "web")
+    npm_workspace_args: tuple[str, ...] = ()
     if _is_termux_startup_environment():
         npm_cwd, npm_workspace_args = _termux_workspace_install_context(web_dir)
     r1 = _run_npm_install_deterministic(
