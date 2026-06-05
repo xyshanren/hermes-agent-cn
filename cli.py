@@ -4888,9 +4888,9 @@ class HermesCLI:
                 resolved_id = self.session_id
             if resolved_id and resolved_id != self.session_id:
                 ChatConsole().print(
-                    f"[{_DIM}]Session {_escape(self.session_id)} was compressed into "
+                    f"[dim]Session {_escape(self.session_id)} was compressed into "
                     f"{_escape(resolved_id)}; resuming the descendant with your "
-                    f"transcript.[/]"
+                    f"transcript.[/dim]"
                 )
                 self.session_id = resolved_id
                 resolved_meta = self._session_db.get_session(self.session_id)
@@ -5134,6 +5134,59 @@ class HermesCLI:
             )
 
         self._console_print()
+
+    def _restore_session_cwd(self, session_meta: dict, *, quiet: bool = False) -> None:
+        """Relaunch a resumed session in the directory it was started from.
+
+        Idempotent and safe to call from every resume path. When the stored
+        ``cwd`` differs from the current process directory, we both
+        ``os.chdir()`` (so the process and any ``os.getcwd()`` fallback agree)
+        and retarget ``TERMINAL_CWD`` (so the terminal tool, code-exec tool,
+        and relative-path resolution all land in the same place — the local
+        terminal backend snapshots cwd on first use, which happens after this).
+
+        No-ops when: the session recorded no cwd (gateway/remote/older
+        sessions), the directory no longer exists, or we're already there.
+        A missing directory degrades to a single dim warning rather than a
+        crash — repos get moved and deleted.
+        """
+        recorded = (session_meta or {}).get("cwd")
+        if not recorded:
+            return
+        recorded = os.path.expanduser(str(recorded))
+        try:
+            current = os.getcwd()
+        except OSError:
+            current = None
+        if current and os.path.realpath(recorded) == os.path.realpath(current):
+            return  # Already where the session lived — nothing to announce.
+
+        if not os.path.isdir(recorded):
+            msg = f"⚠ Session's working directory is gone: {recorded} — staying in {current or '.'}"
+            if quiet:
+                print(msg, file=sys.stderr)
+            else:
+                self._console_print(f"[dim]{_escape(msg)}[/dim]")
+            return
+
+        try:
+            os.chdir(recorded)
+        except OSError as e:
+            msg = f"⚠ Could not enter session's working directory {recorded}: {e}"
+            if quiet:
+                print(msg, file=sys.stderr)
+            else:
+                self._console_print(f"[dim]{_escape(msg)}[/dim]")
+            return
+
+        # Retarget the terminal/code-exec tools to match the process cwd.
+        os.environ["TERMINAL_CWD"] = recorded
+
+        msg = f"↻ Working directory: {recorded}"
+        if quiet:
+            print(msg, file=sys.stderr)
+        else:
+            self._console_print(f"[dim]{_escape(msg)}[/dim]")
 
     def _preload_resumed_session(self) -> bool:
         """Load a resumed session's history from the DB early (before first chat).
