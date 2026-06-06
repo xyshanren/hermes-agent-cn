@@ -149,4 +149,30 @@ async def test_single_followup_is_stored_as_is():
     pending = adapter._pending_messages[session_key]
     assert pending is first
     assert pending.text == "only one"
-    assert adapter._active_sessions[session_key].is_set()
+    assert not adapter._active_sessions[session_key].is_set()
+
+
+def test_adapter_defaults_to_interrupt_mode(monkeypatch):
+    monkeypatch.delenv("HERMES_GATEWAY_BUSY_TEXT_MODE", raising=False)
+    adapter = _make_initialized_adapter()
+    assert adapter._busy_text_mode == "interrupt"
+    assert not adapter._is_queue_text_debounce_candidate(_make_event("hello"))
+
+
+def test_adapter_is_queue_text_debounce_candidate_when_queue_set():
+    # _make_adapter() pins _busy_text_mode="queue" to exercise debounce.
+    adapter = _make_adapter()
+    assert adapter._is_queue_text_debounce_candidate(_make_event("hello world"))
+
+
+def test_command_messages_bypass_debounce_even_in_queue_mode():
+    adapter = _make_adapter()
+    assert not adapter._is_queue_text_debounce_candidate(_make_event(""))
+    assert not adapter._is_queue_text_debounce_candidate(_make_event("/stop"))
+
+
+def test_busy_text_mode_respects_env_var_override(monkeypatch):
+    monkeypatch.setenv("HERMES_GATEWAY_BUSY_TEXT_MODE", "interrupt")
+    adapter = _make_initialized_adapter()
+    assert adapter._busy_text_mode == "interrupt"
+    assert not adapter._is_queue_text_debounce_candidate(_make_event("test"))
