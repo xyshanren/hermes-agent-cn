@@ -202,9 +202,7 @@ fn build_command(script_path: &Path, args: &[String]) -> Command {
 }
 
 /// Canonical PowerShell 5.1 location under a Windows root (`%SystemRoot%`).
-/// Kept separate (and test-visible) so the path layout is unit-tested on any
-/// host, not just Windows.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 fn powershell_under_root(root: &Path) -> std::path::PathBuf {
     root.join("System32")
         .join("WindowsPowerShell")
