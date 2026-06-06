@@ -1992,6 +1992,54 @@ async def update_hermes():
     }
 
 
+def _recent_upstream_commits(n: int = 20) -> List[Dict[str, Any]]:
+    """Commits the local checkout is behind ``origin/main`` by, newest first.
+
+    Logs the SAME range the behind-count uses (``HEAD..origin/main`` — see
+    ``banner._check_via_local_git``), NOT the branch's ``@{upstream}``. On a
+    feature-branch checkout ``@{upstream}`` is the branch's own tip (zero
+    commits), which would leave the changelog empty even though the count is
+    non-zero. Pinning to ``origin/main`` keeps count and changelog consistent.
+
+    Best-effort: returns [] if not a git checkout, origin/main is unreachable,
+    or git is unavailable. Never raises into the request path.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(PROJECT_ROOT),
+                "log",
+                "--format=%H%x1f%s%x1f%an%x1f%ct",
+                "HEAD..origin/main",
+                f"-n{int(n)}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode != 0:
+            return []
+        rows: List[Dict[str, Any]] = []
+        for line in out.stdout.splitlines():
+            if not line.strip():
+                continue
+            parts = (line.split("\x1f") + ["", "", "", "0"])[:4]
+            sha, summary, author, at = parts
+            rows.append(
+                {
+                    "sha": sha[:7],
+                    "summary": summary,
+                    "author": author,
+                    "at": int(at or 0),
+                }
+            )
+        return rows
+    except Exception:
+        return []
+
+
 @app.get("/api/hermes/update/check")
 async def check_hermes_update(force: bool = False):
     """Report whether a Hermes update is available, without applying it.
