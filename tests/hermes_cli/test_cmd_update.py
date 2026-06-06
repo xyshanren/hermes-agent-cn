@@ -176,8 +176,7 @@ class TestCmdUpdateBranchFallback:
         ]
         if len(npm_calls) > 2:
             assert npm_calls[2:] == [
-                (["/usr/bin/npm", "ci", "--silent"], PROJECT_ROOT / "web"),
-                (["/usr/bin/npm", "run", "build"], PROJECT_ROOT / "web"),
+                (["/usr/bin/npm", "ci", "--workspace", "web", "--silent"], PROJECT_ROOT),
             ]
 
         # Regression for #18840: repo root + ui-tui installs must stream
