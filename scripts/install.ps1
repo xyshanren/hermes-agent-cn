@@ -185,18 +185,6 @@ function Write-Err {
     Write-Host "[X] $Message" -ForegroundColor Red
 }
 
-function Invoke-NativeWithRelaxedErrorAction {
-    param([scriptblock]$Script)
-
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        & $Script
-    } finally {
-        $ErrorActionPreference = $prevEAP
-    }
-}
-
 # Inspect npm output for a TLS-trust failure and, if found, print actionable
 # remediation. npm/Node surface corporate MITM proxies and missing root CAs as
 # "unable to get local issuer certificate" / "self-signed certificate in
