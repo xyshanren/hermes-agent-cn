@@ -453,37 +453,6 @@ def remove_wrapper_script(name: str) -> bool:
     return False
 
 
-def _migrate_profile_config_if_outdated(profile_dir: Path) -> None:
-    """Bring a copied profile config.yaml up to the current schema.
-
-    Profile creation can clone a config file that predates schema tracking (no
-    ``_config_version``) or that is simply older than the running Hermes. If we
-    leave it untouched, the first desktop/doctor view of the new profile shows a
-    scary ``v0 → latest`` warning even though we just created the profile. Scope
-    the normal migration pipeline to the new profile and keep it non-interactive.
-    """
-    config_path = profile_dir / "config.yaml"
-    if not config_path.exists():
-        return
-
-    try:
-        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-        from hermes_cli.config import check_config_version, migrate_config
-
-        token = set_hermes_home_override(str(profile_dir))
-        try:
-            current_ver, latest_ver = check_config_version()
-            if current_ver < latest_ver:
-                migrate_config(interactive=False, quiet=True)
-        finally:
-            reset_hermes_home_override(token)
-    except Exception:
-        # Profile creation should not fail because an old copied config could
-        # not be migrated. The next `hermes doctor --fix` can still surface the
-        # detailed error in the target profile.
-        pass
-
-
 def find_alias_for_profile(profile_name: str) -> Optional[str]:
     """Return the alias name of the wrapper that activates *profile_name*, or None.
 
