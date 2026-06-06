@@ -61,7 +61,6 @@ AUTHOR_MAP = {
     "harjoth.khara@gmail.com": "harjothkhara",
     "129007007+HeLLGURD@users.noreply.github.com": "HeLLGURD",
     "290859878+synapsesx@users.noreply.github.com": "synapsesx",
-    "157689911+itsflownium@users.noreply.github.com": "itsflownium",
     "dirtyren@users.noreply.github.com": "dirtyren",
     "islam666@users.noreply.github.com": "islam666",
     "zhaolei.vc@bytedance.com": "zhaoleibd",
