@@ -1965,7 +1965,7 @@ def auto_describe_profile(profile_name: str, payload: DescribeAutoBody):
 
 
 # ---------------------------------------------------------------------------
-# Decompose endpoint (orchestrator-driven fan-out)
+# Decompose endpoint (built-in decomposer fan-out)
 # ---------------------------------------------------------------------------
 
 class DecomposeBody(BaseModel):
