@@ -1597,6 +1597,8 @@ dependencies = [
     { name = "httpx", extra = ["socks"] },
     { name = "jinja2" },
     { name = "openai" },
+    { name = "pathspec" },
+    { name = "pillow" },
     { name = "prompt-toolkit" },
     { name = "psutil" },
     { name = "pydantic" },
@@ -1760,9 +1762,6 @@ termux-all = [
 tts-premium = [
     { name = "elevenlabs" },
 ]
-vercel = [
-    { name = "vercel" },
-]
 voice = [
     { name = "faster-whisper" },
     { name = "numpy" },
@@ -1847,6 +1846,8 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'voice'", specifier = "==2.4.3" },
     { name = "openai", specifier = "==2.24.0" },
     { name = "parallel-web", marker = "extra == 'parallel-web'", specifier = "==0.4.2" },
+    { name = "pathspec", specifier = "==1.1.1" },
+    { name = "pillow", specifier = "==12.2.0" },
     { name = "prompt-toolkit", specifier = "==3.0.52" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "ptyprocess", marker = "sys_platform != 'win32' and extra == 'pty'", specifier = "==0.7.0" },
