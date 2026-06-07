@@ -9022,6 +9022,23 @@ class AIAgent:
         except Exception:
             return False
 
+    def _provider_supports_vision_tool_messages(self) -> bool:
+        """Return True if the active provider accepts list-type tool content.
+
+        Some providers (e.g. Xiaomi MiMo) support multimodal user messages
+        but reject list-type tool message content with 400 errors.  This
+        checks the provider profile's ``supports_vision_tool_messages`` field.
+        """
+        try:
+            from providers import get_provider_profile
+            provider = (getattr(self, "provider", "") or "").strip()
+            profile = get_provider_profile(provider)
+            if profile is not None:
+                return getattr(profile, "supports_vision_tool_messages", True)
+        except Exception:
+            pass
+        return True  # default: assume compatible
+
     def _preprocess_anthropic_content(self, content: Any, role: str) -> Any:
         if not self._content_has_image_parts(content):
             return content
