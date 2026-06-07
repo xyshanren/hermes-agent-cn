@@ -409,6 +409,44 @@ export function useMainApp(gw: GatewayClient) {
 
   useConfigSync({ gw, setBellOnComplete, setVoiceEnabled, setVoiceRecordKey, sid: ui.sid })
 
+  useEffect(() => {
+    if (!ui.sid) {
+      patchUiState({ liveSessionCount: 0 })
+
+      return
+    }
+
+    let stopped = false
+
+    const refresh = () => {
+      gw.request<SessionActiveListResponse>('session.active_list', { current_session_id: getUiState().sid })
+        .then(raw => {
+          const result = asRpcResult<SessionActiveListResponse>(raw)
+
+          if (!stopped && result?.sessions) {
+            const liveSessionCount = result.sessions.length
+
+            // Only patch when the count actually changed. patchUiState always
+            // produces a new state object, which notifies every $uiState
+            // subscriber; patching unconditionally on each 1.5s poll re-renders
+            // the whole TUI and causes idle flicker.
+            if (getUiState().liveSessionCount !== liveSessionCount) {
+              patchUiState({ liveSessionCount })
+            }
+          }
+        })
+        .catch(() => {})
+    }
+
+    refresh()
+    const timer = setInterval(refresh, 1500)
+
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [gw, ui.sid])
+
   // Tab title: `⚠` waiting on approval/sudo/secret/clarify, `⏳` busy, `✓` idle.
   const model = ui.info?.model?.replace(/^.*\//, '') ?? ''
 
