@@ -1049,6 +1049,8 @@ def list_authenticated_providers(
     current_base_url: str = "",
     user_providers: dict = None,
     custom_providers: list | None = None,
+    *,
+    force_fresh_nous_tier: bool = False,
     max_models: int = 8,
     current_model: str = "",
 ) -> List[dict]:
