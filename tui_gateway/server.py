@@ -399,6 +399,33 @@ def _finalize_session(session: dict | None, end_reason: str = "tui_close") -> No
         pass
 
 
+def _teardown_session(session: dict | None) -> None:
+    """Fully tear down a session: finalize, unregister, close agent + worker.
+
+    Shared by ``session.close`` and the orphaned-WS-session reaper. The
+    slash-worker subprocess is closed inside ``_finalize_session`` (the single
+    finalize chokepoint); this still unregisters the approval notifier and
+    closes the in-process agent. Idempotent: the ``_finalized`` guard in
+    ``_finalize_session`` and the ``poll()`` guard in ``_SlashWorker.close``
+    make repeat calls harmless.
+    """
+    if not session:
+        return
+    _finalize_session(session)
+    try:
+        from tools.approval import unregister_gateway_notify
+
+        unregister_gateway_notify(session["session_key"])
+    except Exception:
+        pass
+    try:
+        agent = session.get("agent")
+        if agent and hasattr(agent, "close"):
+            agent.close()
+    except Exception:
+        pass
+
+
 def _teardown_session(session: dict | None, *, end_reason: str = "tui_close") -> None:
     """Fully tear down a session: finalize, unregister, close agent + worker.
 
@@ -540,63 +567,10 @@ def _close_sessions_for_transport(
 
 def _shutdown_sessions() -> None:
     with _sessions_lock:
-        sids = list(_sessions)
-    for sid in sids:
-        _close_session_by_id(sid, end_reason="tui_shutdown")
-
-
-# Last-resort net for any disconnect path that slips past the WS finally. TTL is
-# hours-scale because last_active freezes during a long turn and on passive
-# viewing — running/pending/starting/live-transport are hard exemptions instead.
-try:
-    _SESSION_TTL_S = float(os.environ.get("HERMES_TUI_SESSION_TTL_S") or 6 * 3600)
-except (TypeError, ValueError):
-    _SESSION_TTL_S = float(6 * 3600)
-_SESSION_TTL_S = max(0.0, _SESSION_TTL_S)
-_REAPER_SCAN_S = 300.0
-
-
-def _transport_is_dead(transport) -> bool:
-    # _detached_ws_transport is the post-WS-disconnect drop sentinel; a session
-    # parked on it has no live client. _stdio_transport is the REAL transport
-    # for a standalone `hermes --tui`, so it must NOT count as dead here (doing
-    # so let the idle reaper evict healthy standalone TUI sessions).
-    if transport is _detached_ws_transport:
-        return True
-    return getattr(transport, "_closed", None) is True
-
-
-def _session_is_evictable(sid: str, session: dict, now: float) -> bool:
-    if session.get("running") or _session_pending_kind(sid):
-        return False
-    ready = session.get("agent_ready")
-    if ready is not None and not ready.is_set():  # still starting
-        return False
-    if not _transport_is_dead(session.get("transport")):
-        return False
-    last_active = float(session.get("last_active") or 0.0)
-    created_at = float(session.get("created_at") or 0.0)
-    return (now - last_active) > _SESSION_TTL_S and (now - created_at) > _SESSION_TTL_S
-
-
-def _reap_idle_sessions() -> None:
-    now = time.time()
-    with _sessions_lock:
-        victims = [sid for sid, s in _sessions.items() if _session_is_evictable(sid, s, now)]
-    for sid in victims:
-        _close_session_by_id(sid, end_reason="idle_timeout")
-
-
-def _start_idle_reaper() -> None:
-    def _loop():
-        while True:
-            time.sleep(_REAPER_SCAN_S)
-            try:
-                _reap_idle_sessions()
-            except Exception:
-                pass
-
-    threading.Thread(target=_loop, daemon=True).start()
+        snapshot = list(_sessions.values())
+    for session in snapshot:
+        # _finalize_session closes the slash-worker subprocess too.
+        _finalize_session(session, end_reason="tui_shutdown")
 
 
 atexit.register(_shutdown_sessions)
