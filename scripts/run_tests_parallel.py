@@ -302,37 +302,49 @@ def _run_one_file(
         # dead processes are a no-op.
         _kill_tree(proc, pgid=pgid)
 
-    if rc == 4:
-        # Exit-4 survived the retries (or the file was judged absent).
-        # Capture filesystem forensics so a CI-only "file not found" can
-        # be diagnosed from the log instead of guessed at: does the file
-        # exist NOW, what does the parent dir hold, and is the git tree
-        # clean?  (June 2026: a PR-added test file repeatedly hit exit 4
-        # on one CI shard while passing locally — these lines exist so
-        # the next occurrence is attributable.)
-        forensics = [f"--- exit-4 forensics for {file} ---"]
+    if rc == 4 and Path(file).exists():
+        # pytest exit 4 = "file or directory not found" at exec time, yet the
+        # file is present on disk now. On loaded shared CI runners we have seen
+        # the planner enumerate a file (its tests counted via --collect-only)
+        # but the per-file subprocess fail to stat it moments later — a
+        # transient the deterministic LPT slicer otherwise reproduces on every
+        # rerun (same file set → same shard). Retry the file ONCE before
+        # surfacing it as a hard failure. We do NOT widen the exit-5 rule:
+        # exit 4 on a file that genuinely does not exist must still fail.
+        retry_proc = subprocess.Popen(
+            cmd,
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        retry_pgid: int | None = None
+        if sys.platform != "win32":
+            try:
+                retry_pgid = os.getpgid(retry_proc.pid)
+            except (ProcessLookupError, PermissionError):
+                retry_pgid = None
         try:
-            forensics.append(f"exists={file.exists()} retries_used={attempt}")
-            parent = file.parent
-            if parent.exists():
-                names = sorted(p.name for p in parent.iterdir())
-                sibling_hint = [n for n in names if file.stem[:12] in n]
-                forensics.append(
-                    f"parent={parent} entries={len(names)} "
-                    f"similar={sibling_hint[:5]}"
-                )
-            else:
-                forensics.append(f"parent={parent} MISSING")
-            git_st = subprocess.run(
-                ["git", "status", "--porcelain"],
-                cwd=repo_root, capture_output=True, text=True, timeout=10,
+            retry_output, _ = retry_proc.communicate(timeout=file_timeout)
+            retry_rc = retry_proc.returncode
+        except subprocess.TimeoutExpired:
+            _kill_tree(retry_proc, pgid=retry_pgid)
+            try:
+                retry_output, _ = retry_proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                retry_output = "(file timeout exceeded on retry; output unavailable)"
+            retry_rc = 124
+            retry_output = (
+                f"(per-file timeout on exit-4 retry: {file_timeout:.0f}s exceeded; "
+                f"process tree SIGKILL'd)\n{retry_output}"
             )
-            dirty = git_st.stdout.strip().splitlines()
-            forensics.append(f"git_dirty_entries={len(dirty)}")
-            forensics.extend(f"  {line}" for line in dirty[:10])
-        except Exception as exc:  # noqa: BLE001 — forensics must never mask rc=4
-            forensics.append(f"(forensics error: {exc})")
-        output = output + "\n" + "\n".join(forensics)
+        except BaseException:
+            _kill_tree(retry_proc, pgid=retry_pgid)
+            raise
+        else:
+            _kill_tree(retry_proc, pgid=retry_pgid)
+        rc, output = retry_rc, retry_output
 
     if rc == 5:
         # No tests collected — every test in the file was filtered out.
