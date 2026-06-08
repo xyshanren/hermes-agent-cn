@@ -89,6 +89,39 @@ class _Runtime:
             logger.debug("NeMo Relay plugins.toml init failed: %s", exc, exc_info=True)
             return False
 
+    def _clear_plugins_toml(self) -> None:
+        if not self._plugin_config_initialized:
+            return
+        plugin_mod = getattr(self.nemo_relay, "plugin", None)
+        clear = getattr(plugin_mod, "clear", None)
+        if not callable(clear):
+            return
+        try:
+            _resolve_awaitable(clear())
+        finally:
+            self._plugin_config_initialized = False
+            self._plugin_config_needs_reinit = bool(self.settings.plugins_config)
+
+    def _activate_direct_fallbacks(self) -> None:
+        self._plugin_config_needs_reinit = False
+        self._configure_atof()
+
+    def _maybe_reinitialize_plugins_toml(self) -> None:
+        if not self._plugin_config_needs_reinit or self._plugin_config_initialized:
+            return
+        self._plugin_config_initialized = self._configure_plugins_toml()
+        if not self._plugin_config_initialized:
+            self._activate_direct_fallbacks()
+            return
+        self._clear_atof()
+        self._plugin_config_needs_reinit = False
+
+    def _plugins_toml_owns_exporter(self, exporter_name: str) -> bool:
+        return self._plugin_config_initialized and _observability_exporter_enabled(
+            self.settings.plugins_config,
+            exporter_name,
+        )
+
     def _ensure_plugin_config_output_dirs(self, config: dict[str, Any]) -> None:
         for component in config.get("components", []):
             if not isinstance(component, dict):
