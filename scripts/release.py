@@ -80,7 +80,6 @@ AUTHOR_MAP = {
     "mnajafian@nvidia.com": "mnajafian-nv",
     "25539605+lsaether@users.noreply.github.com": "lsaether",
     "30080538+JimStenstrom@users.noreply.github.com": "JimStenstrom",
-    "rod.boev@gmail.com": "rodboev",
     "zhaolei.vc@bytedance.com": "zhaoleibd",
     "jeffrobodie@gmail.com": "jeffrobodie-glitch",
     "kyssta-exe@users.noreply.github.com": "kyssta-exe",
