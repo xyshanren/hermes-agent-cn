@@ -1515,7 +1515,16 @@ class HermesACPAgent(acp.Agent):
             self.session_manager.save_session(session_id)
 
         final_response = result.get("final_response", "")
-        if final_response:
+        cancelled = bool(state.cancel_event and state.cancel_event.is_set())
+        interrupted = bool(result.get("interrupted")) or cancelled
+        # Hermes' local "waiting for model response" interrupt status is metadata,
+        # not assistant prose — clients get cancellation from stop_reason instead.
+        from agent.conversation_loop import INTERRUPT_WAITING_FOR_MODEL_PREFIX
+
+        suppress_interrupt_response = interrupted and final_response.startswith(
+            INTERRUPT_WAITING_FOR_MODEL_PREFIX
+        )
+        if final_response and not suppress_interrupt_response:
             try:
                 from agent.title_generator import maybe_auto_title
 
