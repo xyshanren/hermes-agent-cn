@@ -954,6 +954,28 @@ def register_task_env_overrides(task_id: str, overrides: Dict[str, Any]):
     """
     _task_env_overrides[task_id] = overrides
 
+    # If a live environment already exists for this task, a freshly registered
+    # ``cwd`` override (e.g. the ACP client switching the editor's project root
+    # mid-session via ``session/load`` / ``session/resume``) must take effect on
+    # the cached env too. ``terminal_tool`` resolves the per-command cwd as
+    # ``workdir > env.cwd > config/override cwd`` so that ordinary in-session
+    # ``cd`` state is preserved; without syncing here the override would sit
+    # below the (already-set) ``env.cwd`` and be silently ignored once any
+    # command has run. Pushing it onto the live env keeps ``cd`` tracking intact
+    # while letting an explicit ACP cwd change win, as the client expects.
+    new_cwd = overrides.get("cwd")
+    if isinstance(new_cwd, str) and new_cwd.strip():
+        # The live env is cached under the raw task_id for per-session surfaces
+        # (ACP/gateway/dashboard) and under the collapsed container id for
+        # isolation-keyed rollouts. Try the raw id first, then the container id,
+        # so a CWD-only override (which collapses to "default") still finds and
+        # updates the originating session's env.
+        container_id = _resolve_container_task_id(task_id)
+        with _env_lock:
+            env = _active_environments.get(task_id) or _active_environments.get(container_id)
+        if env is not None and getattr(env, "cwd", None) is not None:
+            env.cwd = new_cwd
+
 
 def clear_task_env_overrides(task_id: str):
     """
@@ -1741,12 +1763,20 @@ def terminal_tool(
         effective_task_id = _resolve_container_task_id(task_id)
 
         # Check per-task overrides (set by environments like TerminalBench2Env)
-        # before falling back to global env var config. ``resolve_task_overrides``
-        # reads the raw task id first then the collapsed container id, so a
-        # CWD-only override (which collapses ``effective_task_id`` to
-        # ``"default"``) is still found under its originating session id while
-        # isolation-keyed RL/benchmark overrides keep resolving as before.
-        overrides = resolve_task_overrides(task_id)
+        # before falling back to global env var config.
+        #
+        # Overrides are keyed by the *raw* task_id (that's the key
+        # ``register_task_env_overrides`` writes under), NOT by the collapsed
+        # container id. A CWD-only override collapses ``effective_task_id`` to
+        # ``"default"`` for container sharing, but its cwd must still be read
+        # back here under the originating task_id, or the override is silently
+        # dropped. Fall back to the collapsed id so isolation-keyed RL/benchmark
+        # overrides (registered under an id that equals their container id) keep
+        # resolving as before.
+        overrides = (
+            (_task_env_overrides.get(task_id) if task_id else None)
+            or _task_env_overrides.get(effective_task_id, {})
+        )
         
         # Select image based on env type, with per-task override support
         if env_type == "docker":
@@ -1795,9 +1825,18 @@ def terminal_tool(
         # task_id wait for the first one to finish creating the sandbox,
         # instead of each creating their own (wasting Modal resources).
         with _env_lock:
-            if effective_task_id in _active_environments:
-                _last_activity[effective_task_id] = time.time()
-                env = _active_environments[effective_task_id]
+            # Prefer the collapsed container id, but fall back to an env cached
+            # under the raw task_id. Per-session surfaces (ACP/gateway/dashboard)
+            # with a CWD-only override collapse to "default" for container
+            # sharing, yet an env may already be cached under the originating
+            # task_id; honor it instead of spawning a duplicate.
+            _existing_key = (
+                effective_task_id if effective_task_id in _active_environments
+                else (task_id if task_id and task_id in _active_environments else None)
+            )
+            if _existing_key is not None:
+                _last_activity[_existing_key] = time.time()
+                env = _active_environments[_existing_key]
                 needs_creation = False
             else:
                 needs_creation = True
@@ -1812,9 +1851,13 @@ def terminal_tool(
             with task_lock:
                 # Double-check after acquiring the per-task lock
                 with _env_lock:
-                    if effective_task_id in _active_environments:
-                        _last_activity[effective_task_id] = time.time()
-                        env = _active_environments[effective_task_id]
+                    _existing_key = (
+                        effective_task_id if effective_task_id in _active_environments
+                        else (task_id if task_id and task_id in _active_environments else None)
+                    )
+                    if _existing_key is not None:
+                        _last_activity[_existing_key] = time.time()
+                        env = _active_environments[_existing_key]
                         needs_creation = False
 
                 if needs_creation:
