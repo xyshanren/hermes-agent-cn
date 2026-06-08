@@ -198,6 +198,8 @@ AUTHOR_MAP = {
     "30312689+aashizpoudel@users.noreply.github.com": "aashizpoudel",
     "oleksii.lisikh@gmail.com": "olisikh",
     "jithendranaidunara@gmail.com": "JithendraNara",
+    "islam666@users.noreply.github.com": "islam666",
+    "30467832+islam666@users.noreply.github.com": "islam666",
     "jeremy@geocaching.com": "outdoorsea",
     "leone.parise@gmail.com": "leoneparise",
     "mr@shu.io": "mrshu",
