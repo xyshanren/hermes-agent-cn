@@ -188,6 +188,8 @@ The flag is stored as `"pinned": true` on the skill's entry in `~/.hermes/skills
 
 Only **agent-created** skills can be pinned — bundled and hub-installed skills are never subject to curator mutation in the first place, and `hermes curator pin` will refuse with an explanatory message if you try.
 
+A small set of **protected built-ins** is hardcoded as never-archivable and never-consolidatable, regardless of `curator.prune_builtins`, pin state, or LLM judgment. These back load-bearing UX — for example, `plan` powers the `/plan` slash-command flow — so silently archiving one would turn its slash command into an "Unknown command" error with no signal to you. Protected built-ins are filtered out of the curator's candidate list entirely, so the consolidation pass never sees them.
+
 If you want a stronger guarantee than "no deletion" — for instance, freezing a skill's content entirely while the agent still reads it — edit `~/.hermes/skills/<name>/SKILL.md` directly with your editor. The pin guards tool-driven deletion, not your own filesystem access.
 
 ## Usage telemetry
