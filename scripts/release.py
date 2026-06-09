@@ -955,6 +955,7 @@ AUTHOR_MAP = {
     "aviralarora002@gmail.com": "AviArora02-commits",
     "draixagent@gmail.com": "draix",
     "junminliu@gmail.com": "JimLiu",
+    "juraj@bednar.io": "jooray",
     "jarvischer@gmail.com": "maxchernin",
     "levantam.98.2324@gmail.com": "LVT382009",
     "zhurongcheng@rcrai.com": "heykb",
