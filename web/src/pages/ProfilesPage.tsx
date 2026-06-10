@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import spinners from "unicode-animations";
-import { H2 } from "@/components/NouiTypography";
+import { H2 } from "@nous-research/ui/ui/components/typography/h2";
 import { api } from "@/lib/api";
 import type { ProfileInfo } from "@/lib/api";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
@@ -71,6 +71,55 @@ export default function ProfilesPage() {
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setEnd } = usePageHeader();
+
+  // Locale strings with English fallbacks. The enriched keys are optional in
+  // the i18n type so untranslated locales don't break the build — they render
+  // the English literal until translated.
+  const L = useMemo(() => {
+    const p = t.profiles;
+    return {
+      activeProfile: p.activeProfile ?? "Active profile",
+      activeBadge: p.activeBadge ?? "active",
+      setActive: p.setActive ?? "Set as active",
+      activeSet: p.activeSet ?? "Active profile set",
+      gatewayRunning: p.gatewayRunning ?? "Gateway running",
+      gatewayStopped: p.gatewayStopped ?? "Gateway stopped",
+      gatewayRunningWarning:
+        p.gatewayRunningWarning ??
+        "This profile's gateway is running — it will be stopped.",
+      aliasBadge: p.aliasBadge ?? "alias",
+      description: p.description ?? "Description",
+      descriptionPlaceholder:
+        p.descriptionPlaceholder ??
+        "What is this profile good at? Used to route kanban tasks by role.",
+      noDescription: p.noDescription ?? "No description",
+      editDescription: p.editDescription ?? "Edit description",
+      descriptionSaved: p.descriptionSaved ?? "Description saved",
+      reviewBadge: p.reviewBadge ?? "review",
+      autoGenerate: p.autoGenerate ?? "Auto-generate",
+      generating: p.generating ?? "Generating…",
+      describeFailed: p.describeFailed ?? "Could not generate description",
+      distribution: p.distribution ?? "Distribution",
+      advancedOptions: p.advancedOptions ?? "Advanced options",
+      cloneAll:
+        p.cloneAll ?? "Clone everything (memories, sessions, skills, state)",
+      noSkillsOption: p.noSkillsOption ?? "Don't seed bundled skills",
+      descriptionOptional: p.descriptionOptional ?? "Description (optional)",
+      modelOptional: p.modelOptional ?? "Model (optional)",
+      modelInherit: p.modelInherit ?? "Inherit from clone / default",
+      modelLoading: p.modelLoading ?? "Loading models…",
+      modelNone:
+        p.modelNone ?? "No authenticated providers — set a key first",
+      editModel: p.editModel ?? "Change model",
+      modelSaved: p.modelSaved ?? "Model updated",
+      modelSelect: p.modelSelect ?? "Select a model",
+      actions: p.actions ?? "Actions",
+      manageSkills: p.manageSkills ?? "Manage skills & tools",
+      activeSetHint:
+        p.activeSetHint ??
+        "Applies to new CLI/gateway runs. This dashboard still manages its own profile — use “Manage skills & tools” to edit {name}.",
+    };
+  }, [t.profiles]);
 
   // Create modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
