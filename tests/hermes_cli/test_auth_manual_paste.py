@@ -363,6 +363,205 @@ def test_xai_loopback_login_manual_paste_missing_code_raises(monkeypatch):
     assert exc.value.code == "xai_code_missing"
 
 
+def test_xai_loopback_login_timeout_falls_back_to_manual_paste(monkeypatch):
+    """Loopback timeout should accept a bare Grok Build code paste."""
+    monkeypatch.setattr(
+        auth_mod, "_xai_oauth_discovery",
+        lambda *_a, **_k: {
+            "authorization_endpoint": "https://auth.x.ai/oauth2/authorize",
+            "token_endpoint": "https://auth.x.ai/oauth2/token",
+        },
+    )
+
+    class _StubServer:
+        def shutdown(self):
+            return None
+
+        def server_close(self):
+            return None
+
+    class _StubThread:
+        def join(self, timeout=None):
+            return None
+
+    monkeypatch.setattr(
+        auth_mod,
+        "_xai_start_callback_server",
+        lambda: (
+            _StubServer(),
+            _StubThread(),
+            {
+                "code": None,
+                "state": None,
+                "error": None,
+                "error_description": None,
+            },
+            "http://127.0.0.1:56121/callback",
+        ),
+    )
+
+    captured: dict = {"state": None, "prompt_calls": 0}
+    original_build = auth_mod._xai_oauth_build_authorize_url
+
+    def _capture(**kwargs):
+        captured["state"] = kwargs["state"]
+        return original_build(**kwargs)
+
+    monkeypatch.setattr(auth_mod, "_xai_oauth_build_authorize_url", _capture)
+
+    def _raise_timeout(*_a, **_k):
+        raise auth_mod.AuthError(
+            "xAI authorization timed out waiting for the local callback.",
+            provider="xai-oauth",
+            code="xai_callback_timeout",
+        )
+
+    monkeypatch.setattr(auth_mod, "_xai_wait_for_callback", _raise_timeout)
+
+    def _fake_prompt(_redirect_uri):
+        captured["prompt_calls"] += 1
+        return {
+            "code": "manual-auth-code",
+            "state": None,
+            "error": None,
+            "error_description": None,
+        }
+
+    monkeypatch.setattr(auth_mod, "_prompt_manual_callback_paste", _fake_prompt)
+    monkeypatch.setattr(
+        auth_mod.sys, "stdin", type("StubStdin", (), {"isatty": lambda self: True})()
+    )
+    monkeypatch.setattr(
+        auth_mod.httpx,
+        "post",
+        lambda *_a, **_k: _StubTokenResponse(
+            {
+                "access_token": "at-timeout",
+                "refresh_token": "rt-timeout",
+                "id_token": "",
+                "expires_in": 3600,
+                "token_type": "Bearer",
+            }
+        ),
+    )
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        creds = auth_mod._xai_oauth_loopback_login(manual_paste=False)
+
+    rendered = buf.getvalue()
+    assert "xAI loopback callback timed out." in rendered
+    assert "--manual-paste" in rendered
+    assert captured["prompt_calls"] == 1
+    assert creds["tokens"]["access_token"] == "at-timeout"
+    assert creds["tokens"]["refresh_token"] == "rt-timeout"
+
+
+def test_xai_wait_for_callback_accepts_ready_stdin_code(monkeypatch):
+    """Users can paste the Grok Build code while Hermes is still waiting."""
+    class _StubServer:
+        shutdown_called = False
+        close_called = False
+
+        def shutdown(self):
+            self.shutdown_called = True
+
+        def server_close(self):
+            self.close_called = True
+
+    class _StubThread:
+        joined = False
+
+        def join(self, timeout=None):
+            self.joined = True
+
+    server = _StubServer()
+    thread = _StubThread()
+    monkeypatch.setattr(
+        auth_mod,
+        "_read_ready_stdin_line",
+        lambda: "ready-grok-build-code\n",
+    )
+
+    out = auth_mod._xai_wait_for_callback(
+        server,
+        thread,
+        {"code": None, "error": None},
+        timeout_seconds=5,
+        manual_paste_redirect_uri="http://127.0.0.1:56121/callback",
+    )
+
+    assert out["code"] == "ready-grok-build-code"
+    assert out["state"] is None
+    assert out["_manual_paste"] is True
+    assert server.shutdown_called is True
+    assert server.close_called is True
+    assert thread.joined is True
+
+
+def test_xai_loopback_login_timeout_noninteractive_reraises(monkeypatch):
+    """Non-interactive stdin must keep the original timeout error."""
+    monkeypatch.setattr(
+        auth_mod, "_xai_oauth_discovery",
+        lambda *_a, **_k: {
+            "authorization_endpoint": "https://auth.x.ai/oauth2/authorize",
+            "token_endpoint": "https://auth.x.ai/oauth2/token",
+        },
+    )
+
+    class _StubServer:
+        def shutdown(self):
+            return None
+
+        def server_close(self):
+            return None
+
+    class _StubThread:
+        def join(self, timeout=None):
+            return None
+
+    monkeypatch.setattr(
+        auth_mod,
+        "_xai_start_callback_server",
+        lambda: (
+            _StubServer(),
+            _StubThread(),
+            {
+                "code": None,
+                "state": None,
+                "error": None,
+                "error_description": None,
+            },
+            "http://127.0.0.1:56121/callback",
+        ),
+    )
+
+    monkeypatch.setattr(
+        auth_mod,
+        "_xai_wait_for_callback",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            auth_mod.AuthError(
+                "xAI authorization timed out waiting for the local callback.",
+                provider="xai-oauth",
+                code="xai_callback_timeout",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        auth_mod.sys, "stdin", type("StubStdin", (), {"isatty": lambda self: False})()
+    )
+    monkeypatch.setattr(
+        auth_mod,
+        "_prompt_manual_callback_paste",
+        lambda *_a, **_k: pytest.fail("manual-paste fallback should not run"),
+    )
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        with pytest.raises(auth_mod.AuthError) as exc:
+            auth_mod._xai_oauth_loopback_login(manual_paste=False)
+    assert exc.value.code == "xai_callback_timeout"
+
+
 # ---------------------------------------------------------------------------
 # _print_loopback_ssh_hint — now also mentions --manual-paste
 # ---------------------------------------------------------------------------

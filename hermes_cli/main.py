@@ -391,6 +391,31 @@ import time as _time
 from datetime import datetime
 
 from hermes_cli import __version__, __release_date__
+
+# Provider model-selection wizard flows extracted to hermes_cli/model_setup_flows.py
+# (god-file decomposition Phase 2). Re-imported here so select_provider_and_model and
+# existing test monkeypatches (hermes_cli.main._model_flow_*) keep resolving unchanged.
+from hermes_cli.model_setup_flows import (
+    _prompt_auth_credentials_choice,
+    _model_flow_openrouter,
+    _model_flow_nous,
+    _model_flow_openai_codex,
+    _model_flow_xai_oauth,
+    _model_flow_qwen_oauth,
+    _model_flow_minimax_oauth,
+    _model_flow_google_gemini_cli,
+    _model_flow_custom,
+    _model_flow_azure_foundry,
+    _model_flow_named_custom,
+    _model_flow_copilot,
+    _model_flow_copilot_acp,
+    _model_flow_kimi,
+    _model_flow_stepfun,
+    _model_flow_bedrock_api_key,
+    _model_flow_bedrock,
+    _model_flow_api_key_provider,
+    _model_flow_anthropic,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -2705,7 +2730,12 @@ def select_provider_and_model(args=None):
         member_labels = [
             provider_labels.get(m, m) for m in selected_members
         ]
-        member_idx = _prompt_provider_choice(member_labels, default=member_default)
+        group_label = ordered[provider_idx][1].split(" ▸", 1)[0]
+        member_idx = _prompt_provider_choice(
+            member_labels,
+            default=member_default,
+            title=f"Select {group_label} provider:",
+        )
         if member_idx is None:
             print("No change.")
             return
@@ -3206,7 +3236,7 @@ def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
     print(f"{display_name}: custom ({short_url})" + (f" · {model}" if model else ""))
 
 
-def _prompt_provider_choice(choices, *, default=0):
+def _prompt_provider_choice(choices, *, default=0, title="Select provider:"):
     """Show provider selection menu with curses arrow-key navigation.
 
     Falls back to a numbered list when curses is unavailable (e.g. piped
@@ -3216,7 +3246,7 @@ def _prompt_provider_choice(choices, *, default=0):
     try:
         from hermes_cli.setup import _curses_prompt_choice
 
-        idx = _curses_prompt_choice("Select provider:", choices, default)
+        idx = _curses_prompt_choice(title, choices, default)
         if idx >= 0:
             print()
             return idx
@@ -3224,7 +3254,7 @@ def _prompt_provider_choice(choices, *, default=0):
         pass
 
     # Fallback: numbered list
-    print("Select provider:")
+    print(title)
     for i, c in enumerate(choices, 1):
         marker = "→" if i - 1 == default else " "
         print(f"  {marker} {i}. {c}")

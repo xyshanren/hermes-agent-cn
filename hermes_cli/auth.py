@@ -2645,12 +2645,23 @@ def _xai_wait_for_callback(
     result: dict[str, Any],
     *,
     timeout_seconds: float = 180.0,
+    manual_paste_redirect_uri: Optional[str] = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + max(5.0, timeout_seconds)
+    if manual_paste_redirect_uri and sys.stdin.isatty():
+        print()
+        print("If xAI shows a Grok Build code instead of redirecting,")
+        print("paste that code here and press Enter.")
     try:
         while time.monotonic() < deadline:
             if result["code"] or result["error"]:
                 return result
+            if manual_paste_redirect_uri:
+                raw_paste = _read_ready_stdin_line()
+                if raw_paste and raw_paste.strip():
+                    pasted = _parse_pasted_callback(raw_paste)
+                    pasted["_manual_paste"] = True
+                    return pasted
             time.sleep(0.1)
     finally:
         server.shutdown()
@@ -2672,6 +2683,21 @@ def _xai_wait_for_callback(
         provider="xai-oauth",
         code="xai_callback_timeout",
     )
+
+
+def _read_ready_stdin_line() -> Optional[str]:
+    """Return one pending stdin line without blocking, if the terminal has one."""
+    try:
+        if not sys.stdin.isatty():
+            return None
+        import select
+
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        if not ready:
+            return None
+        return sys.stdin.readline()
+    except Exception:
+        return None
 
 
 def _spotify_token_payload_to_state(
@@ -6705,6 +6731,7 @@ def _xai_oauth_loopback_login(
     authorization_endpoint = discovery["authorization_endpoint"]
     token_endpoint = discovery["token_endpoint"]
 
+    allow_missing_state = False
     if manual_paste:
         # No HTTP listener — synthesize a redirect_uri matching what
         # the server would have bound to so the authorize URL the user
@@ -6731,6 +6758,7 @@ def _xai_oauth_loopback_login(
         print("Open this URL to authorize Hermes with xAI:")
         print(authorize_url)
         callback = _prompt_manual_callback_paste(redirect_uri)
+        allow_missing_state = True
     else:
         server, thread, callback_result, redirect_uri = _xai_start_callback_server()
         try:
@@ -6764,12 +6792,30 @@ def _xai_oauth_loopback_login(
                 else:
                     print("Could not open the browser automatically; use the URL above.")
 
-            callback = _xai_wait_for_callback(
-                server,
-                thread,
-                callback_result,
-                timeout_seconds=max(30.0, timeout_seconds * 9),
-            )
+            try:
+                callback = _xai_wait_for_callback(
+                    server,
+                    thread,
+                    callback_result,
+                    timeout_seconds=max(30.0, timeout_seconds * 9),
+                    manual_paste_redirect_uri=redirect_uri,
+                )
+            except AuthError as exc:
+                if (
+                    getattr(exc, "code", "") != "xai_callback_timeout"
+                    or not _stdin_supports_manual_paste()
+                ):
+                    raise
+                print()
+                print("xAI loopback callback timed out.")
+                print("If your browser reached a failed 127.0.0.1 callback page,")
+                print("paste that FULL callback URL below to continue this login.")
+                print("You can also re-run with `--manual-paste` to skip the")
+                print("loopback listener from the start.")
+                callback = _prompt_manual_callback_paste(redirect_uri)
+                if callback.get("code") is None and callback.get("error") is None:
+                    raise exc
+                allow_missing_state = True
         except Exception:
             try:
                 server.shutdown()
@@ -6789,7 +6835,23 @@ def _xai_oauth_loopback_login(
             provider="xai-oauth",
             code="xai_authorization_failed",
         )
-    if callback.get("state") != state:
+    callback_state = callback.get("state")
+    # Manual bare-code paths: when a user pastes only the opaque
+    # authorization code (no ``code=``/``state=`` query parameters),
+    # ``_parse_pasted_callback`` returns ``state=None``.  xAI's consent
+    # page renders the code in-page rather than redirecting through the
+    # 127.0.0.1 callback, so on many remote setups (Cloud Shell, headless
+    # VPS, container consoles) the bare code is the only thing the user
+    # can obtain.  PKCE (code_verifier) still binds the exchange to this
+    # client, so the local state-equality check is redundant on the
+    # bare-code paths — we substitute the locally generated state to keep
+    # the rest of the validation chain (and the token exchange) unchanged.
+    # See #26923 (AccursedGalaxy comment, 2026-05-20).
+    if callback.get("_manual_paste"):
+        allow_missing_state = True
+    if callback_state is None and (manual_paste or allow_missing_state):
+        callback_state = state
+    if callback_state != state:
         raise AuthError(
             "xAI authorization failed: state mismatch.",
             provider="xai-oauth",
