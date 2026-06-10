@@ -14306,7 +14306,7 @@ class GatewayRunner:
             # when we successfully transcribed the audio — it's redundant.
             _placeholder = "(The user sent a message with no text content)"
             if user_text and user_text.strip() == _placeholder:
-                return prefix
+                return prefix, successful_transcripts
             if user_text:
                 return f"{prefix}\n\n{user_text}"
             return prefix
