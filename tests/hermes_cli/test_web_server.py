@@ -2120,7 +2120,7 @@ class TestPtyWebSocket:
         monkeypatch.setattr(
             self.ws_module,
             "_resolve_chat_argv",
-            lambda resume=None, sidecar_url=None: (["/bin/cat"], None, None),
+            lambda resume=None, sidecar_url=None, profile=None: (["/bin/cat"], None, None),
         )
         from starlette.websockets import WebSocketDisconnect
 
@@ -2133,7 +2133,7 @@ class TestPtyWebSocket:
         monkeypatch.setattr(
             self.ws_module,
             "_resolve_chat_argv",
-            lambda resume=None, sidecar_url=None: (["/bin/cat"], None, None),
+            lambda resume=None, sidecar_url=None, profile=None: (["/bin/cat"], None, None),
         )
         from starlette.websockets import WebSocketDisconnect
 
@@ -2146,7 +2146,7 @@ class TestPtyWebSocket:
         monkeypatch.setattr(
             self.ws_module,
             "_resolve_chat_argv",
-            lambda resume=None, sidecar_url=None: (
+            lambda resume=None, sidecar_url=None, profile=None: (
                 ["/bin/sh", "-c", "printf hermes-ws-ok"],
                 None,
                 None,
@@ -2176,7 +2176,7 @@ class TestPtyWebSocket:
         monkeypatch.setattr(
             self.ws_module,
             "_resolve_chat_argv",
-            lambda resume=None, sidecar_url=None: (["/bin/cat"], None, None),
+            lambda resume=None, sidecar_url=None, profile=None: (["/bin/cat"], None, None),
         )
         with self.client.websocket_connect(self._url()) as conn:
             conn.send_bytes(b"round-trip-payload\n")
@@ -2209,7 +2209,7 @@ class TestPtyWebSocket:
             self.ws_module,
             "_resolve_chat_argv",
             # sleep gives the test time to push the resize before the child reads the ioctl.
-            lambda resume=None, sidecar_url=None: (
+            lambda resume=None, sidecar_url=None, profile=None: (
                 [sys.executable, "-c", winsize_script],
                 None,
                 None,
@@ -2238,7 +2238,7 @@ class TestPtyWebSocket:
         monkeypatch.setattr(
             self.ws_module,
             "_resolve_chat_argv",
-            lambda resume=None, sidecar_url=None: (["/bin/cat"], None, None),
+            lambda resume=None, sidecar_url=None, profile=None: (["/bin/cat"], None, None),
         )
         # Patch PtyBridge.spawn at the web_server module's binding.
         import hermes_cli.web_server as ws_mod
@@ -2253,7 +2253,7 @@ class TestPtyWebSocket:
     def test_resume_parameter_is_forwarded_to_argv(self, monkeypatch):
         captured: dict = {}
 
-        def fake_resolve(resume=None, sidecar_url=None):
+        def fake_resolve(resume=None, sidecar_url=None, profile=None):
             captured["resume"] = resume
             return (["/bin/sh", "-c", "printf resume-arg-ok"], None, None)
 
@@ -2273,7 +2273,7 @@ class TestPtyWebSocket:
         same channel — which is how tool events reach the dashboard sidebar."""
         captured: dict = {}
 
-        def fake_resolve(resume=None, sidecar_url=None):
+        def fake_resolve(resume=None, sidecar_url=None, profile=None):
             captured["sidecar_url"] = sidecar_url
             return (["/bin/sh", "-c", "printf sidecar-ok"], None, None)
 
