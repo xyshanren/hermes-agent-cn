@@ -139,8 +139,8 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         parsed_calls.append((tool_call, function_name, function_args, block_result, blocked_by_guardrail))
 
     # ── Logging / callbacks ──────────────────────────────────────────
-    tool_names_str = ", ".join(name for _, name, _, _, _ in parsed_calls)
-    if not agent.quiet_mode:
+    tool_names_str = ", ".join(name for _, name, _, _, _, _ in parsed_calls)
+    if not agent.quiet_mode and getattr(agent, "tool_progress_mode", "all") != "off":
         print(f"  ⚡ Concurrent: {num_tools} tool calls — {tool_names_str}")
         for i, (tc, name, args, block_result, blocked_by_guardrail) in enumerate(parsed_calls, 1):
             args_str = json.dumps(args, ensure_ascii=False)
@@ -376,7 +376,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         if agent._should_emit_quiet_tool_messages():
             cute_msg = _get_cute_tool_message_impl(name, args, tool_duration, result=function_result)
             agent._safe_print(f"  {cute_msg}")
-        elif not agent.quiet_mode:
+        elif not agent.quiet_mode and getattr(agent, "tool_progress_mode", "all") != "off":
             _preview_str = _multimodal_text_summary(function_result)
             if agent.verbose_logging:
                 print(f"  ✅ Tool {i+1} completed in {tool_duration:.2f}s")
@@ -500,7 +500,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
         elif function_name == "skill_manage":
             agent._iters_since_skill = 0
 
-        if not agent.quiet_mode:
+        if not agent.quiet_mode and getattr(agent, "tool_progress_mode", "all") != "off":
             args_str = json.dumps(function_args, ensure_ascii=False)
             if agent.verbose_logging:
                 print(f"  📞 Tool {i}: {function_name}({list(function_args.keys())})")
@@ -847,7 +847,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
         # entire batch.  The model sees it on the next API iteration.
         agent._apply_pending_steer_to_tool_results(messages, 1)
 
-        if not agent.quiet_mode:
+        if not agent.quiet_mode and getattr(agent, "tool_progress_mode", "all") != "off":
             if agent.verbose_logging:
                 print(f"  ✅ Tool {i} completed in {tool_duration:.2f}s")
                 print(agent._wrap_verbose("Result: ", function_result))
