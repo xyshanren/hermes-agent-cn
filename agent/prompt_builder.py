@@ -1176,11 +1176,12 @@ def _load_tier_data() -> dict[str, str] | None:
 def build_skills_system_prompt(
     available_tools: "set[str] | None" = None,
     available_toolsets: "set[str] | None" = None,
+    hidden_categories: "frozenset[str] | None" = None,
 ) -> str:
     """Build a compact skill index for the system prompt.
 
     Two-layer cache:
-      1. In-process LRU dict keyed by (skills_dir, tools, toolsets)
+      1. In-process LRU dict keyed by (skills_dir, tools, toolsets, hidden)
       2. Disk snapshot (``.skills_prompt_snapshot.json``) validated by
          mtime/size manifest — survives process restarts
 
@@ -1190,6 +1191,12 @@ def build_skills_system_prompt(
     scanned alongside the local ``~/.hermes/skills/`` directory.  External dirs
     are read-only — they appear in the index but new skills are always created
     in the local dir.  Local skills take precedence when names collide.
+
+    ``hidden_categories`` (e.g. from the coding posture — see
+    agent/coding_context.py) prunes whole categories from the rendered index.
+    Discovery-only: the snapshot stores everything, ``skills_list`` /
+    ``skill_view`` still reach every skill, and a footer note tells the model
+    the full catalog exists.
     """
     skills_dir = get_skills_dir()
     external_dirs = get_all_skills_dirs()[1:]  # skip local (index 0)
@@ -1214,6 +1221,7 @@ def build_skills_system_prompt(
         tuple(sorted(str(ts) for ts in (available_toolsets or set()))),
         _platform_hint,
         tuple(sorted(disabled)),
+        tuple(sorted(hidden_categories or ())),
     )
     with _SKILLS_PROMPT_CACHE_LOCK:
         cached = _SKILLS_PROMPT_CACHE.get(cache_key)
@@ -1347,35 +1355,27 @@ def build_skills_system_prompt(
             except Exception as e:
                 logger.debug("Could not read external skill description %s: %s", desc_file, e)
 
-    # ── Optional tier-based filtering ────────────────────────────────
-    # When skills.tier_management is enabled, separate skills into active
-    # (builtin + frequent) and archived sections.
-    tier_data = _load_tier_data()
-    if tier_data:
-        active_skills: set[str] = set()
-        archived_skills: set[str] = set()
-        for cat_skills in skills_by_category.values():
-            for name, _desc in cat_skills:
-                tier = tier_data.get(name, "archived")
-                if tier in ("builtin", "frequent"):
-                    active_skills.add(name)
-                else:
-                    archived_skills.add(name)
+    # Posture-driven category pruning (e.g. non-coding skills while pairing on
+    # code). Match on the top-level category segment so nested categories
+    # ("social-media/twitter") are pruned with their parent.
+    hidden_note = ""
+    if hidden_categories:
+        before = sum(len(v) for v in skills_by_category.values())
+        skills_by_category = {
+            cat: entries
+            for cat, entries in skills_by_category.items()
+            if cat.split("/", 1)[0] not in hidden_categories
+        }
+        pruned = before - sum(len(v) for v in skills_by_category.values())
+        if pruned:
+            hidden_note = (
+                f"\n(Note: {pruned} skill(s) in categories unrelated to the "
+                "current coding context are not listed here. The full catalog "
+                "is available via skills_list if the user asks for something "
+                "outside this list.)"
+            )
 
-        filtered: dict[str, list[tuple[str, str]]] = {}
-        archived: list[tuple[str, str]] = []
-        for category in sorted(skills_by_category.keys()):
-            for name, desc in skills_by_category[category]:
-                if name in active_skills:
-                    filtered.setdefault(category, []).append((name, desc))
-                else:
-                    archived.append((name, desc))
-        skills_by_category = filtered
-        _archived_list = archived
-    else:
-        _archived_list = None
-
-    if not skills_by_category and not _archived_list:
+    if not skills_by_category:
         result = ""
     else:
         index_lines = []
@@ -1435,6 +1435,7 @@ def build_skills_system_prompt(
         result += (
             "\n"
             "Only proceed without loading a skill if genuinely none are relevant to the task."
+            + hidden_note
         )
 
     # ── Store in LRU cache ────────────────────────────────────────────

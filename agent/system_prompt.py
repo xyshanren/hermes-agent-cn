@@ -175,9 +175,21 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             )
             if toolset
         }
+        # Coding posture prunes non-coding skill categories from the index
+        # (discovery-only — skills_list/skill_view still reach everything).
+        _hidden_cats = frozenset()
+        try:
+            from agent.coding_context import coding_hidden_skill_categories
+
+            _hidden_cats = coding_hidden_skill_categories(
+                platform=agent.platform, cwd=resolve_context_cwd()
+            )
+        except Exception:
+            _hidden_cats = frozenset()
         skills_prompt = _r.build_skills_system_prompt(
             available_tools=agent.valid_tool_names,
             available_toolsets=avail_toolsets,
+            hidden_categories=_hidden_cats or None,
         )
     else:
         skills_prompt = ""
@@ -204,6 +216,77 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     _env_hints = _r.build_environment_hints()
     if _env_hints:
         stable_parts.append(_env_hints)
+
+    # Coding posture (base Hermes, any interactive coding surface in a code
+    # workspace — see agent/coding_context.py). The operating brief + the live
+    # git/workspace snapshot are built once here and cached for the session;
+    # the snapshot is never re-probed per turn (that would break the prompt
+    # cache), so the brief tells the model to re-check git before relying on it.
+    if agent.valid_tool_names:
+        try:
+            from agent.coding_context import coding_system_blocks
+
+            stable_parts.extend(
+                coding_system_blocks(
+                    platform=agent.platform,
+                    cwd=resolve_context_cwd(),
+                    model=agent.model,
+                )
+            )
+        except Exception:
+            # Coding-context probing must never block prompt build.
+            pass
+
+    # Local Python toolchain probe — names python/pip/uv/PEP-668 state when
+    # something is non-default so the model can pick the right install
+    # strategy without discovering by failure.  Emits a single line; emits
+    # NOTHING when the environment is clean (no token cost).  Skipped
+    # entirely for remote terminal backends (the host's Python state is
+    # irrelevant when tools run inside docker/modal/ssh).  Gated by
+    # config.yaml ``agent.environment_probe`` (default True).
+    if getattr(agent, "_environment_probe", True):
+        try:
+            from tools.env_probe import get_environment_probe_line
+            _probe_line = get_environment_probe_line()
+            if _probe_line:
+                stable_parts.append(_probe_line)
+        except Exception:
+            # Probe failure must never block prompt build.
+            pass
+
+    # Active-profile hint — names the Hermes profile the agent is running
+    # under so it doesn't conflate ~/.hermes/skills/ (default profile) with
+    # ~/.hermes/profiles/<active>/skills/ (this profile's). Deterministic
+    # for the lifetime of the agent — profile name doesn't change
+    # mid-session, so this doesn't break the prompt cache.
+    # See file_safety._resolve_active_profile_name + classify_cross_profile_target
+    # for the matching tool-side guard.
+    try:
+        from agent.file_safety import _resolve_active_profile_name
+        active_profile = _resolve_active_profile_name()
+    except Exception:
+        active_profile = "default"
+    if active_profile == "default":
+        stable_parts.append(
+            "Active Hermes profile: default. Other profiles (if any) live "
+            "under ~/.hermes/profiles/<name>/. Each profile has its own "
+            "skills/, plugins/, cron/, and memories/ that affect a different "
+            "session than this one. Do not modify another profile's "
+            "skills/plugins/cron/memories unless the user explicitly directs "
+            "you to."
+        )
+    else:
+        stable_parts.append(
+            f"Active Hermes profile: {active_profile}. This session reads "
+            f"and writes ~/.hermes/profiles/{active_profile}/. The default "
+            f"profile's data lives at ~/.hermes/skills/, ~/.hermes/plugins/, "
+            f"~/.hermes/cron/, ~/.hermes/memories/ — those belong to a "
+            f"different session run from a different shell. Do NOT modify "
+            f"another profile's skills/plugins/cron/memories unless the user "
+            f"explicitly directs you to. The cross-profile write guard will "
+            f"refuse such writes by default; pass cross_profile=True only "
+            f"after explicit direction."
+        )
 
     platform_key = (agent.platform or "").lower().strip()
     if platform_key in PLATFORM_HINTS:
