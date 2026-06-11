@@ -1318,10 +1318,6 @@ def _config_model_target() -> tuple[str, str]:
         provider = str(cfg_model.get("provider") or "").strip()
         if provider.lower() == "auto":
             provider = ""
-    elif isinstance(cfg_model, str):
-        model = cfg_model.strip()
-    if not model:
-        model = _resolve_model()
     return model, provider
 
 

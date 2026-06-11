@@ -808,14 +808,18 @@ export default function ModelsPage() {
       .finally(() => setLoading(false));
   }, [days]);
 
-  const onAssigned = useCallback(() => {
-    // Reload aux state after any assignment change.
+  const refreshAux = useCallback(() => {
     api
       .getAuxiliaryModels()
       .then(setAux)
       .catch(() => {});
-    setSaveKey((k) => k + 1);
   }, []);
+
+  const onAssigned = useCallback(() => {
+    // Reload aux state after any assignment change.
+    refreshAux();
+    setSaveKey((k) => k + 1);
+  }, [refreshAux]);
 
   useLayoutEffect(() => {
     const periodLabel =
@@ -845,8 +849,9 @@ export default function ModelsPage() {
         </div>
         <Button
           type="button"
-          size="sm"
-          outlined
+          ghost
+          size="icon"
+          className="text-muted-foreground hover:text-foreground"
           onClick={load}
           disabled={loading}
           prefix={loading ? <Spinner /> : <RefreshCw />}
@@ -864,6 +869,24 @@ export default function ModelsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Model assignments can change outside this page (config editor, chat
+  // /model --global, CLI), so refetch them when the page regains focus.
+  useEffect(() => {
+    let last = 0;
+    const onFocus = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - last < 1000) return;
+      last = Date.now();
+      refreshAux();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [refreshAux]);
 
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-6">
