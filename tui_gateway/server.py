@@ -1335,6 +1335,142 @@ def _resolve_startup_runtime() -> tuple[str, str | None]:
     return model, None
 
 
+# Bare billing buckets are not routable provider identities (kept in parity with the
+# provider gate in agent_init). Restoring one as a session provider override breaks resume.
+_BARE_BILLING_PROVIDERS = {"auto", "openrouter", "custom"}
+
+
+def _stored_session_runtime_overrides(row: dict | None) -> dict:
+    """Return runtime fields persisted with a stored session.
+
+    ``session.resume`` is a session-scoped operation: reopening an older chat
+    must restore the model/provider/reasoning state that chat actually used,
+    not whatever global model the user most recently selected in another chat.
+    The durable session row stores the model directly, the billing provider in
+    ``billing_provider``, and richer runtime knobs in JSON ``model_config``.
+    """
+    if not row:
+        return {}
+
+    raw_config = row.get("model_config")
+    model_config: dict = {}
+    if isinstance(raw_config, dict):
+        model_config = raw_config
+    elif isinstance(raw_config, str) and raw_config.strip():
+        try:
+            parsed = json.loads(raw_config)
+            if isinstance(parsed, dict):
+                model_config = parsed
+        except Exception:
+            logger.debug("failed to parse stored session model_config", exc_info=True)
+
+    overrides: dict = {}
+    model = str(row.get("model") or model_config.get("model") or "").strip()
+    # ``billing_provider`` is only the billing bucket — for a custom endpoint it is the
+    # bare class ``"custom"``, which agent_init treats as non-routable, so restoring it as
+    # the provider override makes ``session.resume`` fail with "No LLM provider configured".
+    # Only restore an explicit provider; otherwise leave it unset so resume falls back to
+    # the configured default, matching the working CLI path.
+    explicit_provider = str(model_config.get("provider") or "").strip()
+    billing_provider = str(
+        model_config.get("billing_provider") or row.get("billing_provider") or ""
+    ).strip()
+    provider = explicit_provider
+    if not provider and billing_provider.lower() not in _BARE_BILLING_PROVIDERS:
+        provider = billing_provider
+    base_url = str(model_config.get("base_url") or "").strip()
+    api_mode = str(model_config.get("api_mode") or "").strip()
+    reasoning_config = model_config.get("reasoning_config")
+    service_tier = str(model_config.get("service_tier") or "").strip()
+
+    if model:
+        # Use the same dict-shaped override that live /model switches use so a
+        # DB-restored session can preserve custom endpoint metadata across both
+        # initial resume and later rebuilds (/new). Deliberately do not persist
+        # or restore raw api_key here; endpoint credentials should continue to
+        # come from config/env/provider resolution rather than the session DB.
+        overrides["model_override"] = {
+            "model": model,
+            "provider": provider or None,
+            "base_url": base_url or None,
+            "api_mode": api_mode or None,
+        }
+    if provider:
+        overrides["provider_override"] = provider
+    if isinstance(reasoning_config, dict):
+        overrides["reasoning_config_override"] = reasoning_config
+    if service_tier:
+        overrides["service_tier_override"] = service_tier
+
+    return overrides
+
+
+def _runtime_model_config(agent, existing: dict | None = None) -> dict:
+    config = dict(existing or {})
+    model = str(getattr(agent, "model", "") or "").strip()
+    provider = str(getattr(agent, "provider", "") or "").strip()
+    base_url = str(getattr(agent, "base_url", "") or "").strip()
+    api_mode = str(getattr(agent, "api_mode", "") or "").strip()
+    reasoning_config = getattr(agent, "reasoning_config", None)
+    service_tier = getattr(agent, "service_tier", None)
+
+    if model:
+        config["model"] = model
+    if provider:
+        config["provider"] = provider
+    if base_url:
+        config["base_url"] = base_url
+    else:
+        config.pop("base_url", None)
+    if api_mode:
+        config["api_mode"] = api_mode
+    else:
+        config.pop("api_mode", None)
+    if isinstance(reasoning_config, dict):
+        config["reasoning_config"] = reasoning_config
+    else:
+        config.pop("reasoning_config", None)
+    if service_tier:
+        config["service_tier"] = service_tier
+    else:
+        config.pop("service_tier", None)
+
+    return config
+
+
+def _persist_live_session_runtime(session: dict | None) -> None:
+    """Persist active session runtime so future resumes restore the same footer."""
+    if not session:
+        return
+    agent = session.get("agent")
+    session_key = str(session.get("session_key") or "").strip()
+    if agent is None or not session_key:
+        return
+
+    db = getattr(agent, "_session_db", None) or _get_db()
+    if db is None:
+        return
+
+    try:
+        row = db.get_session(session_key) or {}
+        raw_config = row.get("model_config")
+        existing_config = {}
+        if isinstance(raw_config, dict):
+            existing_config = raw_config
+        elif isinstance(raw_config, str) and raw_config.strip():
+            parsed = json.loads(raw_config)
+            if isinstance(parsed, dict):
+                existing_config = parsed
+        model_config = _runtime_model_config(agent, existing_config)
+        model = str(getattr(agent, "model", "") or "").strip()
+        if hasattr(db, "update_session_meta"):
+            db.update_session_meta(session_key, json.dumps(model_config), model or None)
+        elif model and hasattr(db, "update_session_model"):
+            db.update_session_model(session_key, model)
+    except Exception:
+        logger.debug("failed to persist live session runtime", exc_info=True)
+
+
 def _write_config_key(key_path: str, value):
     cfg = _load_cfg()
     current = cfg
