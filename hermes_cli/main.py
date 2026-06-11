@@ -2349,6 +2349,8 @@ def cmd_whatsapp(args):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except KeyboardInterrupt:
             print("\n  ✗ Install cancelled")
