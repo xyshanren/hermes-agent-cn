@@ -267,7 +267,24 @@ def main():
     # Crawl skills.sh
     all_skills.extend(crawl_skills_sh(skills_sh_source))
 
-    # Crawl other sources in parallel
+    # Crawl other sources in parallel.
+    # Per-source soft caps — sources stop returning when they run out, so these
+    # are ceilings, not targets.  ClawHub has 20k+ skills; bumping to 100k
+    # (well above current catalog size) lets the full catalog land in the
+    # index instead of being truncated at an arbitrary build-time limit.
+    SOURCE_LIMITS = {
+        # 0 = unbounded catalog walk (max_items=0 in ClawHubSource). A positive
+        # limit bounds the walk and also enables the interactive 12s budget.
+        "clawhub": 0,
+        "lobehub": 100_000,
+        "browse-sh": 5_000,
+        "claude-marketplace": 5_000,
+        "github": 5_000,
+        "well-known": 5_000,
+        "official": 5_000,
+    }
+    DEFAULT_SOURCE_LIMIT = 500
+
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {}
         for name, source in sources.items():

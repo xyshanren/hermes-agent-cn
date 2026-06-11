@@ -1921,9 +1921,28 @@ class ClawHubSource(SkillSource):
         cursor: Optional[str] = None
         results: List[SkillMeta] = []
         seen: set[str] = set()
-        max_pages = 50
+        # ClawHub has 50k+ skills as of May 2026 (live E2E walked 49,698 with
+        # an active cursor still pending); 750 pages * 200/page = 150k ceiling
+        # leaves room for catalog growth. Walk-to-exhaustion typically
+        # terminates well before this on `nextCursor` going None — the cap is
+        # a safety rail against an infinite-cursor loop.
+        max_pages = 750
+        # Wall-clock budget is for interactive browse (max_items > 0) only.
+        # The offline index builder passes max_items=0 and must walk the full
+        # catalog — a 12s cap there ships ~3k skills and trips the deploy
+        # health floor (20k).
+        deadline = (
+            time.monotonic() + self.CATALOG_WALK_BUDGET_SECONDS
+            if max_items > 0
+            else None
+        )
+        hit_deadline = False
+        hit_max_items = False
 
         for _ in range(max_pages):
+            if deadline is not None and time.monotonic() > deadline:
+                hit_deadline = True
+                break
             params: Dict[str, Any] = {"limit": 200}
             if cursor:
                 params["cursor"] = cursor
