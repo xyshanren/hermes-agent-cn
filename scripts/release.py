@@ -51,8 +51,6 @@ AUTHOR_MAP = {
     "sswdarius@gmail.com": "necoweb3",
     "peterhao@Peters-MacBook-Air.local": "pinguarmy",
     "adalsteinnhelgason@Aalsteinns-MacBook-Pro-3.local": "AIalliAI",
-    "adalsteinnhelgason@users.noreply.github.com": "AIalliAI",
-    "zhang.hz6666@gmail.com": "HaozheZhang6",
     "barronlroth@gmail.com": "barronlroth",
     "ondrej.drapalik@gmail.com": "OndrejDrapalik",
     "tomasz.panek@gmail.com": "tomekpanek",
