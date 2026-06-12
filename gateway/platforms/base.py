@@ -32,6 +32,7 @@ _AUDIO_EXTS = frozenset({'.ogg', '.opus', '.mp3', '.wav', '.m4a', '.flac'})
 # delivered as a regular document.
 _TELEGRAM_AUDIO_ATTACHMENT_EXTS = frozenset({'.mp3', '.m4a'})
 _TELEGRAM_VOICE_EXTS = frozenset({'.ogg', '.opus'})
+_POST_DELIVERY_CALLBACK_TIMEOUT_SECONDS = 30.0
 
 
 def _platform_name(platform) -> str:
@@ -461,6 +462,7 @@ def is_host_excluded_by_no_proxy(hostname: str, no_proxy_value: str | None = Non
     return False
 
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -857,6 +859,75 @@ SUPPORTED_IMAGE_DOCUMENT_TYPES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Media-delivery extension allowlist — SINGLE SOURCE OF TRUTH
+#
+# Both extractors that turn response text into native attachments derive their
+# extension set from this tuple:
+#   * ``extract_media()``       — explicit ``MEDIA:<path>`` tags
+#   * ``extract_local_files()`` — bare absolute/home paths the agent mentions
+#
+# Historically these two carried independently-maintained extension lists.
+# ``extract_media`` had a narrow list (no .md/.json/.yaml/.xml/.html/...) while
+# ``extract_local_files`` had a broad one. Combined with the unconditional
+# ``MEDIA:\\s*\\S+`` cleanup at the dispatch sites, that mismatch created a
+# silent black hole: a ``MEDIA:/report.md`` tag failed the narrow extract_media
+# match, got stripped from the body by the loose cleanup regex, and was then
+# invisible to extract_local_files — the file was never delivered (issue
+# #34517). Keeping one list eliminates the drift; building the cleanup regexes
+# from the same set means a tag is only stripped when its extension is one we
+# can actually deliver, so an unknown-extension path survives in the body
+# instead of vanishing.
+#
+# Covers images (inline), video (inline where supported), audio (voice/audio),
+# documents/spreadsheets/presentations (send_document), archives, and rendered
+# web output. The dispatch partition (image vs video vs document) lives in
+# ``gateway/run.py``.
+# ---------------------------------------------------------------------------
+
+MEDIA_DELIVERY_EXTS: Tuple[str, ...] = (
+    # Images (embed inline)
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg",
+    # Video (embed inline where supported)
+    ".mp4", ".mov", ".avi", ".mkv", ".webm",
+    # Audio (delivered as voice/audio where supported)
+    ".mp3", ".wav", ".ogg", ".opus", ".m4a", ".flac",
+    # Documents (uploaded as file attachments)
+    ".pdf", ".docx", ".doc", ".odt", ".rtf", ".txt", ".md", ".epub",
+    # Spreadsheets / data
+    ".xlsx", ".xls", ".ods", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml",
+    # Presentations
+    ".pptx", ".ppt", ".odp", ".key",
+    # Archives
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar", ".apk", ".ipa",
+    # Web / rendered output
+    ".html", ".htm",
+)
+
+# Regex alternation fragment of bare extensions (no leading dot), e.g.
+# ``png|jpe?g|...``. ``jpe?g`` collapses jpg/jpeg into one branch. Sorted
+# longest-first so the alternation never matches a shorter ext as a prefix of
+# a longer one (e.g. ``.tar`` before ``.tar.gz`` components).
+_MEDIA_EXT_ALTERNATION = "|".join(
+    sorted((e.lstrip(".") for e in MEDIA_DELIVERY_EXTS), key=len, reverse=True)
+)
+
+# Anchored ``MEDIA:<path>`` cleanup pattern. Unlike the old loose
+# ``MEDIA:\\s*\\S+``, this only strips a tag whose path ends in a known
+# deliverable extension (optionally quoted/backticked). A ``MEDIA:`` tag with
+# an unknown extension is left in the text so it can still be picked up by the
+# bare-path detector (extract_local_files) downstream rather than silently
+# deleted. Shared by the non-streaming dispatch path and the streaming
+# consumer so both behave identically.
+MEDIA_TAG_CLEANUP_RE = re.compile(
+    r'''[`"']?MEDIA:\s*'''
+    r'''(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|'''
+    r'''(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:''' + _MEDIA_EXT_ALTERNATION + r'''))'''
+    r'''(?=[\s`"',;:)\]}]|$)[`"']?''',
+    re.IGNORECASE,
+)
+
+
 def get_document_cache_dir() -> Path:
     """Return the document cache directory, creating it if it doesn't exist."""
     DOCUMENT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1021,6 +1092,21 @@ class MessageEvent:
         # iOS auto-corrects -- to — (em dash) and - to – (en dash)
         args = args.replace("\u2014\u2014", "--").replace("\u2014", "--").replace("\u2013", "-")
         return args
+
+
+@dataclass
+class TextDebounceState:
+    """Per-session busy-text debounce state.
+
+    Tracks the debounced MessageEvent, the asyncio.Task that will eventually
+    deliver it, and the monotonic timestamps that bound the debounce window.
+    Added in v0.15.0+cn.5 cherry-pick (commit 1bed4e8ee follow-up) to make
+    streaming reply edit semantics in test_run_progress_topics compilable.
+    """
+    event: MessageEvent
+    task: asyncio.Task | None
+    first_ts: float
+    last_ts: float
 
 
 _PLAINTEXT_GATEWAY_RESTART_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -1297,11 +1383,22 @@ class BasePlatformAdapter(ABC):
     - Sending messages/responses
     - Handling media
     """
-    
+
+    # Whether this platform renders triple-backtick fenced code blocks (i.e.
+    # ``format_message`` translates/preserves markdown fences into a real code
+    # block).  Drives presentation choices like rendering a ``terminal`` tool
+    # call's command as a ```bash block instead of a flat preview line.
+    # Default False (plain-text platforms); markdown-rendering adapters set True.
+    supports_code_blocks: bool = False
+
     def __init__(self, config: PlatformConfig, platform: Platform):
         self.config = config
         self.platform = platform
         self._message_handler: Optional[MessageHandler] = None
+        # Optional hook (e.g. Telegram DM topic recovery) that rewrites
+        # ``event.source.thread_id`` before session keying. Returns the
+        # corrected thread_id or None to leave the source untouched.
+        self._topic_recovery_fn: Optional[Callable[[Any], Optional[str]]] = None
         self._running = False
         self._fatal_error_code: Optional[str] = None
         self._fatal_error_message: Optional[str] = None
@@ -1545,6 +1642,40 @@ class BasePlatformAdapter(ABC):
         an optional response string.
         """
         self._message_handler = handler
+
+    def set_topic_recovery_fn(
+        self,
+        fn: Optional[Callable[[Any], Optional[str]]],
+    ) -> None:
+        """Install a thread_id-recovery hook (Telegram DM topic mode).
+
+        The hook is called with ``event.source`` before session keying;
+        a non-None return value replaces ``source.thread_id``. Pass
+        ``None`` to clear the hook.
+        """
+        # Guard against subclasses that initialize via ``object.__new__`` in
+        # tests and never run ``BasePlatformAdapter.__init__``.
+        self._topic_recovery_fn = fn  # type: ignore[attr-defined]
+
+    def _apply_topic_recovery(self, event: MessageEvent) -> None:
+        """Rewrite ``event.source.thread_id`` in place if the hook returns one."""
+        recover = getattr(self, "_topic_recovery_fn", None)
+        if recover is None:
+            return
+        source = getattr(event, "source", None)
+        if source is None:
+            return
+        try:
+            recovered = recover(source)
+        except Exception:
+            logger.debug("topic recovery hook failed", exc_info=True)
+            return
+        if recovered is None or str(recovered) == str(source.thread_id or ""):
+            return
+        try:
+            event.source = dataclasses.replace(source, thread_id=str(recovered))
+        except Exception:
+            logger.debug("topic recovery rewrite failed", exc_info=True)
 
     def set_busy_session_handler(self, handler: Optional[Callable[[MessageEvent, str], Awaitable[bool]]]) -> None:
         """Set an optional handler for messages arriving during active sessions."""
@@ -2157,10 +2288,10 @@ class BasePlatformAdapter(ABC):
         cleaned = cleaned.replace("[[as_document]]", "")
         
         # Extract MEDIA:<path> tags, allowing optional whitespace after the colon
-        # and quoted/backticked paths for LLM-formatted outputs.
-        media_pattern = re.compile(
-            r'''[`"']?MEDIA:\s*(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:png|jpe?g|gif|webp|mp4|mov|avi|mkv|webm|ogg|opus|mp3|wav|m4a|flac|epub|pdf|zip|rar|7z|docx?|xlsx?|pptx?|txt|csv|apk|ipa)(?=[\s`"',;:)\]}]|$))[`"']?'''
-        )
+        # and quoted/backticked paths for LLM-formatted outputs. The extension
+        # set is the shared MEDIA_DELIVERY_EXTS source of truth (built once into
+        # MEDIA_TAG_CLEANUP_RE) so it can never drift from extract_local_files.
+        media_pattern = MEDIA_TAG_CLEANUP_RE
         for match in media_pattern.finditer(content):
             path = match.group("path").strip()
             if len(path) >= 2 and path[0] == path[-1] and path[0] in "`\"'":
@@ -2201,24 +2332,7 @@ class BasePlatformAdapter(ABC):
             Tuple of (list of expanded file paths, cleaned text with the
             raw path strings removed).
         """
-        _LOCAL_MEDIA_EXTS = (
-            # Images (embed inline)
-            '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg',
-            # Video (embed inline where supported)
-            '.mp4', '.mov', '.avi', '.mkv', '.webm',
-            # Audio (delivered as voice/audio where supported)
-            '.mp3', '.wav', '.ogg', '.m4a', '.flac',
-            # Documents (uploaded as file attachments)
-            '.pdf', '.docx', '.doc', '.odt', '.rtf', '.txt', '.md',
-            # Spreadsheets / data
-            '.xlsx', '.xls', '.ods', '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml',
-            # Presentations
-            '.pptx', '.ppt', '.odp', '.key',
-            # Archives
-            '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar',
-            # Web / rendered output
-            '.html', '.htm',
-        )
+        _LOCAL_MEDIA_EXTS = MEDIA_DELIVERY_EXTS
         ext_part = '|'.join(e.lstrip('.') for e in _LOCAL_MEDIA_EXTS)
 
         # (?<![/:\w.]) prevents matching inside URLs (e.g. https://…/img.png)
@@ -2247,6 +2361,17 @@ class BasePlatformAdapter(ABC):
             expanded = os.path.expanduser(raw)
             if os.path.isfile(expanded):
                 found.append((raw, expanded))
+            else:
+                # The reply mentions a deliverable-looking path that does not
+                # exist on disk, so it is silently dropped from native delivery.
+                # This is the most common reason a promised file never arrives
+                # (the model said "here's your file" but never wrote it, or
+                # referenced the wrong path). Log it so the gap is visible in
+                # gateway.log rather than vanishing without a trace.
+                logger.info(
+                    "Skipping bare file path in reply (no file on disk): %s",
+                    _log_safe_path(raw),
+                )
 
         # Deduplicate by expanded path, preserving discovery order
         seen: set = set()
@@ -2875,7 +3000,12 @@ class BasePlatformAdapter(ABC):
             return
 
         coerce_plaintext_gateway_command(event)
-        
+
+        # Rewrite ``event.source.thread_id`` via the installed recovery hook
+        # (Telegram DM topic mode) so the session key, guard checks, and
+        # downstream delivery all agree on the same lane.
+        self._apply_topic_recovery(event)
+
         session_key = build_session_key(
             event.source,
             group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
@@ -3172,7 +3302,12 @@ class BasePlatformAdapter(ABC):
                 # Strip any remaining internal directives from message body (fixes #1561)
                 text_content = text_content.replace("[[audio_as_voice]]", "").strip()
                 text_content = text_content.replace("[[as_document]]", "").strip()
-                text_content = re.sub(r"MEDIA:\s*\S+", "", text_content).strip()
+                # Strip only MEDIA: tags whose path has a deliverable extension
+                # (shared MEDIA_TAG_CLEANUP_RE). A MEDIA: tag with an unknown
+                # extension is intentionally left in the body so extract_local_files
+                # below can still pick up the bare path — otherwise the file would
+                # be silently dropped (issue #34517).
+                text_content = MEDIA_TAG_CLEANUP_RE.sub("", text_content).strip()
                 if images:
                     logger.info("[%s] extract_images found %d image(s) in response (%d chars)", self.name, len(images), len(response))
 
@@ -3453,6 +3588,15 @@ class BasePlatformAdapter(ABC):
             except Exception:
                 pass  # Last resort — don't let error reporting crash the handler
         finally:
+            # Stop typing before any deferred callback work.  Post-delivery
+            # callbacks may perform platform I/O; a stuck callback must not
+            # leave the typing refresh task running indefinitely.
+            await _stop_typing_task()
+            try:
+                if hasattr(self, "stop_typing"):
+                    await self.stop_typing(event.source.chat_id)
+            except Exception:
+                pass
             # Fire any one-shot post-delivery callback registered for this
             # session (e.g. deferred background-review notifications).
             #
@@ -3480,11 +3624,12 @@ class BasePlatformAdapter(ABC):
                 try:
                     _post_result = _post_cb()
                     if inspect.isawaitable(_post_result):
-                        await _post_result
-                except Exception:
+                        await asyncio.wait_for(
+                            _post_result,
+                            timeout=_POST_DELIVERY_CALLBACK_TIMEOUT_SECONDS,
+                        )
+                except (asyncio.TimeoutError, Exception):
                     pass
-            # Stop typing indicator
-            await _stop_typing_task()
             # Also cancel any platform-level persistent typing tasks (e.g. Discord)
             # that may have been recreated by _keep_typing after the last stop_typing()
             try:

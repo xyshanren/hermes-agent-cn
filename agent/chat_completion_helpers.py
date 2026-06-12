@@ -91,23 +91,64 @@ def interruptible_api_call(agent, api_kwargs: dict):
     provider fallback.
     """
     result = {"response": None, "error": None}
-    request_client_holder = {"client": None}
+    request_client_holder = {"client": None, "owner_tid": None}
     request_client_lock = threading.Lock()
+    # Request-local cancellation flag. Distinct from agent._interrupt_requested
+    # because that flag is cleared at run_conversation() turn boundaries, but
+    # this daemon worker thread can outlive the turn (the gateway caches
+    # AIAgent instances per session). Tracks whether THIS specific request was
+    # cancelled by the main thread's interrupt handler, so the transport error
+    # that is the expected consequence of our own force-close isn't misread as
+    # a network bug and surfaced to the caller. (PR #6600 — cascading interrupt
+    # hang.)
+    _request_cancelled = {"value": False}
 
     def _set_request_client(client):
         with request_client_lock:
             request_client_holder["client"] = client
+            # #29507: stamp the owning thread so a stranger-thread interrupt
+            # only shuts the connection down rather than racing the worker
+            # for FD ownership during ``client.close()``.
+            request_client_holder["owner_tid"] = threading.get_ident()
         return client
 
     def _take_request_client():
         with request_client_lock:
             client = request_client_holder.get("client")
             request_client_holder["client"] = None
+            request_client_holder["owner_tid"] = None
             return client
 
     def _close_request_client_once(reason: str) -> None:
-        request_client = _take_request_client()
-        if request_client is not None:
+        # #29507: dispatch on the calling thread.
+        #
+        # When ``_call`` (the worker) reaches its ``finally`` it owns the
+        # close and we pop + fully close as before. When a *stranger* thread
+        # (the interrupt-check loop, the stale-call detector) drives the
+        # close, only shut the sockets down so the worker's blocked
+        # ``recv``/``send`` unwinds with an ``EPIPE`` / EOF — and let the
+        # worker close ``client`` from its own thread on its way out. That
+        # avoids the FD-recycling race where the kernel reassigned a
+        # just-closed TLS socket FD to ``kanban.db``, and the still-live SSL
+        # BIO on the worker thread then wrote a 24-byte TLS application-data
+        # record into the SQLite header (#29507).
+        with request_client_lock:
+            request_client = request_client_holder.get("client")
+            owner_tid = request_client_holder.get("owner_tid")
+            stranger_thread = (
+                request_client is not None
+                and owner_tid is not None
+                and owner_tid != threading.get_ident()
+            )
+            if not stranger_thread:
+                # Owning thread (or no recorded owner) → pop and fully close.
+                request_client_holder["client"] = None
+                request_client_holder["owner_tid"] = None
+        if request_client is None:
+            return
+        if stranger_thread:
+            agent._abort_request_openai_client(request_client, reason=reason)
+        else:
             agent._close_request_openai_client(request_client, reason=reason)
 
     def _call():
@@ -158,6 +199,17 @@ def interruptible_api_call(agent, api_kwargs: dict):
                 )
                 result["response"] = request_client.chat.completions.create(**api_kwargs)
         except Exception as e:
+            # If the request was cancelled by the main thread's interrupt
+            # handler, the transport error is the expected consequence of our
+            # own force-close, NOT a network bug. Swallow it instead of
+            # surfacing — the main thread raises InterruptedError. (#6600)
+            if _request_cancelled["value"]:
+                logger.debug(
+                    "Non-streaming worker caught %s after request cancellation — "
+                    "exiting without surfacing a network error.",
+                    type(e).__name__,
+                )
+                return
             result["error"] = e
         finally:
             _close_request_client_once("request_complete")
@@ -227,6 +279,14 @@ def interruptible_api_call(agent, api_kwargs: dict):
             break
 
         if agent._interrupt_requested:
+            # Mark THIS request cancelled before force-closing so the worker's
+            # exception handler recognizes the forced transport error as a
+            # cancel and exits cleanly instead of surfacing a network error or
+            # (in the streaming path) burning full retry cycles. (#6600)
+            _request_cancelled["value"] = True
+            logger.debug(
+                "Force-closing httpx client due to interrupt (not a network error)."
+            )
             # Force-close the in-flight worker-local HTTP connection to stop
             # token generation without poisoning the shared client used to
             # seed future retries.
@@ -776,8 +836,11 @@ def try_activate_fallback(agent, reason: "FailoverReason | None" = None) -> bool
             from hermes_cli.model_normalize import normalize_model_for_provider
 
             fb_model = normalize_model_for_provider(fb_model, fb_provider)
-        except Exception:
-            pass
+        except Exception as _norm_err:
+            logger.warning(
+                "Could not normalize fallback model %r for provider %r: %s",
+                fb_model, fb_provider, _norm_err,
+            )
 
         # Determine api_mode from provider / base URL / model
         fb_api_mode = "chat_completions"
@@ -820,6 +883,25 @@ def try_activate_fallback(agent, reason: "FailoverReason | None" = None) -> bool
         if hasattr(agent, "_transport_cache"):
             agent._transport_cache.clear()
         agent._fallback_activated = True
+
+        # Clear the credential pool when the fallback provider doesn't match
+        # the pool's provider.  The pool was seeded for the primary provider;
+        # leaving it attached means downstream recovery (rate_limit / billing /
+        # auth) calls ``_swap_credential`` with a primary entry which overwrites
+        # the agent's ``base_url`` back to the primary's endpoint — every
+        # fallback request then 404s against the wrong host.  See #33163.
+        # When the fallback shares the pool's provider (e.g. both openrouter
+        # entries with different routing) the pool is preserved.
+        _existing_pool = getattr(agent, "_credential_pool", None)
+        if _existing_pool is not None:
+            _pool_provider = (getattr(_existing_pool, "provider", "") or "").strip().lower()
+            if _pool_provider and _pool_provider != fb_provider:
+                logger.info(
+                    "Fallback to %s/%s: clearing primary credential pool "
+                    "(pool_provider=%s) to prevent cross-provider contamination",
+                    fb_provider, fb_model, _pool_provider,
+                )
+                agent._credential_pool = None
 
         # Honor per-provider / per-model request_timeout_seconds for the
         # fallback target (same knob the primary client uses).  None = use
@@ -943,6 +1025,18 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
             agent._copy_reasoning_content_for_api(msg, api_msg)
             for internal_field in ("reasoning", "finish_reason", "_thinking_prefill"):
                 api_msg.pop(internal_field, None)
+            # Strict OpenAI-compatible gateways (Fireworks-backed OpenCode Go,
+            # Mistral, Moonshot/Kimi) reject any message key outside the Chat
+            # Completions schema. The main loop drops these via
+            # ChatCompletionsTransport.convert_messages(), but the summary path
+            # hand-builds messages and calls chat.completions.create() directly,
+            # bypassing the transport — so mirror that sanitization here:
+            # tool_name (SQLite FTS bookkeeping), the codex_* reasoning carriers,
+            # and every Hermes-internal underscore-prefixed scaffolding key.
+            for schema_foreign in ("tool_name", "codex_reasoning_items", "codex_message_items"):
+                api_msg.pop(schema_foreign, None)
+            for internal_key in [k for k in api_msg if isinstance(k, str) and k.startswith("_")]:
+                api_msg.pop(internal_key, None)
             if _needs_sanitize:
                 agent._sanitize_tool_calls_for_strict_api(api_msg)
             api_messages.append(api_msg)
@@ -1271,23 +1365,52 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
         return result["response"]
 
     result = {"response": None, "error": None, "partial_tool_names": []}
-    request_client_holder = {"client": None, "diag": None}
+    request_client_holder = {"client": None, "diag": None, "owner_tid": None}
     request_client_lock = threading.Lock()
+    # Request-local cancellation flag — see interruptible_api_call for the full
+    # rationale. The streaming retry loop is where the 7-minute cascading-
+    # interrupt hang originated: a force-close raised RemoteProtocolError, the
+    # loop classified it as a transient network error, and burned full retry
+    # cycles (and emitted "reconnecting" noise) on a request the user already
+    # cancelled. The token lets the worker recognize its own forced close and
+    # exit immediately instead of retrying. (PR #6600.)
+    _request_cancelled = {"value": False}
 
     def _set_request_client(client):
         with request_client_lock:
             request_client_holder["client"] = client
+            # See #29507 explanation in the non-streaming variant above.
+            request_client_holder["owner_tid"] = threading.get_ident()
         return client
 
     def _take_request_client():
         with request_client_lock:
             client = request_client_holder.get("client")
             request_client_holder["client"] = None
+            request_client_holder["owner_tid"] = None
             return client
 
     def _close_request_client_once(reason: str) -> None:
-        request_client = _take_request_client()
-        if request_client is not None:
+        # See #29507 explanation in the non-streaming variant above. A
+        # stranger thread (the interrupt-check / stale-stream detector loop)
+        # only aborts sockets — never pops, never calls ``client.close()`` —
+        # so the worker thread retains ownership of the FD release.
+        with request_client_lock:
+            request_client = request_client_holder.get("client")
+            owner_tid = request_client_holder.get("owner_tid")
+            stranger_thread = (
+                request_client is not None
+                and owner_tid is not None
+                and owner_tid != threading.get_ident()
+            )
+            if not stranger_thread:
+                request_client_holder["client"] = None
+                request_client_holder["owner_tid"] = None
+        if request_client is None:
+            return
+        if stranger_thread:
+            agent._abort_request_openai_client(request_client, reason=reason)
+        else:
             agent._close_request_openai_client(request_client, reason=reason)
 
     first_delta_fired = {"done": False}
@@ -1697,6 +1820,21 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                         result["response"] = _call_chat_completions()
                     return  # success
                 except Exception as e:
+                    # If the main poll loop force-closed this request because
+                    # of an interrupt, the resulting transport error is the
+                    # expected consequence of our own close — NOT a transient
+                    # network error. Exit immediately: no retry, no fallback,
+                    # no "reconnecting" status. The outer poll loop raises
+                    # InterruptedError. This is the fix for the cascading-
+                    # interrupt hang where doomed retries burned full
+                    # stream-stale-timeout cycles. (#6600)
+                    if _request_cancelled["value"]:
+                        logger.debug(
+                            "Streaming worker caught %s after request "
+                            "cancellation — exiting without retry.",
+                            type(e).__name__,
+                        )
+                        return
                     _is_timeout = isinstance(
                         e, (_httpx.ReadTimeout, _httpx.ConnectTimeout, _httpx.PoolTimeout)
                     )
@@ -2006,6 +2144,15 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
             )
 
         if agent._interrupt_requested:
+            # Mark THIS request cancelled before force-closing so the worker's
+            # exception handler recognizes the forced transport error as a
+            # cancel and exits without retrying or surfacing a network error.
+            # (#6600)
+            _request_cancelled["value"] = True
+            logger.debug(
+                "Force-closing streaming httpx client due to interrupt "
+                "(not a network error)."
+            )
             try:
                 if agent.api_mode == "anthropic_messages":
                     agent._anthropic_client.close()

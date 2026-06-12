@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
         'user-guide/sessions',
         'user-guide/profiles',
         'user-guide/profile-distributions',
+        'user-guide/multi-profile-gateways',
         'user-guide/git-worktrees',
         'user-guide/docker',
         'user-guide/security',
@@ -361,6 +362,7 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/bundled/software-development/software-development-plan',
                     'user-guide/skills/bundled/software-development/software-development-python-debugpy',
                     'user-guide/skills/bundled/software-development/software-development-requesting-code-review',
+                    'user-guide/skills/bundled/software-development/software-development-simplify-code',
                     'user-guide/skills/bundled/software-development/software-development-spike',
                     'user-guide/skills/bundled/software-development/software-development-subagent-driven-development',
                     'user-guide/skills/bundled/software-development/software-development-systematic-debugging',
@@ -390,6 +392,7 @@ const sidebars: SidebarsConfig = {
                   key: 'skills-optional-autonomous-ai-agents',
                   collapsed: true,
                   items: [
+                    'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-antigravity-cli',
                     'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-blackbox',
                     'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-honcho',
                   ],
@@ -544,6 +547,7 @@ const sidebars: SidebarsConfig = {
                   key: 'skills-optional-productivity',
                   collapsed: true,
                   items: [
+                    'user-guide/skills/optional/productivity/productivity-antigravity-cli',
                     'user-guide/skills/optional/productivity/productivity-canvas',
                     'user-guide/skills/optional/productivity/productivity-here-now',
                     'user-guide/skills/optional/productivity/productivity-memento-flashcards',

@@ -464,6 +464,19 @@ def run_conversation(
 
     active_system_prompt = agent._cached_system_prompt
 
+    # Crash-resilience: persist the inbound user turn as soon as the session row
+    # has a valid system prompt, before any provider call or tool execution can
+    # hang/kill the process. The normal end-of-turn persist still runs later;
+    # _last_flushed_db_idx makes this idempotent and prevents duplicate rows.
+    try:
+        agent._persist_session(messages, conversation_history)
+    except Exception:
+        logger.warning(
+            "Early turn-start session persistence failed for session=%s",
+            agent.session_id or "none",
+            exc_info=True,
+        )
+
     # ── Preflight context compression ──
     # Before entering the main loop, check if the loaded conversation
     # history already exceeds the model's context threshold.  This handles
@@ -1050,6 +1063,14 @@ def run_conversation(
 
             try:
                 agent._reset_stream_delivery_tracking()
+                # api_messages is built once, before this retry loop, while the
+                # primary provider is active.  A mid-conversation fallback can
+                # switch to a require-side provider (DeepSeek / Kimi / MiMo) that
+                # rejects assistant turns lacking reasoning_content.  Re-apply the
+                # echo-back pad for the *current* provider here (idempotent no-op
+                # unless the active provider needs it) so the fallback request
+                # isn't sent with stale, primary-shaped reasoning fields.
+                agent._reapply_reasoning_echo_for_provider(api_messages)
                 api_kwargs = agent._build_api_kwargs(api_messages)
                 if agent._force_ascii_payload:
                     _sanitize_structure_non_ascii(api_kwargs)
@@ -2769,7 +2790,37 @@ def run_conversation(
                     # ssl.SSLError explicitly so the error classifier's
                     # retryable=True mapping takes effect instead.
                     and not isinstance(api_error, ssl.SSLError)
+                    # Provider/SDK "NoneType is not iterable" failures are
+                    # shape mismatches from upstream (e.g. chatgpt.com Codex
+                    # backend response.completed.output=null) — not local
+                    # programming bugs.  Even after #33042 made our own
+                    # consumer immune, third-party shims and mocked clients
+                    # can still surface this shape via TypeError.  Treat
+                    # them as retryable so the error classifier's normal
+                    # retry/fallback path runs instead of killing the turn
+                    # as non-retryable (which left Telegram users staring
+                    # at a bare "Non-retryable error" with no recovery).
+                    and not (
+                        isinstance(api_error, TypeError)
+                        and "nonetype" in str(api_error).lower()
+                        and "not iterable" in str(api_error).lower()
+                    )
                 )
+                # ``FailoverReason.billing`` (HTTP 402) is NOT in this
+                # exclusion set.  By the time we reach this block:
+                #   • credential-pool rotation (line ~2031) has already
+                #     fired for billing and either ``continue``d or
+                #     returned (False, ...) — pool is exhausted or absent.
+                #   • the eager-fallback branch above (line ~2422) also
+                #     fires on billing and ``continue``s if a fallback
+                #     provider is configured.
+                # Falling through to here means BOTH recovery paths
+                # gave up.  Treating 402 as retryable from this point
+                # just burns more paid requests against a depleted
+                # balance with no recovery mechanism left — see #31273
+                # (real-world: ~$40 in 48h on a 24/7 gateway).  Aborting
+                # mirrors how 401/403 (also ``should_fallback=True``)
+                # already behave once their recovery paths have failed.
                 is_client_error = (
                     is_local_validation_error
                     or (
@@ -2777,7 +2828,6 @@ def run_conversation(
                         and not classified.should_compress
                         and classified.reason not in {
                             FailoverReason.rate_limit,
-                            FailoverReason.billing,
                             FailoverReason.overloaded,
                             FailoverReason.context_overflow,
                             FailoverReason.payload_too_large,
@@ -3434,6 +3484,19 @@ def run_conversation(
                         f"⚠️ Tool guardrail halted {decision.tool_name}: {decision.code}"
                     )
                     messages.append({"role": "assistant", "content": final_response})
+                    # Emit the halt message to the client so it's not
+                    # indistinguishable from a crash.  The stream display
+                    # was flushed (callback(None)) before tool execution,
+                    # but the callback is still alive — fire the text
+                    # through it so SSE/TUI clients see the explanation.
+                    if final_response:
+                        agent._safe_print(f"\n{final_response}\n")
+                        if agent.stream_delta_callback:
+                            try:
+                                agent.stream_delta_callback(final_response)
+                                agent.stream_delta_callback(None)
+                            except Exception:
+                                pass
                     break
 
                 # Reset per-turn retry counters after successful tool
@@ -3841,8 +3904,14 @@ def run_conversation(
                 print(f"❌ {error_msg}")
             except (OSError, ValueError):
                 logger.error(error_msg)
-            
-            logger.debug("Outer loop error in API call #%d", api_call_count, exc_info=True)
+
+            # Emit the full traceback at ERROR level so it lands in both
+            # agent.log AND errors.log.  Previously this was logged at DEBUG,
+            # which meant intermittent outer-loop failures were unreproducible
+            # — users would see a one-line summary on screen with no way to
+            # recover the call site.  logger.exception() includes the
+            # traceback automatically and emits at ERROR.
+            logger.exception("Outer loop error in API call #%d", api_call_count)
             
             # If an assistant message with tool_calls was already appended,
             # the API expects a role="tool" result for every tool_call_id.

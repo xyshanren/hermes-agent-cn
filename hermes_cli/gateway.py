@@ -614,6 +614,10 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
         # Platform-appropriate detach for the respawned gateway.  On POSIX
         # start_new_session=True maps to os.setsid; on Windows we need
         # explicit creationflags because start_new_session is a no-op there.
+        # CREATE_BREAKAWAY_FROM_JOB is critical: the watcher itself may have
+        # been spawned inside a job object (Electron/Tauri parent), and
+        # without breakaway the respawned gateway would die when that job
+        # tears down. See _subprocess_compat.windows_detach_flags().
         _popen_kwargs = {
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
@@ -622,8 +626,12 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
             _CREATE_NEW_PROCESS_GROUP = 0x00000200
             _DETACHED_PROCESS = 0x00000008
             _CREATE_NO_WINDOW = 0x08000000
+            _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
             _popen_kwargs["creationflags"] = (
-                _CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS | _CREATE_NO_WINDOW
+                _CREATE_NEW_PROCESS_GROUP
+                | _DETACHED_PROCESS
+                | _CREATE_NO_WINDOW
+                | _CREATE_BREAKAWAY_FROM_JOB
             )
         else:
             _popen_kwargs["start_new_session"] = True
@@ -2139,9 +2147,37 @@ def _build_service_path_dirs(project_root: Path | None = None) -> list[str]:
     return candidates
 
 
+def _stable_service_working_dir() -> str:
+    """Return a WorkingDirectory that will not disappear out from under systemd.
+
+    The gateway does NOT need its cwd to be the source checkout — ``ExecStart``
+    uses an absolute python interpreter and ``-m hermes_cli.main``, so module
+    resolution does not depend on cwd. Pinning ``WorkingDirectory`` to
+    ``PROJECT_ROOT`` (``Path(__file__).parent.parent``) is actively harmful:
+    when the unit is generated from a transient checkout — a ``.worktrees/``
+    dir, or a clone that ``hermes update`` later relocates/removes — the path
+    rots. systemd then fails the start at the CHDIR step (``status=200/CHDIR``,
+    "Changing to the requested working directory failed") *before* Python
+    loads, so the on-boot ``refresh_systemd_unit_if_needed()`` self-heal never
+    runs and ``Restart=always`` crash-loops forever on a dead directory.
+
+    ``HERMES_HOME`` is the stable anchor: it is where config/state/logs live,
+    it never moves, and it is guaranteed to exist whenever the gateway is
+    meaningfully installed. Fall back to ``PROJECT_ROOT`` only if HERMES_HOME
+    cannot be resolved (it always can in practice).
+    """
+    try:
+        home = get_hermes_home()
+        if home and Path(home).is_dir():
+            return str(Path(home).resolve())
+    except Exception:
+        pass
+    return str(PROJECT_ROOT)
+
+
 def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) -> str:
     python_path = get_python_path()
-    working_dir = str(PROJECT_ROOT)
+    working_dir = _stable_service_working_dir()
     detected_venv = _detect_venv_dir()
     venv_dir = str(detected_venv) if detected_venv else str(PROJECT_ROOT / "venv")
 
@@ -2170,7 +2206,10 @@ def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) 
         # (e.g. /root/) to the target user's home so the service can
         # actually access them.
         python_path = _remap_path_for_user(python_path, home_dir)
-        working_dir = _remap_path_for_user(working_dir, home_dir)
+        # Anchor cwd to the target user's HERMES_HOME (stable, always exists)
+        # rather than a remapped source-checkout path that can rot. See
+        # _stable_service_working_dir() for the full rationale.
+        working_dir = str(hermes_home) if hermes_home else _remap_path_for_user(working_dir, home_dir)
         venv_dir = _remap_path_for_user(venv_dir, home_dir)
         path_entries = [_remap_path_for_user(p, home_dir) for p in path_entries]
         path_entries.extend(_build_user_local_paths(Path(home_dir), path_entries))
@@ -2187,7 +2226,7 @@ StartLimitIntervalSec=0
 Type=simple
 User={username}
 Group={group_name}
-ExecStart={python_path} -m hermes_cli.main{f" {profile_arg}" if profile_arg else ""} gateway run --replace
+ExecStart={python_path} -m hermes_cli.main{f" {profile_arg}" if profile_arg else ""} gateway run
 WorkingDirectory={working_dir}
 Environment="HOME={home_dir}"
 Environment="USER={username}"
@@ -2197,8 +2236,6 @@ Environment="VIRTUAL_ENV={venv_dir}"
 Environment="HERMES_HOME={hermes_home}"
 Restart=always
 RestartSec=5
-RestartMaxDelaySec=300
-RestartSteps=5
 RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}
 KillMode=mixed
 KillSignal=SIGTERM
@@ -2225,15 +2262,13 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart={python_path} -m hermes_cli.main{f" {profile_arg}" if profile_arg else ""} gateway run --replace
+ExecStart={python_path} -m hermes_cli.main{f" {profile_arg}" if profile_arg else ""} gateway run
 WorkingDirectory={working_dir}
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
 Environment="HERMES_HOME={hermes_home}"
 Restart=always
 RestartSec=5
-RestartMaxDelaySec=300
-RestartSteps=5
 RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}
 KillMode=mixed
 KillSignal=SIGTERM
@@ -2782,7 +2817,10 @@ def _launchd_domain() -> str:
 
 def generate_launchd_plist() -> str:
     python_path = get_python_path()
-    working_dir = str(PROJECT_ROOT)
+    # Stable cwd anchor — never the volatile source checkout. See
+    # _stable_service_working_dir() for the rationale (same rot risk applies
+    # to launchd's WorkingDirectory as to systemd's).
+    working_dir = _stable_service_working_dir()
     hermes_home = str(get_hermes_home().resolve())
     log_dir = get_hermes_home() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -4037,15 +4075,11 @@ def _setup_dingtalk():
         client_id, client_secret = result
         save_env_value("DINGTALK_CLIENT_ID", client_id)
         save_env_value("DINGTALK_CLIENT_SECRET", client_secret)
-        save_env_value("DINGTALK_ALLOW_ALL_USERS", "true")
         print()
         print_success(f"{emoji} {label} configured via QR scan!")
     else:
         # ── Manual entry ──
         _setup_standard_platform(dingtalk_platform)
-        # Also enable allow-all by default for convenience
-        if get_env_value("DINGTALK_CLIENT_ID"):
-            save_env_value("DINGTALK_ALLOW_ALL_USERS", "true")
 
 
 def _setup_wecom():
@@ -5214,6 +5248,16 @@ def _gateway_command_inner(args):
             sys.exit(1)
 
     elif subcmd == "stop":
+        # Defense: refuse self-targeting gateway stop from inside the gateway.
+        # Prevents agent-initiated kill loops when combined with supervisor KeepAlive.
+        if os.getenv("_HERMES_GATEWAY") == "1":
+            print_error(
+                "Refusing to stop the gateway from inside the gateway process.\n"
+                "This command was blocked to prevent restart loops.\n"
+                "Use `hermes gateway stop` from a shell outside the running gateway."
+            )
+            sys.exit(1)
+
         stop_all = getattr(args, 'all', False)
         system = getattr(args, 'system', False)
 
@@ -5280,6 +5324,16 @@ def _gateway_command_inner(args):
                 print(f"✓ Stopped {get_service_name()} service")
     
     elif subcmd == "restart":
+        # Defense: refuse self-targeting gateway restart from inside the gateway.
+        # Prevents agent-initiated kill loops when combined with supervisor KeepAlive.
+        if os.getenv("_HERMES_GATEWAY") == "1":
+            print_error(
+                "Refusing to restart the gateway from inside the gateway process.\n"
+                "This command was blocked to prevent restart loops.\n"
+                "Use `hermes gateway restart` from a shell outside the running gateway."
+            )
+            sys.exit(1)
+
         # Try service first, fall back to killing and restarting
         service_available = False
         system = getattr(args, 'system', False)

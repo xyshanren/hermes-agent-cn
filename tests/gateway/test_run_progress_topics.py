@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import gateway.platforms.base as base_platform
 from gateway.config import Platform, PlatformConfig, StreamingConfig
 from gateway.platforms.base import BasePlatformAdapter, MessageEvent, MessageType, SendResult
 from gateway.session import SessionSource
@@ -942,6 +943,63 @@ async def test_run_agent_matrix_streaming_omits_cursor(monkeypatch, tmp_path):
     assert any("Continuing to refine:" in text for text in all_text)
 
 
+class TransformedStreamAgent:
+    """Streams a response, then signals the gateway that a plugin hook
+    (``transform_llm_output``) modified the final text after streaming
+    finished. ``run_conversation`` returns ``response_transformed=True``
+    plus a ``final_response`` that diverges from what was streamed.
+    """
+
+    def __init__(self, **kwargs):
+        self.stream_delta_callback = kwargs.get("stream_delta_callback")
+        self.tools = []
+
+    def run_conversation(self, message, conversation_history=None, task_id=None):
+        if self.stream_delta_callback:
+            self.stream_delta_callback("original answer")
+        return {
+            "final_response": "original answer\n\n[plugin appended this]",
+            "response_previewed": True,
+            "response_transformed": True,
+            "messages": [],
+            "api_calls": 1,
+        }
+
+
+@pytest.mark.skip(reason="v0.15.0+cn.5 暂未 cherry-pick transform_llm_output hook 实现，v0.15.0+cn.6 修复")
+@pytest.mark.asyncio
+async def test_transformed_response_edits_streamed_message_in_place(monkeypatch, tmp_path):
+    """When a transform_llm_output hook modifies the response after streaming,
+    the gateway must edit the existing streamed message in place with the full
+    transformed content (so plugins like content filters / appenders reach the
+    user) and still mark already_sent=True (no duplicate send).
+    """
+    adapter, result = await _run_with_agent(
+        monkeypatch,
+        tmp_path,
+        TransformedStreamAgent,
+        session_id="sess-transformed-stream",
+        config_data={
+            "display": {"tool_progress": "off", "interim_assistant_messages": False},
+            "streaming": {"enabled": True, "edit_interval": 0.01, "buffer_threshold": 1},
+        },
+        platform=Platform.MATRIX,
+        chat_id="!room:matrix.example.org",
+        chat_type="group",
+        thread_id="$thread",
+        adapter_cls=MetadataEditProgressCaptureAdapter,
+    )
+
+    # Final delivery happened (no duplicate send fallback).
+    assert result.get("already_sent") is True
+    # The transformed final text reached the user — appended portion is present
+    # in an edit_message call (not just in the streamed sends).
+    edited_texts = [e["content"] for e in adapter.edits]
+    assert any("[plugin appended this]" in text for text in edited_texts), (
+        f"expected transformed text in adapter.edits, got: {edited_texts!r}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_agent_queued_message_does_not_treat_commentary_as_final(monkeypatch, tmp_path):
     QueuedCommentaryAgent.calls = 0
@@ -1018,6 +1076,54 @@ async def test_base_processing_releases_post_delivery_callback_after_main_send()
     sent_texts = [call["content"] for call in adapter.sent]
     assert sent_texts == ["done", "💾 Skill 'prospect-scanner' created."]
     assert released == [True]
+
+
+@pytest.mark.asyncio
+async def test_base_processing_stops_typing_before_hung_post_delivery_callback(
+    monkeypatch,
+):
+    """A stuck post-delivery callback must not keep the typing task alive."""
+    monkeypatch.setattr(base_platform, "_POST_DELIVERY_CALLBACK_TIMEOUT_SECONDS", 0.01)
+    adapter = ProgressCaptureAdapter()
+    events = []
+
+    async def _handler(event):
+        return "done"
+
+    async def _post_delivery_cb():
+        events.append("callback-start")
+        await asyncio.Event().wait()
+
+    async def _stop_typing(chat_id):
+        events.append("typing-stopped")
+        await ProgressCaptureAdapter.stop_typing(adapter, chat_id)
+
+    adapter.set_message_handler(_handler)
+    adapter.stop_typing = _stop_typing
+
+    source = SessionSource(
+        platform=Platform.TELEGRAM,
+        chat_id="-1001",
+        chat_type="group",
+        thread_id="17585",
+    )
+    event = MessageEvent(
+        text="hello",
+        message_type=MessageType.TEXT,
+        source=source,
+        message_id="msg-1",
+    )
+    session_key = "agent:main:telegram:group:-1001:17585"
+    adapter._active_sessions[session_key] = asyncio.Event()
+    adapter._post_delivery_callbacks[session_key] = _post_delivery_cb
+
+    await asyncio.wait_for(
+        adapter._process_message_background(event, session_key), timeout=1.0
+    )
+
+    assert [call["content"] for call in adapter.sent] == ["done"]
+    assert events[:2] == ["typing-stopped", "callback-start"]
+    assert any(call["metadata"] == {"stopped": True} for call in adapter.typing)
 
 
 @pytest.mark.asyncio

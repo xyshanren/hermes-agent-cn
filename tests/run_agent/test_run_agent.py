@@ -1311,8 +1311,9 @@ class TestBuildApiKwargs:
         assert "temperature" not in kwargs
 
     def test_kimi_coding_endpoint_sends_max_tokens_and_reasoning(self, agent):
-        """Kimi endpoint should send max_tokens=32000 and reasoning_effort as
-        top-level params, matching Kimi CLI's default behavior."""
+        """Kimi endpoint sends max_tokens=32000. With no reasoning_config it
+        defaults to the thinking toggle (xor contract: never paired with a
+        top-level reasoning_effort)."""
         agent.provider = "kimi-coding"
         agent.base_url = "https://api.kimi.com/coding/v1"
         agent._base_url_lower = agent.base_url.lower()
@@ -1322,7 +1323,8 @@ class TestBuildApiKwargs:
         kwargs = agent._build_api_kwargs(messages)
 
         assert kwargs["max_tokens"] == 32000
-        assert kwargs["reasoning_effort"] == "medium"
+        assert kwargs["extra_body"]["thinking"] == {"type": "enabled"}
+        assert "reasoning_effort" not in kwargs
 
     def test_kimi_coding_endpoint_respects_custom_effort(self, agent):
         """reasoning_effort should reflect reasoning_config.effort when set."""
@@ -1377,8 +1379,8 @@ class TestBuildApiKwargs:
         kwargs = agent._build_api_kwargs(messages)
 
         assert kwargs["max_tokens"] == 32000
-        assert kwargs["reasoning_effort"] == "medium"
         assert kwargs["extra_body"]["thinking"] == {"type": "enabled"}
+        assert "reasoning_effort" not in kwargs
 
     def test_moonshot_cn_endpoint_sends_max_tokens_and_reasoning(self, agent):
         """api.moonshot.cn (China endpoint) should get the same params."""
@@ -1391,8 +1393,8 @@ class TestBuildApiKwargs:
         kwargs = agent._build_api_kwargs(messages)
 
         assert kwargs["max_tokens"] == 32000
-        assert kwargs["reasoning_effort"] == "medium"
         assert kwargs["extra_body"]["thinking"] == {"type": "enabled"}
+        assert "reasoning_effort" not in kwargs
 
     def test_provider_preferences_injected(self, agent):
         agent.provider = "openrouter"
@@ -2122,15 +2124,20 @@ class TestConcurrentToolExecution:
 
     def test_concurrent_handles_tool_error(self, agent):
         """If one tool raises, others should still complete."""
-        tc1 = _mock_tool_call(name="web_search", arguments='{}', call_id="c1")
-        tc2 = _mock_tool_call(name="web_search", arguments='{}', call_id="c2")
+        # Distinguish the two calls by their arguments so the error is tied to
+        # a SPECIFIC tool call rather than invocation order. Concurrent
+        # execution gives no guarantee that c1's handler runs before c2's, so
+        # keying the raise on a call-order counter is racy: under thread-pool
+        # scheduling c2 could be invoked first, take the "first call raises"
+        # branch, and the error would land in messages[1] instead of
+        # messages[0]. Keying on args makes the assertion deterministic.
+        tc1 = _mock_tool_call(name="web_search", arguments='{"q": "boom"}', call_id="c1")
+        tc2 = _mock_tool_call(name="web_search", arguments='{"q": "ok"}', call_id="c2")
         mock_msg = _mock_assistant_msg(content="", tool_calls=[tc1, tc2])
         messages = []
 
-        call_count = [0]
         def fake_handle(name, args, task_id, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
+            if args.get("q") == "boom":
                 raise RuntimeError("boom")
             return "success"
 
@@ -2138,9 +2145,11 @@ class TestConcurrentToolExecution:
             agent._execute_tool_calls_concurrent(mock_msg, messages, "task-1")
 
         assert len(messages) == 2
-        # First tool should have error
+        # Results are ordered by tool_call_id; c1 raised, c2 succeeded.
+        assert messages[0]["tool_call_id"] == "c1"
         assert "Error" in messages[0]["content"] or "boom" in messages[0]["content"]
         # Second tool should succeed
+        assert messages[1]["tool_call_id"] == "c2"
         assert "success" in messages[1]["content"]
 
     def test_concurrent_interrupt_before_start(self, agent):
@@ -2511,6 +2520,40 @@ class TestHandleMaxIterations:
             if m.get("role") == "tool" and m.get("tool_call_id") == "call_no_result"
         ]
         assert len(stub_ids) >= 1, f"No stub result for assistant tool_call: {stub_ids}"
+
+    def test_summary_strips_strict_schema_foreign_fields(self, agent):
+        """Regression: the max-iterations summary request must NOT carry
+        Chat-Completions-schema-foreign keys — tool_name (SQLite FTS
+        bookkeeping), codex_* reasoning carriers, or internal _-prefixed
+        scaffolding. Strict gateways (Fireworks-backed OpenCode Go, Mistral,
+        Kimi) reject these with 'Extra inputs are not permitted, field:
+        messages[N].tool_name'. The transport's convert_messages() strips
+        them on the main loop; this hand-built summary path must mirror it."""
+        agent.client.chat.completions.create.return_value = _mock_response(content="Summary")
+        agent._cached_system_prompt = "You are helpful."
+        messages = [
+            {"role": "user", "content": "do stuff"},
+            {
+                "role": "assistant",
+                "tool_calls": [{"id": "call_1", "function": {"name": "execute_code", "arguments": "{}"}}],
+                "codex_reasoning_items": [{"id": "rs_1"}],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result", "tool_name": "execute_code"},
+            {"role": "assistant", "content": "Done.", "_empty_recovery_synthetic": True},
+        ]
+
+        result = agent._handle_max_iterations(messages, 60)
+
+        assert result == "Summary"
+        sent_msgs = agent.client.chat.completions.create.call_args.kwargs.get("messages", [])
+        for m in sent_msgs:
+            assert "tool_name" not in m, m
+            assert "codex_reasoning_items" not in m, m
+            assert "codex_message_items" not in m, m
+            assert not any(isinstance(k, str) and k.startswith("_") for k in m), m
+        # Internal history is untouched — the path copies each message.
+        assert messages[2]["tool_name"] == "execute_code"
+        assert messages[1]["codex_reasoning_items"] == [{"id": "rs_1"}]
 
     def test_summary_omits_provider_preferences_for_non_openrouter(self, agent):
         agent.base_url = "https://api.openai.com/v1"
@@ -3611,6 +3654,52 @@ class TestRunConversation:
         assert len(kanban_block_calls) == 0, (
             "kanban_block should not be called outside kanban mode"
         )
+
+
+class TestHookPayloadSanitizesSimpleNamespace:
+    """Regression: ``_hook_jsonable`` referenced ``SimpleNamespace`` without
+    importing it, so sanitizing any hook payload that contained one raised
+    ``NameError: name 'SimpleNamespace' is not defined``.
+
+    The non-OpenAI providers (Bedrock, Codex responses, the auxiliary client,
+    and the chat-completion stream stub) build their response / message /
+    tool_call objects as ``types.SimpleNamespace`` — see
+    ``agent/bedrock_adapter.py``, ``agent/codex_responses_adapter.py``, and
+    ``agent/auxiliary_client.py``. Those raw objects are handed straight to
+    ``_api_response_payload_for_hook`` for the ``post_api_request`` hook, so the
+    crash silently killed observability hooks for every one of those providers
+    (the call sites swallow the exception with ``except Exception: pass``).
+    """
+
+    def test_hook_jsonable_normalizes_simplenamespace(self):
+        ns = SimpleNamespace(id="call_1", value=42, nested=SimpleNamespace(name="x"))
+        result = AIAgent._sanitize_hook_payload(ns)
+        assert result == {"id": "call_1", "value": 42, "nested": {"name": "x"}}
+
+    def test_api_response_payload_for_hook_normalizes_simplenamespace_tool_calls(self, agent):
+        # Shape mirrors agent/bedrock_adapter.py::normalize_converse_response and
+        # agent/codex_responses_adapter.py — raw SDK objects are SimpleNamespace.
+        tool_call = SimpleNamespace(
+            id="call_1",
+            type="function",
+            function=SimpleNamespace(name="web_search", arguments='{"q": "hi"}'),
+        )
+        assistant_message = SimpleNamespace(
+            role="assistant",
+            content="",
+            tool_calls=[tool_call],
+        )
+        response = SimpleNamespace(model="anthropic.claude-3", usage=None)
+
+        payload = agent._api_response_payload_for_hook(
+            response, assistant_message, finish_reason="tool_calls"
+        )
+
+        assert payload["model"] == "anthropic.claude-3"
+        assert payload["finish_reason"] == "tool_calls"
+        normalized_call = payload["assistant_message"]["tool_calls"][0]
+        assert normalized_call["id"] == "call_1"
+        assert normalized_call["function"]["name"] == "web_search"
 
 
 class TestRetryExhaustion:

@@ -6286,8 +6286,8 @@ def _update_via_zip(args):
     )
 
     print("→ Downloading latest version...")
+    tmp_dir = tempfile.mkdtemp(prefix="hermes-update-")
     try:
-        tmp_dir = tempfile.mkdtemp(prefix="hermes-update-")
         zip_path = os.path.join(tmp_dir, f"hermes-agent-{branch}.zip")
         urlretrieve(zip_url, zip_path)
 
@@ -6334,12 +6334,11 @@ def _update_via_zip(args):
 
         print(f"✓ Updated {update_count} items from ZIP")
 
-        # Cleanup
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-
     except Exception as e:
         print(f"✗ ZIP update failed: {e}")
         sys.exit(1)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Clear stale bytecode after ZIP extraction
     removed = _clear_bytecode_cache(PROJECT_ROOT)
@@ -7681,7 +7680,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         try:
             from hermes_cli.backup import create_quick_snapshot
 
-            snap_id = create_quick_snapshot(label="pre-update")
+            snap_id = create_quick_snapshot(label="pre-update", keep=1)
             if snap_id:
                 print(f"  ✓ Pre-update snapshot: {snap_id}")
         except Exception as exc:
@@ -8667,7 +8666,8 @@ def cmd_profile(args):
                 )
                 print(f"Skills:         {p.skill_count} installed")
                 if p.alias_path:
-                    print(f"Alias:          {p.name} → hermes -p {p.name}")
+                    alias_display = p.alias_name or p.name
+                    print(f"Alias:          {alias_display} → hermes -p {p.name}")
                 break
         print()
         return
@@ -8699,7 +8699,7 @@ def cmd_profile(args):
             name = p.name
             model = (p.model or "—")[:26]
             gw = "running" if p.gateway_running else "stopped"
-            alias = p.name if p.alias_path else "—"
+            alias = (p.alias_name or p.name) if p.alias_path else "—"
             if p.is_default:
                 alias = "—"
             if p.distribution_name:
@@ -8847,6 +8847,8 @@ def cmd_profile(args):
             _check_gateway_running,
             _count_skills,
             _read_distribution_meta,
+            _get_wrapper_dir,
+            find_alias_for_profile,
         )
 
         if not profile_exists(name):
@@ -8857,7 +8859,7 @@ def cmd_profile(args):
         gw = _check_gateway_running(profile_dir)
         skills = _count_skills(profile_dir)
         dist_name, dist_version, dist_source = _read_distribution_meta(profile_dir)
-        wrapper = _get_wrapper_dir() / name
+        alias_name = find_alias_for_profile(name)
 
         print(f"\nProfile: {name}")
         print(f"Path:    {profile_dir}")
@@ -8876,8 +8878,10 @@ def cmd_profile(args):
             if dist_source:
                 print(f"Installed from: {dist_source}")
             print(f"  (run `hermes profile info {name}` for full manifest)")
-        if wrapper.exists():
-            print(f"Alias:   {wrapper}")
+        if alias_name:
+            is_windows = sys.platform == "win32"
+            wrapper = _get_wrapper_dir() / (f"{alias_name}.bat" if is_windows else alias_name)
+            print(f"Alias:   {alias_name} → hermes -p {name}  ({wrapper})")
         print()
 
     elif action == "alias":
@@ -8903,11 +8907,10 @@ def cmd_profile(args):
             if collision:
                 print(f"Error: {collision}")
                 sys.exit(1)
-            wrapper_path = create_wrapper_script(alias_name)
+            wrapper_path = create_wrapper_script(
+                alias_name, target=name if custom_name else None
+            )
             if wrapper_path:
-                # If custom name, write the profile name into the wrapper
-                if custom_name:
-                    wrapper_path.write_text(f'#!/bin/sh\nexec hermes -p {name} "$@"\n')
                 print(f"✓ Alias created: {wrapper_path}")
                 if not _is_wrapper_dir_in_path():
                     print(f"⚠ {_get_wrapper_dir()} is not in your PATH.")
