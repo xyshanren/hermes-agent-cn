@@ -147,6 +147,57 @@ _IMAGE_TOKEN_ESTIMATE = 1600
 _IMAGE_CHAR_EQUIVALENT = _IMAGE_TOKEN_ESTIMATE * _CHARS_PER_TOKEN
 _SUMMARY_FAILURE_COOLDOWN_SECONDS = 600
 
+# Hard ceiling for the deterministic summary-failure handoff.  The fallback is
+# only meant to preserve continuity anchors from the dropped window, not to
+# become another unbounded transcript copy after the LLM summarizer failed.
+_FALLBACK_SUMMARY_MAX_CHARS = 8_000
+_FALLBACK_TURN_MAX_CHARS = 700
+_AUTO_FOCUS_MAX_TURNS = 3
+_AUTO_FOCUS_TURN_MAX_CHARS = 260
+_AUTO_FOCUS_MAX_CHARS = 700
+# Keep a short run of recent messages verbatim even when the token budget is
+# already exhausted.  The public ``protect_last_n`` default is intentionally
+# high for small/light tails, but using all 20 as a hard floor here would bring
+# back the old large-tool-output case where nothing can be compacted.
+_MAX_TAIL_MESSAGE_FLOOR = 8
+
+
+_PATH_MENTION_RE = re.compile(r"(?:/|~/?|[A-Za-z]:\\)[^\s`'\")\]}<>]+")
+
+# MEDIA delivery directives must not reach the summarizer — if one leaks into
+# the summary, the downstream model may re-emit it as an active directive on
+# the next turn, triggering bogus attachment sends (#14665).
+_MEDIA_DIRECTIVE_RE = re.compile(r"MEDIA:\S+")
+
+
+def _dedupe_append(items: list[str], value: str, *, limit: int) -> None:
+    value = value.strip()
+    if value and value not in items and len(items) < limit:
+        items.append(value)
+
+
+def _extract_tool_call_name_and_args(tool_call: Any) -> tuple[str, str]:
+    """Return a best-effort ``(name, arguments)`` pair for dict/object tool calls."""
+    if isinstance(tool_call, dict):
+        fn = tool_call.get("function") or {}
+        return str(fn.get("name") or "unknown"), str(fn.get("arguments") or "")
+
+    fn = getattr(tool_call, "function", None)
+    if fn is None:
+        return "unknown", ""
+    return str(getattr(fn, "name", None) or "unknown"), str(getattr(fn, "arguments", None) or "")
+
+
+def _extract_tool_call_id(tool_call: Any) -> str:
+    if isinstance(tool_call, dict):
+        return str(tool_call.get("id") or "")
+    return str(getattr(tool_call, "id", "") or "")
+
+
+def _collect_path_mentions(text: str, relevant_files: list[str], *, limit: int = 12) -> None:
+    for match in _PATH_MENTION_RE.findall(text):
+        _dedupe_append(relevant_files, match.rstrip(".,:;"), limit=limit)
+
 
 def _content_length_for_budget(raw_content: Any) -> int:
     """Return the effective char-length of a message's content for token budgeting.
@@ -1545,11 +1596,12 @@ The user has requested that this compaction PRIORITISE preserving all informatio
         derived from ``summary_target_ratio * context_length``, so it
         scales automatically with the model's context window.
 
-        Token budget is the primary criterion.  A hard minimum of 3 messages
-        is always protected, but the budget is allowed to exceed by up to
-        1.5x to avoid cutting inside an oversized message (tool output, file
-        read, etc.).  If even the minimum 3 messages exceed 1.5x the budget
-        the cut is placed right after the head so compression still runs.
+        Token budget is the primary criterion.  A bounded message-count floor
+        keeps a short run of recent turns verbatim even when the budget is
+        exhausted, but the budget is allowed to exceed by up to 1.5x to avoid
+        cutting inside an oversized message (tool output, file read, etc.). If
+        even that floor exceeds 1.5x the budget, the cut is placed right after
+        the head so compression still runs.
 
         Never cuts inside a tool_call/result group.  Always ensures the most
         recent user message is in the tail (see ``_ensure_last_user_message_in_tail``).
@@ -1557,8 +1609,19 @@ The user has requested that this compaction PRIORITISE preserving all informatio
         if token_budget is None:
             token_budget = self.tail_token_budget
         n = len(messages)
-        # Hard minimum: always keep at least 3 messages in the tail
-        min_tail = min(3, n - head_end - 1) if n - head_end > 1 else 0
+        # Hard minimum: always keep a bounded recent-message floor in the tail.
+        # ``protect_last_n`` remains a minimum up to the cap; the cap avoids
+        # preserving a whole run of bulky tool outputs on every compaction.
+        available_tail = max(0, n - head_end - 1)
+        min_tail_floor = max(3, min(self.protect_last_n, _MAX_TAIL_MESSAGE_FLOOR))
+        # Leave at least two non-head messages available to summarize on short
+        # transcripts; otherwise compression can replace a tiny middle with a
+        # summary and save no messages at all.
+        compressible_tail_cap = max(3, available_tail - 2)
+        min_tail = (
+            min(min_tail_floor, compressible_tail_cap, available_tail)
+            if available_tail > 1 else 0
+        )
         soft_ceiling = int(token_budget * 1.5)
         accumulated = 0
         cut_idx = n  # start from beyond the end
