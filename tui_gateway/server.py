@@ -1874,7 +1874,52 @@ def _apply_model_switch(sid: str, session: dict, raw_input: str) -> dict:
         }
     if persist_global:
         _persist_model_switch(result)
-    return {"value": result.new_model, "warning": result.warning_message or ""}
+    return {
+        "value": result.new_model,
+        "warning": result.warning_message or "",
+        "confirm_required": False,
+    }
+
+
+def _sync_agent_model_with_config(sid: str, session: dict) -> None:
+    """Adopt a config.yaml model change at turn start, like gateways do per
+    message. Sessions pinned with /model keep their choice; a failed switch
+    keeps the current model and never blocks the turn.
+    """
+    agent = session.get("agent")
+    if agent is None or session.get("model_override"):
+        return
+    target = _config_model_target()
+    if not target[0]:
+        return
+    seen = session.get("config_model_seen")
+    # Record first so a broken config gets one attempt per edit, not per turn.
+    session["config_model_seen"] = target
+    if target == seen:
+        return
+    model, provider = target
+    # Already running the configured model (branched/resumed session before
+    # its first sync, or a config revert after a failed switch): adopt the
+    # baseline without a redundant switch.
+    if model == getattr(agent, "model", "") and (
+        not provider or provider == getattr(agent, "provider", "")
+    ):
+        return
+    raw = f"{model} --provider {provider}" if provider else model
+    try:
+        _apply_model_switch(
+            sid,
+            session,
+            raw,
+            confirm_expensive_model=True,
+            pin_session_override=False,
+        )
+    except Exception as e:
+        _emit(
+            "error",
+            sid,
+            {"message": f"Could not switch to configured model {model}: {e}"},
+        )
 
 
 def _compress_session_history(
