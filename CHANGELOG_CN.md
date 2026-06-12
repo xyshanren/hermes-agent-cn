@@ -76,9 +76,33 @@
 |---|---|---|
 | 手动冲突 EXCLUDE_MANUAL | ~200 个 | 延后到 v0.15.0+cn.6 |
 | 大文件跳过 EXCLUDE_LARGE | ~30 个 | 延后（需人工看 diff）|
-| i18n 升级（C8 19 commit）| 待启动 | Week 4 任务 |
+| i18n 升级 | n/a | 2026-06-12 重新评估：**#38241 (`4a1907bd1`) 只改 `apps/desktop/`，CN 不维护 desktop——改 PR 无收益，文档化为 EXCLUDE** |
 | T3 修复（C3 2 commit）| 待启动 | Week 4 任务 |
 | 减法 PR（T1 16 文件 + T4 22 目录）| 待启动 | Week 4 任务 |
+
+---
+
+## v0.15.0+cn.6 入口（2026-06-12 起） — 3 项 hard work
+
+**工作分支**：`upstream-merge-cn6-2026-06`（从 `cn` @ `8ffd33a40` 切出，2026-06-12 16:53）
+
+### 重新评估 i18n 升级（v0.15.0+cn.5 → v0.15.0+cn.6）
+
+**结论**：#38241 (`4a1907bd1 feat(desktop): add i18n with Simplified Chinese (zh-Hans) support`) **不值得 cherry-pick**。
+
+**理由**：
+1. **PR 范围**：36 文件 / +4226 -1378 行，**只改 `apps/desktop/`**（上游 Electron 桌面 app）
+2. **CN 减法 T3 = desktop 类**：CN 主张"另一条路"——不用 Electron 桌面，**pick 了不测试不部署不维护**
+3. **0 价值**：v0.15.0+cn.5 已通过 `EXCLUDE_LARGE`（或 timeout/skip）跳过 #38241，**没破坏 CN 主线**——**显式 EXCLUDE 比静默跳过更安全**
+
+**EXCLUDE 文档化位置**：
+- `cherry_pick_v6+` 脚本 EXCLUDE_LARGE 列表（v7 已有 23 个，加 #38241 后 24 个）
+- `AGENTS.md`（如必要）—— v0.15.0+cn.6 内部 commit 时补
+
+**净影响**：v0.15.0+cn.6 backlog 从 4 项变为 3 项，**全部为真硬骨头**：
+- **B** T3 修复（anthropic_adapter/bedrock_adapter 2 commit）— 低风险，~30 min
+- **C** 减法 PR（T1 16 文件 + T4 22 plugin 目录）— 低风险，~1-2 hour
+- **D** ~200 manual 冲突（cli.py 663KB + run_agent.py 800+）— 高风险，~1 周
 
 ### 升级指引
 
