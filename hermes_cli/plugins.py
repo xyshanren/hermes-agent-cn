@@ -800,6 +800,7 @@ class PluginManager:
             self._plugins.clear()
             self._hooks.clear()
             self._plugin_tool_names.clear()
+            self._plugin_platform_names.clear()
             self._cli_commands.clear()
             self._plugin_commands.clear()
             self._plugin_skills.clear()
