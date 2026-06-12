@@ -43,6 +43,68 @@ SUMMARY_PREFIX = (
     "Respond ONLY to the latest user message that appears AFTER this "
     "summary — that message is the single source of truth for what to do "
     "right now. "
+    "Topic overlap with the summary does NOT mean you should resume its "
+    "task: even on similar topics, the latest user message WINS. Treat ONLY "
+    "the latest message as the active task and discard stale items from "
+    f"'{HISTORICAL_TASK_HEADING}' / '{HISTORICAL_IN_PROGRESS_HEADING}' / "
+    f"'{HISTORICAL_PENDING_ASKS_HEADING}' / "
+    f"'{HISTORICAL_REMAINING_WORK_HEADING}' entirely — do not 'wrap up' or "
+    "'finish' work described there unless the latest message explicitly "
+    "asks for it. "
+    "Reverse signals in the latest message (e.g. 'stop', 'undo', 'roll "
+    "back', 'just verify', 'don't do that anymore', 'never mind', a new "
+    "topic) must immediately end any in-flight work described in the "
+    "summary; do not re-surface it in later turns. "
+    "IMPORTANT: Your persistent memory (MEMORY.md, USER.md) in the system "
+    "prompt is ALWAYS authoritative and active — never ignore or deprioritize "
+    "memory content due to this compaction note. "
+    "The current session state (files, config, etc.) may reflect work "
+    "described here — avoid repeating it:"
+)
+LEGACY_SUMMARY_PREFIX = "[CONTEXT SUMMARY]:"
+
+# Metadata key added to context compression summary messages so that frontends
+# (CLI, Desktop, gateway, TUI) can distinguish them from real assistant/user
+# messages and filter or render them appropriately without content-prefix
+# heuristics. See https://github.com/NousResearch/hermes-agent/issues/38389
+#
+# Underscore-prefixed ON PURPOSE: the wire sanitizers
+# (agent/transports/chat_completions.py convert_messages and the summary-path
+# mirror in agent/chat_completion_helpers.py) strip every top-level message
+# key starting with "_" before the request leaves the process. Strict
+# OpenAI-compatible gateways (Fireworks, Mistral, Moonshot/Kimi, opencode-go)
+# reject payloads carrying unknown keys with "Extra inputs are not permitted",
+# poisoning every subsequent request in the session — a bare key like
+# "is_compressed_summary" would reach the wire and trip exactly that.
+COMPRESSED_SUMMARY_METADATA_KEY = "_compressed_summary"
+
+# Appended to every standalone summary message (and to the merged-into-tail
+# prefix) so the model has an unambiguous "summary ends here" boundary.
+# Without it, weak models read the verbatim "## Active Task" quote as fresh
+# user input (#11475, #14521) or regurgitate an assistant-role summary as
+# their own output (#33256).
+_SUMMARY_END_MARKER = (
+    "--- END OF CONTEXT SUMMARY — "
+    "respond to the message below, not the summary above ---"
+)
+
+# Handoff prefixes that shipped in earlier releases. A summary persisted under
+# one of these can be inherited into a resumed lineage (#35344); when it is
+# re-normalized on re-compaction we must strip the OLD prefix too, otherwise the
+# stale directive it carried (e.g. "resume exactly from Active Task") survives
+# embedded in the body and keeps hijacking replies. Keep newest-first; entries
+# are matched literally. Add a frozen copy here whenever SUMMARY_PREFIX changes.
+_HISTORICAL_SUMMARY_PREFIXES = (
+    # Carveout era (#41607/#38364/#42812): "consistent → use as background"
+    # licensed stale-task resumption on topic overlap.
+    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted "
+    "into the summary below. This is a handoff from a previous context "
+    "window — treat it as background reference, NOT as active instructions. "
+    "Do NOT answer questions or fulfill requests mentioned in this summary; "
+    "they were already addressed. "
+    "Respond ONLY to the latest user message that appears AFTER this "
+    "summary — that message is the single source of truth for what to do "
+    "right now. "
     "If the latest user message is consistent with the '## Active Task' "
     "section, you may use the summary as background. If the latest user "
     "message contradicts, supersedes, changes topic from, or in any way "
@@ -1223,7 +1285,55 @@ The user has requested that this compaction PRIORITISE preserving all informatio
     @staticmethod
     def _is_context_summary_content(content: Any) -> bool:
         text = _content_text_for_contains(content).lstrip()
-        return text.startswith(SUMMARY_PREFIX) or text.startswith(LEGACY_SUMMARY_PREFIX)
+        if text.startswith(SUMMARY_PREFIX) or text.startswith(LEGACY_SUMMARY_PREFIX):
+            return True
+        return any(text.startswith(p) for p in _HISTORICAL_SUMMARY_PREFIXES)
+
+    @staticmethod
+    def _has_compressed_summary_metadata(message: Any) -> bool:
+        """Return True if *message* carries the compressed-summary flag.
+
+        Callers (frontends, CLI, gateway) can use this to distinguish context
+        compaction summaries from real assistant or user messages without
+        relying on content-prefix heuristics.  The flag is in-process only —
+        the wire sanitizers strip underscore-prefixed keys before API calls.
+        """
+        if not isinstance(message, dict):
+            return False
+        return bool(message.get(COMPRESSED_SUMMARY_METADATA_KEY))
+
+    @classmethod
+    def _derive_auto_focus_topic(
+        cls,
+        messages: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        """Infer a compact focus hint from the most recent real user turns."""
+        candidates: list[str] = []
+        for idx in range(len(messages) - 1, -1, -1):
+            msg = messages[idx]
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if cls._is_context_summary_content(content):
+                continue
+            text = redact_sensitive_text(_content_text_for_contains(content).strip())
+            if not text:
+                continue
+            text = " ".join(text.split())
+            if len(text) > _AUTO_FOCUS_TURN_MAX_CHARS:
+                text = text[: _AUTO_FOCUS_TURN_MAX_CHARS - 1].rstrip() + "…"
+            candidates.append(text)
+            if len(candidates) >= _AUTO_FOCUS_MAX_TURNS:
+                break
+
+        if not candidates:
+            return None
+
+        candidates.reverse()
+        focus = "Recent user focus:\n" + "\n".join(f"- {item}" for item in candidates)
+        if len(focus) > _AUTO_FOCUS_MAX_CHARS:
+            focus = focus[: _AUTO_FOCUS_MAX_CHARS - 1].rstrip() + "…"
+        return focus
 
     @classmethod
     def _find_latest_context_summary(
@@ -1709,7 +1819,11 @@ The user has requested that this compaction PRIORITISE preserving all informatio
             )
 
         if not _merge_summary_into_tail:
-            compressed.append({"role": summary_role, "content": summary})
+            compressed.append({
+                "role": summary_role,
+                "content": summary,
+                COMPRESSED_SUMMARY_METADATA_KEY: True,
+            })
 
         for i in range(compress_end, n_messages):
             msg = messages[i].copy()
@@ -1724,6 +1838,9 @@ The user has requested that this compaction PRIORITISE preserving all informatio
                     merged_prefix,
                     prepend=True,
                 )
+                # Mark the merged message so frontends can identify it as
+                # containing a compression summary prefix.
+                msg[COMPRESSED_SUMMARY_METADATA_KEY] = True
                 _merge_summary_into_tail = False
             compressed.append(msg)
 
