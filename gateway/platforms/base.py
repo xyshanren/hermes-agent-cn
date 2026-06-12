@@ -1094,6 +1094,21 @@ class MessageEvent:
         return args
 
 
+@dataclass
+class TextDebounceState:
+    """Per-session busy-text debounce state.
+
+    Tracks the debounced MessageEvent, the asyncio.Task that will eventually
+    deliver it, and the monotonic timestamps that bound the debounce window.
+    Added in v0.15.0+cn.5 cherry-pick (commit 1bed4e8ee follow-up) to make
+    streaming reply edit semantics in test_run_progress_topics compilable.
+    """
+    event: MessageEvent
+    task: asyncio.Task | None
+    first_ts: float
+    last_ts: float
+
+
 _PLAINTEXT_GATEWAY_RESTART_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^(?:please\s+)?restart\s+(?:the\s+)?gateway[.!?\s]*$", re.IGNORECASE),
     re.compile(r"^(?:please\s+)?restart\s+(?:the\s+)?hermes\s+gateway[.!?\s]*$", re.IGNORECASE),

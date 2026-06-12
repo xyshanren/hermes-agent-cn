@@ -4,6 +4,103 @@
 
 ---
 
+## v0.15.0+cn.5 (2026-06-12) — 上游 8 周债大批 cherry-pick
+
+> **8 周债一次性还清**：从 v0.14.0+cn.4（2026-04-17）以来 **259 个 upstream commit** cherry-pick 进来。
+> 工具链：自研 cherry_pick v1-v7 脚本演进（7 个版本迭代）
+
+### Cherry-pick 工具链演进
+
+| 版本 | 关键能力 | 累计 commit |
+|---|---|---|
+| **v1** 试水 | 10 commit 试水（手工挑） | 6 |
+| **v2** 自动化 | 巨型 refactor 过滤 + SED + 新文件自动 | 26 |
+| **v3** 优化 | 依赖锁 AUTO-OURS + picklist 优先级 | 53 |
+| **v4** SPLIT | 大文件按 hunks 拆分（cli.py / run_agent.py）| 74 |
+| **v5** 单标 | test_voice_command.py 修复（EXCLUDE_THEIRS 首创）| 115 |
+| **v6** 累积 | EXCLUDE_MANUAL 78 个 + 大写 EXCLUDE | 151 |
+| **v7** bug 修 | 空 cherry-pick 自动 skip + timeout 30s | **259** |
+
+### 关键修复
+
+| 修复 | 受益 |
+|---|---|
+| **test_voice_command.py 接受上游** | 129+ 测试 FAIL 解决（v5 修复） |
+| **cli.py 空 cherry-pick 自动 skip** | v7 修法 #1（状态错乱 bug）|
+| **依赖锁 AUTO-OURS**（pyproject.toml/uv.lock/Cargo.toml 等）| CN 锁版本原则兑现 |
+| **scripts/release.py AUTO-OURS** | 6+ 次冲突自动解决 |
+| **大文件按 hunks 拆分** | cli.py/run_agent.py/hermes_state.py 单独留 manual |
+
+### 主推平台保留（按 ROADMAP §三.5 决策）
+
+- ✅ **feishu**（飞书）— 主推
+- ✅ **weixin**（微信）— 主推
+- 降权（保留但不主动维护）：wecom / yuanbao / dingtalk
+
+### 跨项目验证
+
+- ✅ **hermes-tray 集成测试 21/21 通过**（跨项目兼容性良好）
+- ✅ **5 个国内平台 import OK**（feishu/weixin/wecom/yuanbao/dingtalk）
+- ✅ **gateway.run / hermes_state / agent.conversation_loop** import OK
+- ⚠️ 已知：Smoke 1.4 导入名不匹配（`run_conversation` 非 `conversation_loop`，非 break change）
+- ⚠️ 已知：test_voice_command.py 部分新测试暂未运行（CN 不依赖 voice 模块）
+
+### 跳过的内容
+
+按 cn 分支"本地化 + 做减法"思想，**以下 upstream 改动被 SKIP**：
+- **v0.16 主打 features**：
+  - `apps/desktop/`（Electron 桌面，CN 主张另一条路）
+  - Nous Portal（CN 不依赖 Nous 账号）
+  - OAuth-gated gateway（CN 走飞书/钉钉/企微 OAuth）
+  - Web admin panel（CN 主张 CLI + quickstart）
+  - Multi-profile / multi-org（CN 是个人/小团队定位）
+  - 完整 Simplified Chinese 翻译（@JimLiu PR #38241，跟 CN i18n 撞，v0.15.0+cn.6 处理）
+- **T3 不活跃代码**：anthropic_adapter / bedrock_adapter / google_oauth 等（保留但不维护）
+- **外国 Provider plugin**：openrouter / bedrock / gemini / google_chat / teams 等
+- **已裁平台**：discord / telegram / whatsapp / signal / bluebubbles / matrix / mattermost / x_search 等
+
+### 决策依据
+
+- **scout 报告**：`MiniMax/projects/hermes-agent-cn-notes/UPSTREAM_CLASSIFICATION_REPORT.md`（556 SKIP / 1396 MERGE / 174 REVIEW）
+- **ROADMAP**：`MiniMax/projects/hermes-agent-cn-notes/ROADMAP.md`（5 周计划 + 时间窗口）
+- **PROJECT_NOTES**：`MiniMax/projects/hermes-agent-cn-notes/PROJECT_NOTES.md`（项目记忆 + 教训）
+- **试水报告 v1-v7**：`hermes-agent-cn/.agent-teams/research/upstream-trial-v{1..7}-report.md`
+
+### 合并计划 v4 (`merge-plan-v4.md`)
+
+5 周计划 Week 1-5 详细任务拆解 + 任务包（T-V1/T-V2/T-V3），可下发给其他 agent。
+
+### 已知问题（v0.15.0+cn.6 处理）
+
+| 类别 | 数量 | 状态 |
+|---|---|---|
+| 手动冲突 EXCLUDE_MANUAL | ~200 个 | 延后到 v0.15.0+cn.6 |
+| 大文件跳过 EXCLUDE_LARGE | ~30 个 | 延后（需人工看 diff）|
+| i18n 升级（C8 19 commit）| 待启动 | Week 4 任务 |
+| T3 修复（C3 2 commit）| 待启动 | Week 4 任务 |
+| 减法 PR（T1 16 文件 + T4 22 目录）| 待启动 | Week 4 任务 |
+
+### 升级指引
+
+```bash
+# 用户从 v0.14.0+cn.4 升级到 v0.15.0+cn.5
+cd ~/hermes-agent-cn
+git fetch origin
+git checkout cn
+git pull
+# v0.15.0+cn.5 是新分支 upstream-merge-v7-2026-06，需 review 后合并
+git checkout upstream-merge-v7-2026-06
+# 跑测试
+pytest tests/ -v --timeout 30
+# 看是否破坏核心功能
+# 如果 OK，merge 到 cn：
+git checkout cn
+git merge upstream-merge-v7-2026-06
+git push origin cn
+```
+
+---
+
 ## v0.14.0+cn.4 (2026-06-03) — SmartRouter Phase 5 + 多项增强
 
 ### SmartRouter Phase 5

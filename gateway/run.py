@@ -18216,7 +18216,7 @@ class GatewayRunner:
                     _content_delivered,
                 )
                 response["already_sent"] = True
-            elif not _is_empty_sentinel and _transformed and _sc is not None:
+            elif not _is_empty_sentinel and response.get("response_transformed", False) and _sc is not None:
                 # Plugin hooks transformed the response after streaming — edit the
                 # existing streamed message instead of sending a duplicate.
                 _sc_msg_id = _sc.message_id
