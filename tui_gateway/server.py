@@ -1300,6 +1300,31 @@ def _resolve_model() -> str:
     return "anthropic/claude-sonnet-4"
 
 
+def _config_model_target() -> tuple[str, str]:
+    """(model, provider) currently selected by config (env as fallback).
+
+    config.yaml wins over HERMES_MODEL / HERMES_INFERENCE_MODEL here, the
+    reverse of `_resolve_model()`'s startup order. Those env vars are a
+    provision-time seed (hosted instances set HERMES_INFERENCE_MODEL in the
+    container env); if they outranked config.yaml, the per-turn sync would
+    stay pinned to the seed forever and dashboard/CLI model changes would
+    never reach an open chat — the exact bug this sync exists to fix.
+    """
+    cfg_model = _load_cfg().get("model")
+    model = ""
+    provider = ""
+    if isinstance(cfg_model, dict):
+        model = str(cfg_model.get("default", "") or "").strip()
+        provider = str(cfg_model.get("provider") or "").strip()
+        if provider.lower() == "auto":
+            provider = ""
+    elif isinstance(cfg_model, str):
+        model = cfg_model.strip()
+    if not model:
+        model = _resolve_model()
+    return model, provider
+
+
 def _resolve_startup_runtime() -> tuple[str, str | None]:
     model = _resolve_model()
     explicit_provider = os.environ.get("HERMES_TUI_PROVIDER", "").strip()
