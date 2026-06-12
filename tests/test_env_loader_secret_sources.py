@@ -61,6 +61,7 @@ def test_format_secret_source_suffix_generic_label_for_future_sources():
     )
 
 
+@pytest.mark.skip(reason="v0.15.0+cn.6 T1a: bitwarden module removed; this end-to-end test no longer applies")
 def test_apply_external_secret_sources_records_bitwarden_origin(tmp_path, monkeypatch):
     """End-to-end: when ``apply_bitwarden_secrets`` returns applied keys,
     they end up in ``_SECRET_SOURCES`` so the UI can label them."""

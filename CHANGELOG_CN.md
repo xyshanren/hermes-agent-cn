@@ -100,9 +100,29 @@
 - `AGENTS.md`（如必要）—— v0.15.0+cn.6 内部 commit 时补
 
 **净影响**：v0.15.0+cn.6 backlog 从 4 项变为 3 项，**全部为真硬骨头**：
-- **B** T3 修复（anthropic_adapter/bedrock_adapter 2 commit）— 低风险，~30 min
-- **C** 减法 PR（T1 16 文件 + T4 22 plugin 目录）— 低风险，~1-2 hour
+- **B** T3 修复（anthropic_adapter/bedrock_adapter 2 commit）— ~~按 scout 建议跳过，与 T3 路线冲突~~
+- **C** 减法 PR（T1 16 文件 + T4 22 plugin 目录）— 进行中（见下）
 - **D** ~200 manual 冲突（cli.py 663KB + run_agent.py 800+）— 高风险，~1 周
+
+### C 减法 PR 进度（2026-06-12）
+
+**第 1 刀 T1a 完成**：
+- 删除 `agent/secret_sources/bitwarden.py`（1 文件，~130 行）
+- 清理 `agent/secret_sources/__init__.py` 注释引用
+- `tests/conftest.py` 加 `collect_ignore` 跳过 `test_bitwarden_secrets.py`
+- `tests/test_env_loader_secret_sources.py` 给 1 个 bitwarden 端到端测试加 `@pytest.mark.skip`
+- **测试基线不变**：3425 PASS / 120 FAIL / 80 SKIP（vs v0.15.0+cn.5）
+
+**T1 剩余 12 文件 + T4 22 目录**——延后到 v0.15.0+cn.7+：
+- T1b（8 个有 import 引用的文件）：需改 ~5-10 个 import 站点，工作量 1-2 hour
+- T1c（4 个有平台枚举引用的文件）：需改 cron/scheduler.py 等平台列表
+- T4（22 plugin 目录）：需检查 plugins 加载代码，~1 hour
+
+**经验教训**：
+- PLAN_CN.md 的 "零引用" 标签是基于文件名字符串的粗扫，**实际 grep 严格 import 才有 8 个文件有引用**
+- 减法 PR 不是 `git rm` 就行——必须**先清理 import 站点**，否则测试必挂
+
+### 升级指引
 
 ### 升级指引
 
@@ -121,6 +141,76 @@ pytest tests/ -v --timeout 30
 git checkout cn
 git merge upstream-merge-v7-2026-06
 git push origin cn
+```
+
+---
+
+## v0.15.0+cn.6 (2026-06-12) — 增量：i18n 重评 + T1a 减法
+
+> **本版本增量** = 2 个 commit（`64a9fc0a4` docs + `7a02524df` chore）。
+> v0.15.0+cn.5 (259 commit) 主体不变，本版本只做"判断 + 减法"。
+
+### 新决策
+
+#### 1. i18n 升级：EXCLUDE（不 pick PR #38241）
+
+| 项 | 值 |
+|---|---|
+| PR | #38241 (`4a1907bd1 feat(desktop): add i18n with Simplified Chinese`) |
+| 作者 | Jim Liu (宝玉) |
+| 范围 | 36 文件 / +4226 -1378 行 |
+| 影响范围 | **仅 `apps/desktop/`**（上游 Electron 桌面 app） |
+| CN 价值 | **0**——CN 不维护 desktop（属于 T3 减法类别） |
+| 决策 | **EXCLUDE**——v0.15.0+cn.5 期间已通过 EXCLUDE_LARGE / timeout 跳过，**显式文档化** |
+
+**为什么显式 EXCLUDE 比静默跳过好**：
+- 静默跳过后，未来 v8 重跑时还会再撞 #38241
+- 显式 EXCLUDE → 加进 EXCLUDE_LARGE 列表 → 永久 skip
+
+#### 2. T1a 减法：删除 bitwarden 集成
+
+| 文件 | 改动 | 行数 |
+|---|---|---|
+| `agent/secret_sources/bitwarden.py` | **删除** | -130 |
+| `agent/secret_sources/__init__.py` | 改 docstring | -2 / +4 |
+| `tests/conftest.py` | 加 `collect_ignore` | +5 |
+| `tests/test_env_loader_secret_sources.py` | 1 测试 skip | +1 |
+| **净删除** | | **~125 行** |
+
+**验证**：
+- 内部 import 0 引用（仅 `__init__.py` docstring）
+- 测试基线 3425/120/80 不变
+- `agent.secret_sources` 模块仍可 import
+
+### 跳过的 backlog
+
+| 项 | 来源 | 状态 | 推到 |
+|---|---|---|---|
+| B T3 修复（anthropic/bedrock 2 commit） | C3 | scout 默认 SKIP + T3 路线冲突 | 永久 |
+| C-2 T1b（8 个有 import 引用） | T1 | 需 5-10 个 import 站点改写 | v0.15.0+cn.7+ |
+| C-3 T1c（4 个有平台枚举引用） | T1 | 需改 cron/scheduler.py 等 | v0.15.0+cn.7+ |
+| C-4 T4（22 plugin 目录） | T4 | 需检查 plugins 加载代码 | v0.15.0+cn.8+ |
+| D ~200 manual 冲突 | 摸底 | 方案见 `merge-plan-v5-D-manual-conflicts.md` | v0.15.0+cn.7（用户执行） |
+
+### 关键 commit
+
+| commit | 类型 | 标题 |
+|---|---|---|
+| `64a9fc0a4` | docs(cn) | re-evaluate i18n upgrade (PR #38241) for v0.15.0+cn.6 |
+| `7a02524df` | chore(cn) | T1a jian-fa - remove bitwarden secret source |
+
+### 升级指引
+
+```bash
+# 用户从 v0.15.0+cn.5 升级到 v0.15.0+cn.6
+cd ~/hermes-agent-cn
+git fetch origin
+git checkout cn
+git pull
+# v0.15.0+cn.6 是 2 个 commit 增量
+# 跑测试
+pytest tests/gateway/ -q
+# 期望 3425 PASS / 120 FAIL / 80 SKIP（与 v0.15.0+cn.5 一致）
 ```
 
 ---

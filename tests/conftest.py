@@ -837,6 +837,9 @@ def _live_system_guard(request, monkeypatch):
 # (acp, docker profile, mcp integration). Cherry-picking them produces
 # collection errors with ImportError or AttributeError. Skip collection.
 # Tracked in v0.15.0+cn.6 backlog.
+import os
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+
 collect_ignore_glob = [
     "test_cn_simple.py",                # standalone runner script
     "acp/test_*.py",                    # ACP desktop protocol — CN doesn't maintain
@@ -863,4 +866,11 @@ collect_ignore_glob = [
     "tools/test_send_message_missing_platforms.py",
     "tools/test_send_message_tool.py",
     "tools/test_spotify_client.py",
+]
+
+# Tests removed alongside their modules (T1 jian-fa in v0.15.0+cn.6+).
+# collect_ignore_glob uses fnmatch against basenames, but tests in tests/
+# root sometimes need explicit absolute paths. Provide both safety nets.
+collect_ignore = [
+    os.path.join(_ROOT, "test_bitwarden_secrets.py"),  # bitwarden removed in v0.15.0+cn.6 T1a
 ]

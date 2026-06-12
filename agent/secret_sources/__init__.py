@@ -5,9 +5,6 @@ credentials at process startup, _after_ ~/.hermes/.env has loaded.  By
 default sources are non-destructive: they only set values for env vars
 that aren't already present, so .env and shell exports continue to win.
 
-Currently shipped:
-
-  - ``bitwarden`` — Bitwarden Secrets Manager (`bws` CLI).  See
-    ``agent.secret_sources.bitwarden`` for the integration and
-    ``hermes_cli.secrets_cli`` for the user-facing setup wizard.
+(v0.15.0+cn.6: Bitwarden integration removed — see CHANGELOG_CN.md
+T1a jian-fa.  No remaining secret source modules.)
 """
