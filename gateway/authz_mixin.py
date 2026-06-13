@@ -83,6 +83,89 @@ class GatewayAuthorizationMixin:
                 policy = extra.get("dm_policy")
         return str(policy or "").strip().lower()
 
+    def _adapter_group_policy(self, platform: Optional[Platform]) -> str:
+        """Best-effort read of an own-policy adapter's effective group policy.
+
+        Mirror of ``_adapter_dm_policy`` for group / forum / channel traffic:
+        returns the lowercased ``group_policy`` (``"open"`` / ``"allowlist"`` /
+        ``"disabled"``) for *platform*, or ``""`` when unknown. Prefers the live
+        adapter's resolved ``_group_policy`` and falls back to ``config.extra``
+        for bare runners built without a live adapter.
+
+        Used by ``_is_user_authorized`` to decide whether an own-policy adapter
+        restricted group senders to a configured allowlist (trustworthy) or
+        forwarded the whole channel under ``group_policy: open`` (not
+        authorization).
+        """
+        if not platform:
+            return ""
+        adapters = getattr(self, "adapters", None) or {}
+        adapter = adapters.get(platform)
+        policy = getattr(adapter, "_group_policy", None) if adapter is not None else None
+        if policy is None:
+            config = getattr(self, "config", None)
+            platform_cfg = (
+                config.platforms.get(platform)
+                if config is not None and hasattr(config, "platforms")
+                else None
+            )
+            extra = getattr(platform_cfg, "extra", None) if platform_cfg else None
+            if isinstance(extra, dict):
+                policy = extra.get("group_policy")
+        return str(policy or "").strip().lower()
+
+    def _adapter_group_has_sender_allowlist(
+        self,
+        platform: Optional[Platform],
+        chat_id: Optional[str],
+    ) -> bool:
+        """Whether a per-group sender allowlist gated this group message.
+
+        WeCom supports ``groups.<group_id>.allow_from`` on top of the top-level
+        ``group_policy``. A group may be open at the chat level while still
+        restricting which senders inside that group can invoke Hermes. If such a
+        message reached the gateway, the adapter already checked that sender
+        allowlist, so it is a trustworthy intake decision rather than the
+        fail-open ``group_policy: open`` case.
+        """
+        if not platform or not chat_id:
+            return False
+        adapters = getattr(self, "adapters", None) or {}
+        adapter = adapters.get(platform)
+        groups = getattr(adapter, "_groups", None) if adapter is not None else None
+        if groups is None:
+            config = getattr(self, "config", None)
+            platform_cfg = (
+                config.platforms.get(platform)
+                if config is not None and hasattr(config, "platforms")
+                else None
+            )
+            extra = getattr(platform_cfg, "extra", None) if platform_cfg else None
+            if isinstance(extra, dict):
+                groups = extra.get("groups")
+        if not isinstance(groups, dict):
+            return False
+
+        chat_id_str = str(chat_id)
+        group_cfg = groups.get(chat_id_str)
+        if not isinstance(group_cfg, dict):
+            lowered = chat_id_str.lower()
+            for key, value in groups.items():
+                if isinstance(key, str) and key.lower() == lowered and isinstance(value, dict):
+                    group_cfg = value
+                    break
+        if not isinstance(group_cfg, dict):
+            group_cfg = groups.get("*")
+        if not isinstance(group_cfg, dict):
+            return False
+
+        sender_allow = group_cfg.get("allow_from") or group_cfg.get("allowFrom")
+        if isinstance(sender_allow, str):
+            return bool(sender_allow.strip())
+        if isinstance(sender_allow, (list, tuple, set)):
+            return any(str(item).strip() for item in sender_allow)
+        return False
+
     def _is_user_authorized(self, source: SessionSource) -> bool:
         """
         Check if a user is authorized to use the bot.
@@ -237,19 +320,16 @@ class GatewayAuthorizationMixin:
             # env-only default-deny below, which would silently break
             # `dm_policy: open` and config-only allowlists. (#34515)
             if self._adapter_enforces_own_access_policy(source.platform):
-                # Exception: `dm_policy: pairing` does NOT authorize at intake.
-                # The adapter forwards the DM precisely so the gateway can run
-                # its pairing handshake (issue a code, consult the pairing
-                # store). The pairing-store approval check above already ran and
-                # returned False for this sender, so blanket-trusting the
-                # adapter here would silently turn pairing mode into open
-                # access. Fall through to default-deny so the unpaired sender is
-                # offered a pairing code instead. (Pairing is DM-only; group
-                # traffic keeps the adapter-trust path.)
-                if not (
-                    source.chat_type == "dm"
-                    and self._adapter_dm_policy(source.platform) == "pairing"
-                ):
+                if source.chat_type in {"group", "forum", "channel"}:
+                    effective_policy = self._adapter_group_policy(source.platform)
+                    if self._adapter_group_has_sender_allowlist(
+                        source.platform,
+                        source.chat_id,
+                    ):
+                        return True
+                else:
+                    effective_policy = self._adapter_dm_policy(source.platform)
+                if effective_policy == "allowlist":
                     return True
             # No allowlists configured -- check global allow-all flag
             return os.getenv("GATEWAY_ALLOW_ALL_USERS", "").lower() in {"true", "1", "yes"}
