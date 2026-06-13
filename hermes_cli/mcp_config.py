@@ -176,7 +176,7 @@ def _probe_single_server(
         _ensure_mcp_loop,
         _run_on_mcp_loop,
         _connect_server,
-        _stop_mcp_loop,
+        _stop_mcp_loop_if_idle,
     )
 
     _ensure_mcp_loop()
@@ -202,7 +202,7 @@ def _probe_single_server(
     except BaseException as exc:
         raise _unwrap_exception_group(exc) from None
     finally:
-        _stop_mcp_loop()
+        _stop_mcp_loop_if_idle()
 
     return tools_found
 
