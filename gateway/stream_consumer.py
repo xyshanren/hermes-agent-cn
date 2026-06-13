@@ -1257,6 +1257,51 @@ class GatewayStreamConsumer:
                         self._flood_strikes = 0
                         return True
                     else:
+                        if (
+                            finalize
+                            and is_turn_final
+                            and self.cfg.cursor
+                            and self._last_sent_text.endswith(self.cfg.cursor)
+                            and self._visible_prefix() == text
+                        ):
+                            # The final clean-up edit failed, but the complete
+                            # answer is already visible from the last streaming
+                            # frame (usually with only the cursor still stuck on
+                            # screen).  Mark the content delivered so the
+                            # gateway suppresses its normal full final send;
+                            # otherwise users see the same long answer twice
+                            # when Telegram/Discord rate-limit this cosmetic
+                            # final edit (#36965, #25349).
+                            self._final_content_delivered = True
+                        raw_response = getattr(result, "raw_response", None)
+                        if isinstance(raw_response, dict) and raw_response.get("partial_overflow"):
+                            # Telegram edited/sent one or more overflow chunks,
+                            # but not the complete response.  Preserve the
+                            # visible prefix so the got_done fallback sends the
+                            # missing tail instead of marking a clipped topic
+                            # reply as final delivery.
+                            self._message_id = str(
+                                raw_response.get("last_message_id")
+                                or result.message_id
+                                or self._message_id
+                            )
+                            delivered_prefix = raw_response.get("delivered_prefix")
+                            if isinstance(delivered_prefix, str) and delivered_prefix:
+                                self._last_sent_text = delivered_prefix
+                                self._fallback_prefix = delivered_prefix
+                                self._fallback_preserve_partial_messages = text.startswith(
+                                    delivered_prefix
+                                )
+                            else:
+                                self._fallback_prefix = self._visible_prefix()
+                                self._fallback_preserve_partial_messages = False
+                            self._fallback_final_send = True
+                            self._edit_supported = False
+                            self._already_sent = True
+                            if getattr(result, "continuation_message_ids", ()):
+                                self._notify_new_message()
+                            return False
+
                         # Edit failed.  If this looks like flood control / rate
                         # limiting, use adaptive backoff: double the edit interval
                         # and retry on the next cycle.  Only permanently disable
