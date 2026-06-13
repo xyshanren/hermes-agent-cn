@@ -5781,7 +5781,11 @@ class AIAgent:
         return messages
 
     @staticmethod
-    def _is_thinking_only_assistant(msg: Dict[str, Any]) -> bool:
+    def _is_thinking_only_assistant(
+        msg: Dict[str, Any],
+        *,
+        drop_codex_reasoning_items: bool = True,
+    ) -> bool:
         """Return True if ``msg`` is an assistant turn whose only payload is reasoning.
 
         "Thinking-only" means the model emitted reasoning (``reasoning`` or
@@ -5832,92 +5836,30 @@ class AIAgent:
         rd = msg.get("reasoning_details")
         if isinstance(rd, list) and rd:
             return True
+        # Codex Responses stores encrypted reasoning state under a separate
+        # assistant-message key. Treat only real reasoning items as
+        # thinking-only; empty/junk lists should fall through to the generic
+        # empty-turn handling instead of being dropped here.
+        codex_items = msg.get("codex_reasoning_items")
+        if drop_codex_reasoning_items and isinstance(codex_items, list):
+            return any(
+                isinstance(item, dict) and item.get("type") == "reasoning"
+                for item in codex_items
+            )
         return False
 
     @staticmethod
     def _drop_thinking_only_and_merge_users(
         messages: List[Dict[str, Any]],
+        *,
+        drop_codex_reasoning_items: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Drop thinking-only assistant turns; merge any adjacent user messages left behind.
-
-        Runs on the per-call ``api_messages`` copy only. The stored
-        conversation history (``self.messages``) is never mutated, so the
-        user still sees the thinking block in the CLI/gateway transcript and
-        session persistence keeps the full trace. Only the wire copy sent to
-        the provider is cleaned.
-
-        Why drop-and-merge rather than inject stub text:
-        - Fabricating ``"."`` / ``"(continued)"`` text lies in the history
-          and makes future turns see model output the model didn't emit.
-        - Dropping the turn preserves honesty; merging adjacent user messages
-          preserves the provider's role-alternation invariant.
-        - This is the pattern used by Claude Code's ``normalizeMessagesForAPI``
-          (filterOrphanedThinkingOnlyMessages + mergeAdjacentUserMessages).
-        """
-        if not messages:
-            return messages
-
-        # Pass 1: drop thinking-only assistant turns.
-        kept = [m for m in messages if not AIAgent._is_thinking_only_assistant(m)]
-        dropped = len(messages) - len(kept)
-        if dropped == 0:
-            return messages
-
-        # Pass 2: merge any newly-adjacent user messages.
-        merged: List[Dict[str, Any]] = []
-        merges = 0
-        for m in kept:
-            prev = merged[-1] if merged else None
-            if (
-                prev is not None
-                and prev.get("role") == "user"
-                and m.get("role") == "user"
-            ):
-                prev_content = prev.get("content", "")
-                cur_content = m.get("content", "")
-                # Work on a copy of ``prev`` so the caller's input dicts are
-                # never mutated. ``_sanitize_api_messages`` upstream already
-                # hands us per-call copies, but staying pure here means we
-                # can be called safely from anywhere (tests, other loops).
-                prev_copy = dict(prev)
-                # Only string-content merge is meaningful for role-alternation
-                # purposes. If either side is a list (multimodal), append as a
-                # separate block rather than collapsing.
-                if isinstance(prev_content, str) and isinstance(cur_content, str):
-                    sep = "\n\n" if prev_content and cur_content else ""
-                    prev_copy["content"] = prev_content + sep + cur_content
-                elif isinstance(prev_content, list) and isinstance(cur_content, list):
-                    prev_copy["content"] = list(prev_content) + list(cur_content)
-                elif isinstance(prev_content, list) and isinstance(cur_content, str):
-                    if cur_content:
-                        prev_copy["content"] = list(prev_content) + [
-                            {"type": "text", "text": cur_content}
-                        ]
-                    else:
-                        prev_copy["content"] = list(prev_content)
-                elif isinstance(prev_content, str) and isinstance(cur_content, list):
-                    new_blocks: List[Dict[str, Any]] = []
-                    if prev_content:
-                        new_blocks.append({"type": "text", "text": prev_content})
-                    new_blocks.extend(cur_content)
-                    prev_copy["content"] = new_blocks
-                else:
-                    # Unknown content shape — fall back to appending separately
-                    # (violates alternation, but safer than raising in a hot path).
-                    merged.append(m)
-                    continue
-                merged[-1] = prev_copy
-                merges += 1
-            else:
-                merged.append(m)
-
-        logger.debug(
-            "Pre-call sanitizer: dropped %d thinking-only assistant turn(s), "
-            "merged %d adjacent user message(s)",
-            dropped,
-            merges,
+        """Forwarder — see ``agent.agent_runtime_helpers.drop_thinking_only_and_merge_users``."""
+        from agent.agent_runtime_helpers import drop_thinking_only_and_merge_users
+        return drop_thinking_only_and_merge_users(
+            messages,
+            drop_codex_reasoning_items=drop_codex_reasoning_items,
         )
-        return merged
 
     @staticmethod
     def _cap_delegate_task_calls(tool_calls: list) -> list:
