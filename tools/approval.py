@@ -151,6 +151,11 @@ _SENSITIVE_WRITE_TARGET = (
     rf'{_SHELL_RC_FILES}|'
     rf'{_CREDENTIAL_FILES})'
 )
+_USER_SENSITIVE_WRITE_TARGET = (
+    rf'(?:{_SSH_SENSITIVE_PATH}|'
+    rf'{_SHELL_RC_FILES}|'
+    rf'{_CREDENTIAL_FILES})'
+)
 _PROJECT_SENSITIVE_WRITE_TARGET = rf'(?:{_PROJECT_ENV_PATH}|{_PROJECT_CONFIG_PATH})'
 _COMMAND_TAIL = r'(?:\s*(?:&&|\|\||;).*)?$'
 
@@ -384,6 +389,27 @@ DANGEROUS_PATTERNS = [
     # /private/etc/ mirror).
     (rf'\b(cp|mv|install)\b.*\s{_SYSTEM_CONFIG_PATH}', "copy/move file into system config path"),
     (rf'\b(cp|mv|install)\b.*\s["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config file"),
+    # cp/mv/install OVERWRITING a sensitive credential/SSH/shell-rc/Hermes file.
+    # The tee/redirection patterns above already gate _SENSITIVE_WRITE_TARGET
+    # (~/.ssh/*, ~/.netrc/.pgpass/.npmrc/.pypirc, shell rc files,
+    # ~/.hermes/config.yaml/.env), but cp/mv/install was only paired for /etc and
+    # project-relative env/config — so `cp evil ~/.ssh/authorized_keys` (key
+    # implant), `cp creds ~/.netrc`, and `cp evil ~/.bashrc` (login-time command
+    # injection) slipped through with auto-approve. Same unpaired-door rationale
+    # as #14639 / the sed-tee-redirect pairing on these targets.
+    # Anchor the sensitive target to the command tail so this fires on the
+    # DESTINATION (last arg) only — `cp evil ~/.ssh/authorized_keys` is gated,
+    # but reading OUT of a sensitive path (`cp ~/.ssh/config /tmp/x`) stays safe.
+    # The trailing `[^\s"\']*` consumes the rest of the destination filename
+    # (e.g. `authorized_keys` after the `~/.ssh/` fragment).
+    (rf'\b(cp|mv|install)\b.*\s["\']?{_SENSITIVE_WRITE_TARGET}[^\s"\']*["\']?{_COMMAND_TAIL}', "copy/move file into sensitive credential/SSH/shell-rc path"),
+    # In-place edits mutate the target file directly, bypassing redirection,
+    # tee, and copy/move/install coverage. Gate the same user-controlled
+    # startup/credential files so `sed -i ... ~/.bashrc` and `perl -i ...
+    # ~/.ssh/authorized_keys` cannot silently plant login commands or keys.
+    (rf'\bsed\s+-[^\s]*i.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*', "in-place edit of sensitive credential/SSH/shell-rc path"),
+    (rf'\bsed\s+--in-place\b.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*', "in-place edit of sensitive credential/SSH/shell-rc path (long flag)"),
+    (rf'\b(?:perl|ruby)\b.*(?:^|\s)-[^\s]*i\b.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*', "in-place edit of sensitive credential/SSH/shell-rc path (perl/ruby)"),
     (rf'\bsed\s+-[^\s]*i.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config"),
     (rf'\bsed\s+--in-place\b.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config (long flag)"),
     # Script execution via heredoc — bypasses the -e/-c flag patterns above.
