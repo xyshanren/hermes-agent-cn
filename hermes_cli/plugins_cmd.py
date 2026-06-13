@@ -113,13 +113,33 @@ def _sanitize_plugin_name(name: str, plugins_dir: Path) -> Path:
     return target
 
 
-def _resolve_git_url(identifier: str) -> str:
-    """Turn an identifier into a cloneable Git URL.
+_GITHUB_BROWSER_SEGMENTS = {
+    "actions",
+    "blob",
+    "commit",
+    "commits",
+    "issues",
+    "pull",
+    "pulls",
+    "releases",
+    "tree",
+    "wiki",
+}
+
+
+def _resolve_git_url(identifier: str) -> tuple[str, Optional[str]]:
+    """Turn an identifier into a cloneable Git URL and optional subdirectory.
+
+    Returns ``(git_url, subdir)`` where ``subdir`` is the path within the
+    cloned repository that contains the plugin (``None`` when the plugin lives
+    at the repo root).
 
     Accepted formats:
     - Full URL: https://github.com/owner/repo.git
     - Full URL: git@github.com:owner/repo.git
     - Full URL: ssh://git@github.com/owner/repo.git
+    - Browser URL: https://github.com/owner/repo/tree/main/path
+      →  (https://github.com/owner/repo.git, "path")
     - Shorthand: owner/repo  →  https://github.com/owner/repo.git
 
     NOTE: ``http://`` and ``file://`` schemes are accepted but will trigger a
@@ -127,7 +147,29 @@ def _resolve_git_url(identifier: str) -> str:
     """
     # Already a URL
     if identifier.startswith(("https://", "http://", "git@", "ssh://", "file://")):
-        return identifier
+        if identifier.startswith("https://github.com/"):
+            path = identifier[len("https://github.com/") :]
+            path = path.split("?", 1)[0].split("#", 1)[0].strip("/")
+            parts = path.split("/")
+            if len(parts) >= 3 and all(parts[:2]) and parts[2] in _GITHUB_BROWSER_SEGMENTS:
+                repo = parts[1].removesuffix(".git")
+                subdir = None
+                if parts[2] == "tree" and len(parts) >= 5:
+                    subdir = "/".join(p for p in parts[4:] if p).strip("/") or None
+                return f"https://github.com/{parts[0]}/{repo}.git", subdir
+
+        # Explicit ``#subdir`` fragment — unambiguous for any scheme.
+        if "#" in identifier:
+            git_url, _, frag = identifier.partition("#")
+            return git_url, (frag.strip("/") or None)
+        # Natural ``.git/`` boundary (GitHub-style URLs).
+        marker = ".git/"
+        idx = identifier.find(marker)
+        if idx != -1:
+            git_url = identifier[: idx + len(".git")]
+            subdir = identifier[idx + len(marker) :].strip("/")
+            return git_url, (subdir or None)
+        return identifier, None
 
     # owner/repo shorthand
     parts = identifier.strip("/").split("/")

@@ -96,9 +96,144 @@ class TestResolveGitUrl:
         with pytest.raises(ValueError, match="Invalid plugin identifier"):
             _resolve_git_url("justoneword")
 
-    def test_invalid_three_parts_raises(self):
-        with pytest.raises(ValueError, match="Invalid plugin identifier"):
-            _resolve_git_url("a/b/c")
+    def test_shorthand_with_subdir(self):
+        url, subdir = _resolve_git_url("owner/repo/my-plugin")
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir == "my-plugin"
+
+    def test_shorthand_with_nested_subdir(self):
+        url, subdir = _resolve_git_url("owner/repo/path/to/plugin")
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir == "path/to/plugin"
+
+    def test_shorthand_with_subdir_trailing_slash(self):
+        url, subdir = _resolve_git_url("owner/repo/my-plugin/")
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir == "my-plugin"
+
+    def test_https_url_with_subdir(self):
+        url, subdir = _resolve_git_url("https://github.com/owner/repo.git/my-plugin")
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir == "my-plugin"
+
+    def test_https_url_with_nested_subdir(self):
+        url, subdir = _resolve_git_url(
+            "https://github.com/owner/repo.git/path/to/plugin"
+        )
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir == "path/to/plugin"
+
+    def test_url_with_fragment_subdir(self):
+        url, subdir = _resolve_git_url("https://github.com/owner/repo.git#my-plugin")
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir == "my-plugin"
+
+    def test_file_url_with_fragment_subdir(self):
+        url, subdir = _resolve_git_url("file:///tmp/repo#path/to/plugin")
+        assert url == "file:///tmp/repo"
+        assert subdir == "path/to/plugin"
+
+    def test_ssh_url_with_fragment_subdir(self):
+        url, subdir = _resolve_git_url("git@github.com:owner/repo.git#sub")
+        assert url == "git@github.com:owner/repo.git"
+        assert subdir == "sub"
+
+    @pytest.mark.parametrize(
+        "identifier",
+        [
+            "https://github.com/owner/repo/tree/main",
+            "https://github.com/owner/repo/blob/main/README.md",
+            "https://github.com/owner/repo/pull/123",
+            "https://github.com/owner/repo/commit/abc123def",
+            "https://github.com/owner/repo/releases/tag/v1.0",
+            "https://github.com/owner/repo/issues/42",
+        ],
+    )
+    def test_github_browser_url_normalized_to_repo(self, identifier):
+        url, subdir = _resolve_git_url(identifier)
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir is None
+
+    @pytest.mark.parametrize(
+        ("identifier", "expected_subdir"),
+        [
+            ("https://github.com/owner/repo/tree/main/plugins/foo", "plugins/foo"),
+            ("https://github.com/owner/repo/tree/feature-branch/plugin", "plugin"),
+            ("https://github.com/owner/repo/tree/main/plugins/foo?plain=1", "plugins/foo"),
+            ("https://github.com/owner/repo.git/tree/main/plugins/foo", "plugins/foo"),
+        ],
+    )
+    def test_github_tree_browser_url_preserves_subdir(self, identifier, expected_subdir):
+        url, subdir = _resolve_git_url(identifier)
+        assert url == "https://github.com/owner/repo.git"
+        assert subdir == expected_subdir
+
+    @pytest.mark.parametrize(
+        "identifier",
+        [
+            "https://github.com/owner/repo",
+            "https://github.com/owner/repo.git",
+            "https://github.com/owner",
+            "https://github.com/owner/repo/branches",
+            "https://github.com/owner//tree/main",
+            "https://gitlab.com/owner/repo/tree/main",
+            "git@github.com:owner/repo.git",
+            "file:///tmp/repo/tree/main",
+        ],
+    )
+    def test_non_browser_urls_passthrough(self, identifier):
+        url, subdir = _resolve_git_url(identifier)
+        assert url == identifier
+        assert subdir is None
+
+
+# ── _resolve_subdir_within ──────────────────────────────────────────────────
+
+
+class TestResolveSubdirWithin:
+    """Subdirectory resolution stays within the clone and rejects traversal."""
+
+    def test_valid_subdir(self, tmp_path):
+        (tmp_path / "my-plugin").mkdir()
+        result = _resolve_subdir_within(tmp_path, "my-plugin")
+        assert result == (tmp_path / "my-plugin").resolve()
+
+    def test_valid_nested_subdir(self, tmp_path):
+        (tmp_path / "a" / "b" / "c").mkdir(parents=True)
+        result = _resolve_subdir_within(tmp_path, "a/b/c")
+        assert result == (tmp_path / "a" / "b" / "c").resolve()
+
+    def test_rejects_dot_dot_escape(self, tmp_path):
+        clone = tmp_path / "clone"
+        clone.mkdir()
+        (tmp_path / "secret").mkdir()
+        with pytest.raises(PluginOperationError, match="escapes the repository"):
+            _resolve_subdir_within(clone, "../secret")
+
+    def test_rejects_absolute_path_escape(self, tmp_path):
+        clone = tmp_path / "clone"
+        clone.mkdir()
+        # An absolute path resolves outside the clone root.
+        with pytest.raises(PluginOperationError, match="escapes the repository"):
+            _resolve_subdir_within(clone, "/etc")
+
+    def test_rejects_symlink_escape(self, tmp_path):
+        clone = tmp_path / "clone"
+        clone.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (clone / "link").symlink_to(outside)
+        with pytest.raises(PluginOperationError, match="escapes the repository"):
+            _resolve_subdir_within(clone, "link")
+
+    def test_rejects_missing_subdir(self, tmp_path):
+        with pytest.raises(PluginOperationError, match="does not exist"):
+            _resolve_subdir_within(tmp_path, "nope")
+
+    def test_rejects_file_not_dir(self, tmp_path):
+        (tmp_path / "afile").write_text("x")
+        with pytest.raises(PluginOperationError, match="not a directory"):
+            _resolve_subdir_within(tmp_path, "afile")
 
 
 # ── _resolve_git_executable ─────────────────────────────────────────────────
