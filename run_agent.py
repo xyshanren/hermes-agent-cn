@@ -5841,7 +5841,7 @@ class AIAgent:
         # thinking-only; empty/junk lists should fall through to the generic
         # empty-turn handling instead of being dropped here.
         codex_items = msg.get("codex_reasoning_items")
-        if drop_codex_reasoning_items and isinstance(codex_items, list):
+        if isinstance(codex_items, list):
             return any(
                 isinstance(item, dict) and item.get("type") == "reasoning"
                 for item in codex_items
