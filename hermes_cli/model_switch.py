@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import List, NamedTuple, Optional
 
 from hermes_cli.providers import (
+    ProviderDef,
     custom_provider_slug,
     determine_api_mode,
     get_label,
@@ -44,6 +45,23 @@ from agent.models_dev import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _bare_custom_provider_def(current_base_url: str) -> Optional[ProviderDef]:
+    """ProviderDef for a direct ``model.provider: custom`` endpoint."""
+    base_url = str(current_base_url or "").strip()
+    if not base_url:
+        return None
+    return ProviderDef(
+        id="custom",
+        name="Custom endpoint",
+        transport="openai_chat",
+        api_key_env_vars=(),
+        base_url=base_url,
+        is_aggregator=False,
+        auth_type="api_key",
+        source="model-config",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -682,6 +700,8 @@ def switch_model(
             user_providers,
             custom_providers,
         )
+        if pdef is None and explicit_provider.strip().lower() == "custom":
+            pdef = _bare_custom_provider_def(current_base_url)
         if pdef is None:
             _switch_err = (
                 f"Unknown provider '{explicit_provider}'. "
@@ -845,6 +865,8 @@ def switch_model(
 
     provider_changed = target_provider != current_provider
     provider_label = get_label(target_provider)
+    if target_provider == "custom" and current_base_url:
+        provider_label = "Custom endpoint"
     if target_provider.startswith("custom:"):
         custom_pdef = resolve_provider_full(
             target_provider,
@@ -860,25 +882,66 @@ def switch_model(
     api_mode = ""
 
     if provider_changed or explicit_provider:
-        try:
-            runtime = resolve_runtime_provider(
-                requested=target_provider,
-                target_model=new_model,
-            )
-            api_key = runtime.get("api_key", "")
-            base_url = runtime.get("base_url", "")
-            api_mode = runtime.get("api_mode", "")
-        except Exception as e:
-            return ModelSwitchResult(
-                success=False,
-                target_provider=target_provider,
-                provider_label=provider_label,
-                is_global=is_global,
-                error_message=(
-                    f"Could not resolve credentials for provider "
-                    f"'{provider_label}': {e}"
-                ),
-            )
+        import os
+        # User-config providers (providers.<name> in config.yaml) carry their
+        # own base_url + transport + key reference. resolve_runtime_provider()
+        # resolves by provider NAME and doesn't know user-config slugs (e.g. a
+        # block named "openai"), so it would re-resolve from scratch and fail
+        # or hop to an aggregator. Use the pdef's endpoint directly instead.
+        _user_pdef = None
+        if explicit_provider and user_providers:
+            from hermes_cli.providers import resolve_user_provider as _ruser
+            _user_pdef = _ruser(explicit_provider.strip().lower(), user_providers)
+            if _user_pdef is None:
+                _user_pdef = _ruser(target_provider, user_providers)
+        if _user_pdef is not None and _user_pdef.base_url:
+            _ucfg = (user_providers or {}).get(explicit_provider.strip().lower()) \
+                or (user_providers or {}).get(target_provider) or {}
+            _ukey = str(_ucfg.get("api_key", "") or "").strip()
+            if _ukey.startswith("${") and _ukey.endswith("}"):
+                _ukey = os.environ.get(_ukey[2:-1], "").strip()
+            if not _ukey:
+                _kenv = str(_ucfg.get("key_env", "") or "").strip()
+                if _kenv:
+                    _ukey = os.environ.get(_kenv, "").strip()
+            try:
+                runtime = resolve_runtime_provider(
+                    requested=target_provider,
+                    explicit_api_key=_ukey or None,
+                    explicit_base_url=_user_pdef.base_url,
+                    target_model=new_model,
+                )
+                api_key = runtime.get("api_key", "") or _ukey
+                base_url = runtime.get("base_url", "") or _user_pdef.base_url
+                api_mode = runtime.get("api_mode", "")
+            except Exception:
+                api_key = _ukey
+                base_url = _user_pdef.base_url
+                api_mode = ""
+        elif target_provider == "custom" and current_base_url:
+            api_key = current_api_key
+            base_url = current_base_url
+            api_mode = determine_api_mode(target_provider, base_url)
+        else:
+            try:
+                runtime = resolve_runtime_provider(
+                    requested=target_provider,
+                    target_model=new_model,
+                )
+                api_key = runtime.get("api_key", "")
+                base_url = runtime.get("base_url", "")
+                api_mode = runtime.get("api_mode", "")
+            except Exception as e:
+                return ModelSwitchResult(
+                    success=False,
+                    target_provider=target_provider,
+                    provider_label=provider_label,
+                    is_global=is_global,
+                    error_message=(
+                        f"Could not resolve credentials for provider "
+                        f"'{provider_label}': {e}"
+                    ),
+                )
     else:
         try:
             runtime = resolve_runtime_provider(
@@ -1595,7 +1658,7 @@ def list_authenticated_providers(
             "name": "Custom endpoint",
             "is_current": True,
             "is_user_defined": True,
-            "models": _models[:max_models] if max_models is not None else _models,
+            "models": _models[:max_models] if max_models else _models,
             "total_models": len(_models),
             "source": "model-config",
             "api_url": str(current_base_url).strip().rstrip("/"),
