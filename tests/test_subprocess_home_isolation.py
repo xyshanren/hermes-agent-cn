@@ -17,6 +17,8 @@ from unittest.mock import patch
 
 import hermes_constants
 
+import hermes_constants
+
 
 
 # ---------------------------------------------------------------------------
