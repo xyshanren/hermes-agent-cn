@@ -828,7 +828,29 @@ def handle_function_call(
                 task_id=task_id,
                 user_task=user_task,
             )
-        duration_ms = int((time.monotonic() - _dispatch_start) * 1000)
+        except Exception:
+            reset_current_observability_context = None
+        try:
+            if function_name == "execute_code":
+                # Prefer the caller-provided list so subagents can't overwrite
+                # the parent's tool set via the process-global.
+                sandbox_enabled = enabled_tools if enabled_tools is not None else _last_resolved_tool_names
+                def _dispatch(next_args: Dict[str, Any]) -> Any:
+                    return registry.dispatch(
+                        function_name, next_args,
+                        task_id=task_id,
+                        session_id=session_id,
+                        enabled_tools=sandbox_enabled,
+                    )
+            else:
+                def _dispatch(next_args: Dict[str, Any]) -> Any:
+                    return registry.dispatch(
+                        function_name, next_args,
+                        task_id=task_id,
+                        session_id=session_id,
+                        user_task=user_task,
+                    )
+            from hermes_cli.middleware import run_tool_execution_middleware
 
         try:
             from hermes_cli.plugins import invoke_hook
