@@ -316,6 +316,11 @@ class WhatsAppAdapter(BasePlatformAdapter):
             return float(default)
         return parsed
 
+        self._text_batch_delay_seconds = float(os.getenv("HERMES_WHATSAPP_TEXT_BATCH_DELAY_SECONDS", "5.0"))
+        self._text_batch_split_delay_seconds = float(os.getenv("HERMES_WHATSAPP_TEXT_BATCH_SPLIT_DELAY_SECONDS", "10.0"))
+        self._pending_text_batches: Dict[str, MessageEvent] = {}
+        self._pending_text_batch_tasks: Dict[str, asyncio.Task] = {}
+
     def _effective_reply_prefix(self) -> str:
         """Return the prefix the Node bridge will add in self-chat mode."""
         whatsapp_mode = os.getenv("WHATSAPP_MODE", "self-chat")

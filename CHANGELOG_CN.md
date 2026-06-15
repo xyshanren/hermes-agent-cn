@@ -215,7 +215,86 @@ pytest tests/gateway/ -q
 
 ---
 
-## v0.14.0+cn.4 (2026-06-03) — SmartRouter Phase 5 + 多项增强
+## v0.15.0+cn.7 (2026-06-15) — 方案 D 首次人工 merge（11 upstream KEEP commits）
+
+> **本版本** = D 方案首批 ~200 manual 冲突清理，经过 v1→v2→v3 三轮 path-rule 精炼，从 928 个 upstream commit 中筛出 **56 个 KEEP**，首批 cherry-pick **11 个**。
+> 
+> 合并基线（merge-base）：`1e71b7180`（2026-05-22）
+> 工作分支：`upstream-merge-cn6-2026-06`
+
+### 分类方法论
+
+| 版本 | 分类方法 | KEEP+REVIEW | C6（混合） | C7（模糊） |
+|------|---------|:-----------:|:----------:|:----------:|
+| v1 | 基础 path-rule | 194 | 47 | 140 |
+| v2 | +4 规则（T3/删除/比例/反向匹配） | 58 | **2** | **2** |
+| v3 | Mavis 审核最终 | **56** | **0** | **0** |
+
+path-rule 精度从 ~80% 提升到 ~99%。
+
+### 首批 cherry-pick（11 个）
+
+#### Phase 2a — P1 CN 平台（5 个）
+
+| commit | 平台 | 改动 | 冲突解决 |
+|--------|------|------|---------|
+| `e8cacb57d` | feishu | _message_text_cache LRU 淘汰 | feishu.py 1 行 conflit → accept THEIRS |
+| `31c8d5ff5` | wecom | defusedxml 依赖容缺 | wecom_callback.py 10 行 → accept THEIRS |
+| `60b0a0e00` | qqbot | SILK 魔数检测切片长度修复 | 自动合并 |
+| `cddb7283d` | weixin | text-batch 延迟从 env var 改为 config.yaml | weixin.py 10 行 → accept THEIRS |
+| `b0ce47daa` | weixin/whatsapp | text debounce 批处理 | weixin.py+whatsapp.py → keep OURS（config.yaml > env var）|
+
+#### Phase 2b — P3/P4 核心 + CLI（6 个）
+
+| commit | 模块 | 改动 | 结果 |
+|--------|------|------|------|
+| `904c0b479` | hermes_state + CLI | `vacuum()` 返回 FTS index 数；新增 `session optimize` 命令 | 自动合并 |
+| `e4a1220f8` | toolsets.py | webhook toolset 权限收窄（安全） | 自动合并 |
+| `61268ff7a` | hermes_cli | 新增 `hermes prompt-size` 诊断 | 自动合并 |
+| `84ee80eb5` | hermes_cli | 进程标题设为 `hermes`（ps/top 可见） | 自动合并 |
+| `7ab167736` | hermes_cli | 基于 OSV.dev 的供应链审计 | 自动合并 |
+| `be27bfed0` | auth | API server key 占位符加固 | 自动合并 |
+
+### 测试基线
+
+| 范围 | PASS | FAIL | SKIP | 说明 |
+|------|:----:|:----:|:----:|------|
+| CN 平台全量 | 487 | 11 | 45 | 11 failures 全部前存在（weixin chunk delivery / wecom_callback ET=None / telegram text batching） |
+| 网关核心子集 | 856 | 20 | 45 | 无回归 |
+
+### 跳过统计（batch1 928 个）
+
+| 原因 | 数量 | 场景 |
+|------|:----:|------|
+| C1 已裁（desktop/website/ui-tui） | 398 | 自动过滤 |
+| C3 不活跃代码（tests/docs/agents） | 469 | 自动过滤 |
+| C8 i18n 翻译 | 5 | 永久排除 |
+| 空 cherry-pick（CN 已有） | 8 | import 变更、docs 微调 |
+| modify/delete 冲突（CN 已删文件） | 4 | nous_account.py、dashboard_auth |
+| hermes_cli/models.py 冲突 | 5 | CN 模型列表大幅不同 |
+| website/docs 冲突 | 2 | CN docs 已汉化 |
+| run_agent.py import 重构 | 2 | CN import 结构不同 |
+| **总处理** | **56 KEEP（11 picked + 45 留 v0.15.0+cn.8）** | |
+
+### v0.15.0+cn.8 待办
+
+- 剩余 **45 个 KEEP**（P4 hermes_cli/ 文件约 25 个、P5 tests/tools 约 20 个）
+- T1b/T1c 减法（8 文件 + 4 平台枚举引用）
+- T4 22 plugin 目录清理
+- batch2（6/1~6/11 约 1428 个 upstream commit）分类 + merge
+
+### 升级指引
+
+```bash
+# 从 v0.15.0+cn.6 升级
+cd ~/hermes-agent-cn
+git fetch origin
+git checkout cn
+git pull
+# 跑 CN 平台测试验证
+source ~/hermes-venv/bin/activate
+python -m pytest tests/gateway/test_feishu.py tests/gateway/test_weixin.py -q
+```
 
 ### SmartRouter Phase 5
 

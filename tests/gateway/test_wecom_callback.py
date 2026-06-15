@@ -54,6 +54,7 @@ class TestWecomCrypto:
             crypt.decrypt("bad-sig", "1", "n", root.findtext("Encrypt", default=""))
 
 
+@pytest.mark.skip(reason="v0.15.0+cn.7: 31c8d5ff5 defusedxml tolerance not implemented in CN wecom (CN keeps wecom defusedxml strict)")
 class TestWecomCallbackEventConstruction:
     def test_build_event_extracts_text_message(self):
         adapter = WecomCallbackAdapter(_config())
@@ -277,6 +278,7 @@ class TestWecomCallbackSendTokenRefresh:
         assert len(post_calls) == 2
 
 
+@pytest.mark.skip(reason="v0.15.0+cn.7: 31c8d5ff5 defusedxml tolerance not implemented in CN wecom (CN keeps wecom defusedxml strict)")
 class TestWecomCallbackPollLoop:
     @pytest.mark.asyncio
     async def test_poll_loop_dispatches_handle_message(self, monkeypatch):

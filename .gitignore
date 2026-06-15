@@ -91,3 +91,7 @@ graphify-out/
 
 # AtomCode local-scope configs (machine-specific)
 .atomcode/local/
+
+# Mavis work directories (research reports, scripts, intermediate)
+.agent-teams/
+.atomcode/
