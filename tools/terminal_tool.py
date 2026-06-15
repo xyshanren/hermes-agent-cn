@@ -988,6 +988,26 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
     return "default"
 
 
+def resolve_task_overrides(task_id: Optional[str]) -> Dict[str, Any]:
+    """Return the env overrides for *task_id*, raw key first then collapsed.
+
+    ``register_task_env_overrides`` writes under the *raw* task/session id, but
+    a CWD-only override collapses (:func:`_resolve_container_task_id`) to the
+    shared ``"default"`` container so per-session surfaces (ACP/gateway/
+    dashboard) don't each spin up their own sandbox. Callers that need the
+    override (terminal command setup, file-tool cwd resolution) must therefore
+    read the raw id FIRST and only fall back to the collapsed container id, or
+    the originating session's override is silently dropped. This is the single
+    source of that lookup so the terminal and file layers can't drift apart.
+    """
+    raw = task_id or "default"
+    return (
+        _task_env_overrides.get(raw)
+        or _task_env_overrides.get(_resolve_container_task_id(raw))
+        or {}
+    )
+
+
 # Configuration from environment variables
 
 def _parse_env_var(name: str, default: str, converter=int, type_label: str = "integer"):
@@ -1721,8 +1741,12 @@ def terminal_tool(
         effective_task_id = _resolve_container_task_id(task_id)
 
         # Check per-task overrides (set by environments like TerminalBench2Env)
-        # before falling back to global env var config
-        overrides = _task_env_overrides.get(effective_task_id, {})
+        # before falling back to global env var config. ``resolve_task_overrides``
+        # reads the raw task id first then the collapsed container id, so a
+        # CWD-only override (which collapses ``effective_task_id`` to
+        # ``"default"``) is still found under its originating session id while
+        # isolation-keyed RL/benchmark overrides keep resolving as before.
+        overrides = resolve_task_overrides(task_id)
         
         # Select image based on env type, with per-task override support
         if env_type == "docker":

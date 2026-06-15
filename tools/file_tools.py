@@ -541,11 +541,11 @@ def _get_file_ops(task_id: str = "default") -> ShellFileOperations:
                 terminal_env = None
 
         if terminal_env is None:
-            from tools.terminal_tool import _task_env_overrides
+            from tools.terminal_tool import resolve_task_overrides
 
             config = _get_env_config()
             env_type = config["env_type"]
-            overrides = _task_env_overrides.get(task_id, {})
+            overrides = resolve_task_overrides(raw_task_id)
 
             if env_type == "docker":
                 image = overrides.get("docker_image") or config["docker_image"]
