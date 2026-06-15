@@ -12420,6 +12420,92 @@ def cmd_dashboard(args):
         remaining = _find_stale_dashboard_pids()
         sys.exit(1 if remaining else 0)
 
+    # ── Unified profile launch routing ────────────────────────────────
+    # The dashboard is a MACHINE management surface: it can read/write any
+    # profile via the per-request ?profile= scoping. Running one dashboard
+    # per profile just fragments that (port collisions, N processes, and a
+    # "which dashboard am I on?" guessing game). So when a NAMED profile
+    # launches the dashboard (`worker dashboard` → HERMES_HOME points into
+    # profiles/), default to the machine dashboard:
+    #   - already running → open the browser at ?profile=<name> and exit
+    #   - not running     → re-exec as the machine dashboard (pinned to the
+    #     default profile so _apply_profile_override can't re-route through
+    #     the sticky active_profile file) with the launching profile
+    #     preselected in the UI's switcher.
+    # `--isolated` opts out and preserves the old per-profile behavior.
+    try:
+        from hermes_cli.profiles import get_active_profile_name
+        _launch_profile = get_active_profile_name()
+    except Exception:
+        _launch_profile = "default"
+
+    if (
+        _launch_profile not in ("default", "custom")
+        and not getattr(args, "isolated", False)
+        and not getattr(args, "open_profile", "")
+        # Desktop pool backends are intentionally per-profile.
+        and os.environ.get("HERMES_DESKTOP") != "1"
+    ):
+        url = f"http://{args.host or '127.0.0.1'}:{args.port}/?profile={_launch_profile}"
+        if _dashboard_listening(args.host, args.port):
+            print(f"Machine dashboard already running on port {args.port}.")
+            print(f"  Managing profile '{_launch_profile}': {url}")
+            if not args.no_open:
+                try:
+                    import webbrowser
+                    webbrowser.open(url)
+                except Exception:
+                    pass
+            sys.exit(0)
+
+        print(
+            f"Routing to the machine dashboard (profile '{_launch_profile}' "
+            f"preselected). Use --isolated for a dedicated per-profile server."
+        )
+        reexec_argv = [
+            sys.executable, "-m", "hermes_cli.main",
+            "-p", "default",
+            "dashboard",
+            "--port", str(args.port),
+            "--host", args.host,
+            "--open-profile", _launch_profile,
+        ]
+        if args.no_open:
+            reexec_argv.append("--no-open")
+        if getattr(args, "insecure", False):
+            reexec_argv.append("--insecure")
+        if getattr(args, "skip_build", False):
+            reexec_argv.append("--skip-build")
+        env = os.environ.copy()
+        # Pin the child to the machine ROOT, not the launching profile's
+        # HERMES_HOME.  We must resolve the root explicitly instead of just
+        # dropping HERMES_HOME: in the Docker layout the machine root is
+        # /opt/data (set via `ENV HERMES_HOME=/opt/data`), so an unset
+        # HERMES_HOME falls back to $HOME/.hermes = /opt/data/.hermes — an
+        # empty, auto-seeded home where the dashboard sees only the default
+        # profile and the install-method stamp is missing (so the Docker
+        # update-button guard also misfires).  get_default_hermes_root()
+        # returns the root for both layouts: ~/.hermes for a standard install
+        # and /opt/data for Docker (it strips a trailing profiles/<name>).
+        # See the support report for the double-mount workaround this avoids.
+        try:
+            from hermes_constants import get_default_hermes_root
+            env["HERMES_HOME"] = str(get_default_hermes_root())
+        except Exception:
+            # Best-effort: if root resolution fails, fall back to the prior
+            # behaviour (drop HERMES_HOME) rather than block the reroute.
+            env.pop("HERMES_HOME", None)
+        # On Windows, os.execvpe() does not truly replace the process — it
+        # spawns via CreateProcess then the parent exits.  Under Python 3.14+
+        # this can crash with STATUS_ACCESS_VIOLATION (0xC0000005) when
+        # re-executing the dashboard for a non-default profile.  Use
+        # subprocess.Popen + sys.exit() on Windows to avoid the crash.
+        if sys.platform == "win32":
+            proc = subprocess.Popen(reexec_argv, env=env)
+            sys.exit(proc.wait())
+        else:
+            os.execvpe(sys.executable, reexec_argv, env)
+
     # Attach gui.log early so dashboard startup/build failures are captured in
     # the same logs directory as every other Hermes surface.
     try:
