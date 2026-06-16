@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 _BUILTIN_DELIVER_PLATFORMS = {
     "telegram", "discord", "slack", "signal", "sms", "whatsapp",
-    "matrix", "mattermost", "homeassistant", "email", "dingtalk",
+    "matrix", "mattermost", "email", "dingtalk",
     "feishu", "wecom", "wecom_callback", "weixin", "bluebubbles",
     "qqbot", "yuanbao",
 }

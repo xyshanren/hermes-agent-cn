@@ -608,8 +608,6 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     for chunk in chunks:
         if platform == Platform.EMAIL:
             result = await _send_email(pconfig.extra, chat_id, chunk)
-        elif platform == Platform.HOMEASSISTANT:
-            result = await _send_homeassistant(pconfig.token, pconfig.extra, chat_id, chunk)
         elif platform == Platform.DINGTALK:
             result = await _send_dingtalk(pconfig.extra, chat_id, chunk)
         elif platform == Platform.FEISHU:

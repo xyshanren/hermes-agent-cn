@@ -113,7 +113,6 @@ class Platform(Enum):
     SIGNAL = "signal"
     MATTERMOST = "mattermost"
     MATRIX = "matrix"
-    HOMEASSISTANT = "homeassistant"
     EMAIL = "email"
     SMS = "sms"
     DINGTALK = "dingtalk"
@@ -1505,17 +1504,6 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
             name=os.getenv("MATRIX_HOME_ROOM_NAME", "Home"),
             thread_id=os.getenv("MATRIX_HOME_ROOM_THREAD_ID") or None,
         )
-
-    # Home Assistant
-    hass_token = os.getenv("HASS_TOKEN")
-    if hass_token:
-        if Platform.HOMEASSISTANT not in config.platforms:
-            config.platforms[Platform.HOMEASSISTANT] = PlatformConfig()
-        config.platforms[Platform.HOMEASSISTANT].enabled = True
-        config.platforms[Platform.HOMEASSISTANT].token = hass_token
-        hass_url = os.getenv("HASS_URL")
-        if hass_url:
-            config.platforms[Platform.HOMEASSISTANT].extra["url"] = hass_url
 
     # Email
     email_addr = os.getenv("EMAIL_ADDRESS")
