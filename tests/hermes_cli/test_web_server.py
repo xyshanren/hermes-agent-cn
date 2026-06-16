@@ -257,6 +257,7 @@ class TestWebServerEndpoints:
         import hermes_constants
         import hermes_cli.web_server as web_server
 
+        monkeypatch.setattr(web_server, "_default_hermes_root_is_opt_data", lambda: False)
         monkeypatch.setattr(hermes_constants, "is_container", lambda: True)
 
         assert web_server._dashboard_local_update_managed_externally() is True

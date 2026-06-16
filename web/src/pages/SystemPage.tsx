@@ -358,6 +358,13 @@ export default function SystemPage() {
   // user-triggered forced re-check from the "Check for updates" button.
   const applyUpdate = async () => {
     setUpdateConfirmOpen(false);
+    if (status?.can_update_hermes === false) {
+      showToast(
+        "Hermes updates are managed outside this dashboard.",
+        "success",
+      );
+      return;
+    }
     try {
       const resp = await api.updateHermes();
       if (!resp.ok && resp.error === "docker_update_unsupported") {
