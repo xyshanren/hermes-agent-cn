@@ -866,6 +866,14 @@ collect_ignore_glob = [
     "tools/test_send_message_missing_platforms.py",
     "tools/test_send_message_tool.py",
     "tools/test_spotify_client.py",
+    # T1b jian-fa — files removed in v0.15.0+cn.8
+    "gateway/test_msgraph_webhook.py",
+    "tools/test_browser_camofox.py",
+    "tools/test_browser_camofox_persistence.py",
+    "gateway/test_homeassistant.py",
+    "tools/test_microsoft_graph_auth.py",
+    "tools/test_microsoft_graph_client.py",
+    "integration/test_ha_integration.py",
 ]
 
 # Tests removed alongside their modules (T1 jian-fa in v0.15.0+cn.6+).
