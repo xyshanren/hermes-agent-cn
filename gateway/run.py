@@ -895,13 +895,6 @@ from gateway.restart import (
 )
 
 
-from gateway.whatsapp_identity import (
-    canonical_whatsapp_identifier as _canonical_whatsapp_identifier,  # noqa: F401
-    expand_whatsapp_aliases as _expand_whatsapp_auth_aliases,
-    normalize_whatsapp_identifier as _normalize_whatsapp_identifier,
-)
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -6386,19 +6379,6 @@ class GatewayRunner:
         check_ids = {user_id}
         if "@" in user_id:
             check_ids.add(user_id.split("@")[0])
-
-        # WhatsApp: resolve phone↔LID aliases from bridge session mapping files
-        if source.platform == Platform.WHATSAPP:
-            normalized_allowed_ids = set()
-            for allowed_id in allowed_ids:
-                normalized_allowed_ids.update(_expand_whatsapp_auth_aliases(allowed_id))
-            if normalized_allowed_ids:
-                allowed_ids = normalized_allowed_ids
-
-            check_ids.update(_expand_whatsapp_auth_aliases(user_id))
-            normalized_user_id = _normalize_whatsapp_identifier(user_id)
-            if normalized_user_id:
-                check_ids.add(normalized_user_id)
 
         return bool(check_ids & allowed_ids)
 

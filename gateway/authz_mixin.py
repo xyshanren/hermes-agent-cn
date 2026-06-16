@@ -22,10 +22,6 @@ from typing import Optional
 
 from gateway.config import Platform
 from gateway.session import SessionSource
-from gateway.whatsapp_identity import (
-    expand_whatsapp_aliases as _expand_whatsapp_auth_aliases,
-    normalize_whatsapp_identifier as _normalize_whatsapp_identifier,
-)
 
 
 class GatewayAuthorizationMixin:
@@ -320,19 +316,6 @@ class GatewayAuthorizationMixin:
         check_ids = {user_id}
         if "@" in user_id:
             check_ids.add(user_id.split("@")[0])
-
-        # WhatsApp: resolve phone↔LID aliases from bridge session mapping files
-        if source.platform == Platform.WHATSAPP:
-            normalized_allowed_ids = set()
-            for allowed_id in allowed_ids:
-                normalized_allowed_ids.update(_expand_whatsapp_auth_aliases(allowed_id))
-            if normalized_allowed_ids:
-                allowed_ids = normalized_allowed_ids
-
-            check_ids.update(_expand_whatsapp_auth_aliases(user_id))
-            normalized_user_id = _normalize_whatsapp_identifier(user_id)
-            if normalized_user_id:
-                check_ids.add(normalized_user_id)
 
         # SimpleX: SIMPLEX_ALLOWED_USERS accepts either the numeric contactId
         # or the contact's display name. The adapter sets user_id=contactId for
