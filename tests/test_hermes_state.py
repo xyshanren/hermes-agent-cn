@@ -160,6 +160,294 @@ class TestSessionLifecycle:
         child = db.get_session("child")
         assert child["parent_session_id"] == "parent"
 
+    def test_db_initializes_without_fts5_module(self, tmp_path, monkeypatch):
+        real_connect = sqlite3.connect
+
+        def connect_without_fts(*args, **kwargs):
+            kwargs["factory"] = _NoFtsConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_fts)
+
+        db = SessionDB(db_path=tmp_path / "state.db")
+        try:
+            assert db._fts_enabled is False
+            # Neither FTS5 virtual table should have been created on a build
+            # that lacks the fts5 module — both init paths must degrade.
+            assert db._fts_table_exists("messages_fts") is False
+            assert db._fts_table_exists("messages_fts_trigram") is False
+
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="user", content="hello from sqlite without fts")
+
+            messages = db.get_messages("s1")
+            assert len(messages) == 1
+            assert messages[0]["content"] == "hello from sqlite without fts"
+            assert db.search_messages("hello") == []
+        finally:
+            db.close()
+
+    def test_existing_fts_tables_do_not_break_without_fts5(
+        self, tmp_path, monkeypatch
+    ):
+        db_path = tmp_path / "state.db"
+        seeded = SessionDB(db_path=db_path)
+        try:
+            seeded.create_session(session_id="s1", source="cli")
+            seeded.append_message("s1", role="user", content="before runtime change")
+        finally:
+            seeded.close()
+
+        real_connect = sqlite3.connect
+
+        def connect_without_fts(*args, **kwargs):
+            kwargs["factory"] = _NoFtsExistingTableConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_fts)
+
+        db = SessionDB(db_path=db_path)
+        try:
+            assert db._fts_enabled is False
+            assert db.get_session("s1") is not None
+            assert len(db.get_messages("s1")) == 1
+
+            # Existing FTS triggers must be disabled too; otherwise this write
+            # would try to insert into an unusable FTS virtual table.
+            db.append_message("s1", role="assistant", content="after runtime change")
+            messages = db.get_messages("s1")
+            assert len(messages) == 2
+            assert messages[1]["content"] == "after runtime change"
+        finally:
+            db.close()
+
+    def test_old_schema_without_fts5_does_not_crash(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(SCHEMA_SQL)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (9,))
+        conn.commit()
+        conn.close()
+
+        real_connect = sqlite3.connect
+
+        def connect_without_fts(*args, **kwargs):
+            kwargs["factory"] = _NoFtsConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_fts)
+
+        db = SessionDB(db_path=db_path)
+        try:
+            assert db._fts_enabled is False
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="user", content="legacy no fts")
+            assert db.get_messages("s1")[0]["content"] == "legacy no fts"
+            assert db.search_messages("legacy") == []
+
+            # Leave the FTS migration version in place so a future FTS-capable
+            # runtime can still rebuild and backfill the indexes.
+            row = db._conn.execute("SELECT version FROM schema_version").fetchone()
+            assert row["version"] == 9
+        finally:
+            db.close()
+
+    def test_fts_runtime_restores_triggers_after_no_fts_open(
+        self, tmp_path, monkeypatch
+    ):
+        db_path = tmp_path / "state.db"
+        seeded = SessionDB(db_path=db_path)
+        try:
+            seeded.create_session(session_id="s1", source="cli")
+            seeded.append_message("s1", role="user", content="first searchable")
+        finally:
+            seeded.close()
+
+        real_connect = sqlite3.connect
+
+        def connect_without_fts(*args, **kwargs):
+            kwargs["factory"] = _NoFtsExistingTableConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_fts)
+        no_fts = SessionDB(db_path=db_path)
+        try:
+            no_fts.append_message("s1", role="assistant", content="not indexed yet")
+        finally:
+            no_fts.close()
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", real_connect)
+        restored = SessionDB(db_path=db_path)
+        try:
+            assert restored._fts_enabled is True
+            restored.append_message("s1", role="assistant", content="indexed again")
+            assert len(restored.search_messages("not indexed yet")) == 1
+            assert len(restored.search_messages("indexed")) == 2
+        finally:
+            restored.close()
+
+    def test_base_fts_rebuilds_after_trigger_repair_without_trigram(
+        self, tmp_path, monkeypatch
+    ):
+        """Trigger repair must rebuild base FTS even when trigram is unavailable."""
+        db_path = tmp_path / "state.db"
+        seeded = SessionDB(db_path=db_path)
+        try:
+            seeded.create_session(session_id="s1", source="cli")
+            seeded.append_message("s1", role="user", content="already indexed")
+            for trigger in (
+                "messages_fts_insert",
+                "messages_fts_delete",
+                "messages_fts_update",
+                "messages_fts_trigram_insert",
+                "messages_fts_trigram_delete",
+                "messages_fts_trigram_update",
+            ):
+                seeded._conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+            seeded._conn.commit()
+            seeded.append_message("s1", role="assistant", content="repair only base needle")
+        finally:
+            seeded.close()
+
+        real_connect = sqlite3.connect
+
+        def connect_without_trigram(*args, **kwargs):
+            kwargs["factory"] = _NoTrigramConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_trigram)
+        restored = SessionDB(db_path=db_path)
+        try:
+            assert restored._fts_enabled is True
+            assert restored._trigram_available is False
+            assert restored._fts_table_exists("messages_fts") is True
+            assert len(restored.search_messages("needle")) == 1
+        finally:
+            restored.close()
+
+    def test_is_fts5_unavailable_error_catches_trigram_tokenizer(self):
+        """Unit test: _is_fts5_unavailable_error matches 'no such tokenizer: trigram'."""
+        fts5_err = sqlite3.OperationalError("no such module: fts5")
+        trigram_err = sqlite3.OperationalError("no such tokenizer: trigram")
+        generic_tokenizer_err = sqlite3.OperationalError("no such tokenizer: foo")
+        unrelated_err = sqlite3.OperationalError("no such table: foo")
+
+        assert SessionDB._is_fts5_unavailable_error(fts5_err) is True
+        assert SessionDB._is_fts5_unavailable_error(trigram_err) is True
+        # Generic tokenizer errors should NOT match — only trigram.
+        assert SessionDB._is_fts5_unavailable_error(generic_tokenizer_err) is False
+        assert SessionDB._is_fts5_unavailable_error(unrelated_err) is False
+
+    def test_is_trigram_unavailable_error(self):
+        """Unit test: _is_trigram_unavailable_error is scoped to trigram."""
+        trigram_err = sqlite3.OperationalError("no such tokenizer: trigram")
+        generic_err = sqlite3.OperationalError("no such tokenizer: foo")
+        fts5_err = sqlite3.OperationalError("no such module: fts5")
+
+        assert SessionDB._is_trigram_unavailable_error(trigram_err) is True
+        assert SessionDB._is_trigram_unavailable_error(generic_err) is False
+        assert SessionDB._is_trigram_unavailable_error(fts5_err) is False
+
+    def test_db_initializes_without_trigram_tokenizer(self, tmp_path, monkeypatch):
+        """SessionDB must not crash when FTS5 exists but trigram tokenizer is missing."""
+        real_connect = sqlite3.connect
+
+        def connect_without_trigram(*args, **kwargs):
+            kwargs["factory"] = _NoTrigramConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_trigram)
+
+        db = SessionDB(db_path=tmp_path / "state.db")
+        try:
+            # Base FTS5 should still work (trigram is optional).
+            assert db._fts_enabled is True
+            assert db._fts_table_exists("messages_fts") is True
+            # Trigram table should NOT have been created.
+            assert db._fts_table_exists("messages_fts_trigram") is False
+
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="user", content="hello without trigram")
+
+            messages = db.get_messages("s1")
+            assert len(messages) == 1
+            assert messages[0]["content"] == "hello without trigram"
+
+            # FTS5 keyword search should still work.
+            assert len(db.search_messages("hello")) == 1
+        finally:
+            db.close()
+
+    def test_v11_migration_backfills_base_fts_when_trigram_unavailable(
+        self, tmp_path, monkeypatch
+    ):
+        """Regression: v11 migration must backfill base FTS even when trigram is unavailable."""
+        real_connect = sqlite3.connect
+        db_path = tmp_path / "state.db"
+
+        # Phase 1: create a DB at schema v10 with messages.
+        db = SessionDB(db_path=db_path)
+        db.create_session(session_id="s1", source="cli")
+        db.append_message("s1", role="user", content="legacy message alpha")
+        db.append_message("s1", role="assistant", content="legacy reply beta")
+        # Force schema version to v10 so migration runs on next open.
+        db._conn.execute(
+            "UPDATE schema_version SET version = 10"
+        )
+        db._conn.commit()
+        db.close()
+
+        # Phase 2: reopen with trigram disabled — migration should still
+        # backfill base FTS and make existing messages searchable.
+        def connect_without_trigram(*args, **kwargs):
+            kwargs["factory"] = _NoTrigramConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_trigram)
+        migrated_db = SessionDB(db_path=db_path)
+        try:
+            assert migrated_db._fts_enabled is True
+            assert migrated_db._trigram_available is False
+            assert migrated_db._fts_table_exists("messages_fts") is True
+            assert migrated_db._fts_table_exists("messages_fts_trigram") is False
+
+            # Existing messages must be searchable via base FTS.
+            results = migrated_db.search_messages("legacy message")
+            assert len(results) == 1
+            # snippet has FTS5 highlight markers (>>>...<<<); check raw content via get_messages
+            msgs = migrated_db.get_messages("s1")
+            assert any("legacy message" in m["content"] for m in msgs)
+        finally:
+            migrated_db.close()
+
+    def test_cjk_search_falls_back_to_like_when_trigram_unavailable(
+        self, tmp_path, monkeypatch
+    ):
+        """Regression: long CJK queries must fall back to LIKE when trigram is missing."""
+        real_connect = sqlite3.connect
+        db_path = tmp_path / "state.db"
+
+        def connect_without_trigram(*args, **kwargs):
+            kwargs["factory"] = _NoTrigramConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_trigram)
+        db = SessionDB(db_path=db_path)
+        try:
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="user", content="大别山项目计划书")
+            db.append_message("s1", role="user", content="长江大桥设计方案")
+
+            # 3+ CJK chars would normally use trigram, but it's unavailable.
+            # Must fall back to LIKE and still return results.
+            results = db.search_messages("大别山")
+            assert len(results) == 1
+            # Note: search_messages strips 'content' from results; use 'snippet'.
+            assert "大别山" in results[0]["snippet"]
+        finally:
+            db.close()
+
 
 # =========================================================================
 # Message storage
