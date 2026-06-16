@@ -279,9 +279,6 @@ class TeamsSummaryWriter:
         if self._graph_client is not None:
             return self._graph_client
 
-        from tools.microsoft_graph_auth import MicrosoftGraphTokenProvider
-        from tools.microsoft_graph_client import MicrosoftGraphClient
-
         access_token = str(config.get("access_token") or "").strip()
         if access_token:
             return MicrosoftGraphClient(
