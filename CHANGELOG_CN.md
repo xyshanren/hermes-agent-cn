@@ -276,12 +276,50 @@ path-rule 精度从 ~80% 提升到 ~99%。
 | run_agent.py import 重构 | 2 | CN import 结构不同 |
 | **总处理** | **56 KEEP（11 picked + 45 留 v0.15.0+cn.8）** | |
 
-### v0.15.0+cn.8 待办
+### v0.15.0+cn.8 — 减法收尾完成（2026-06-16）
 
-- 剩余 **45 个 KEEP**（P4 hermes_cli/ 文件约 25 个、P5 tests/tools 约 20 个）
-- T1b/T1c 减法（8 文件 + 4 平台枚举引用）
-- T4 22 plugin 目录清理
+> **8 commits · 37 files changed · 6,462 行删除 · 0 FAIL 新增**
+> 对应 D 方案 v6：A ✓ + B ✓ + C ✓ → 所有减法目标已完成
+
+#### A — T1b：8 文件 import 站点改写后删除
+
+| Batch | 文件 | commit |
+|-------|------|--------|
+| 1 | `gateway/platforms/msgraph_webhook.py` | `b31a0f8b8` |
+| 2 | `tools/browser_camofox.py` + `browser_camofox_state.py` | `2214230b3` |
+| 3 | `tools/binary_extensions.py`（内联到 2 个文件） | `379602334` |
+| 4 | `tools/microsoft_graph_auth.py` + `microsoft_graph_client.py` + `plugins/teams_pipeline/` | `f49e63095` |
+| 5 | `gateway/whatsapp_identity.py` | `fa72efeb1` |
+| 6 | `gateway/platforms/homeassistant.py`（11 个文件跨文件清理） | `fa3684b35` |
+
+#### B — T1c：平台枚举清理
+
+| 清理项 | 文件 | commit |
+|-------|------|--------|
+| 清理 MSGRAPH_WEBHOOK 枚举 + config 块 | `gateway/config.py`（-58 行） | `d5d671778` |
+
+#### C — T4：22 外国 plugin 目录删除
+
+| 类型 | 目录 | commit |
+|------|------|--------|
+| 16 model-providers | anthropic, arcee, azure-foundry, bedrock, copilot, copilot-acp, gemini, google, gmi, huggingface, kilocode, nous, novita, nvidia, openai-codex, openrouter, xai | `8dcf5bdf3` |
+| 5 platforms | google_chat, irc, line, simplex, teams | `8dcf5bdf3` |
+| CN 保留 | 13 model-providers + 2 platforms（discord, photon） | — |
+
+#### 删减统计
+
+| 类别 | 文件数 | 删除行数 |
+|------|--------|----------|
+| T1a（v0.15.0+cn.6） | 1 | ~130 |
+| T1b | 8 文件 + ~20 修改 | ~5,078 |
+| T1c | 1 文件修改 | 58 |
+| T4 | 5 git-tracked | 1,284 |
+| **合计** | **~35** | **~6,462** |
+
+#### 后续待办
+
 - batch2（6/1~6/11 约 1428 个 upstream commit）分类 + merge
+- v0.15.0+cn.9 启动后评估 D 方案 D 项（run_agent.py 拆分重评）
 
 ### 升级指引
 
