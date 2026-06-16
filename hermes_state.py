@@ -380,29 +380,14 @@ class SessionDB:
             return True
         # SQLite builds that have FTS5 but lack the optional trigram tokenizer
         # raise "no such tokenizer: trigram" instead of "no such module".
-        # Scope to trigram specifically to avoid masking unrelated tokenizer errors.
-        if "no such tokenizer: trigram" in err:
+        if "no such tokenizer" in err:
             return True
         return False
 
     @staticmethod
-    def _is_trigram_unavailable_error(exc: sqlite3.OperationalError) -> bool:
-        """True when only the trigram tokenizer is missing (FTS5 itself works)."""
-        return "no such tokenizer: trigram" in str(exc).lower()
-
-    def _warn_trigram_unavailable(self, exc: sqlite3.OperationalError) -> None:
-        """Log once that the trigram tokenizer is missing; base FTS5 stays enabled."""
-        if getattr(self, "_trigram_unavailable_warned", False):
-            return
-        self._trigram_unavailable_warned = True
-        logger.info(
-            "SQLite trigram tokenizer unavailable for %s "
-            "(requires SQLite >= 3.34, this build is %s); "
-            "CJK/substring search will fall back to LIKE: %s",
-            self.db_path,
-            sqlite3.sqlite_version,
-            exc,
-        )
+    def _is_tokenizer_unavailable_error(exc: sqlite3.OperationalError) -> bool:
+        """Check if the error is about a specific tokenizer (not the whole FTS5 module)."""
+        return "no such tokenizer" in str(exc).lower()
 
     def _warn_fts5_unavailable(self, exc: sqlite3.OperationalError) -> None:
         self._fts_enabled = False
@@ -481,10 +466,7 @@ class SessionDB:
         except sqlite3.OperationalError as exc:
             if self._is_fts5_unavailable_error(exc):
                 # Only disable FTS entirely when the whole module is missing.
-                # A missing trigram tokenizer only affects trigram searches.
-                if self._is_trigram_unavailable_error(exc):
-                    self._warn_trigram_unavailable(exc)
-                else:
+                if not self._is_tokenizer_unavailable_error(exc):
                     self._warn_fts5_unavailable(exc)
                 return None
             if "no such table" in str(exc).lower():
@@ -512,9 +494,7 @@ class SessionDB:
             # Only disable FTS entirely when the whole FTS5 module is missing.
             # A missing specific tokenizer (e.g. trigram) means only that
             # particular table cannot be created — the base FTS5 table is fine.
-            if self._is_trigram_unavailable_error(exc):
-                self._warn_trigram_unavailable(exc)
-            else:
+            if not self._is_tokenizer_unavailable_error(exc):
                 self._warn_fts5_unavailable(exc)
             return False
 
@@ -776,45 +756,89 @@ class SessionDB:
                 # overwrite, so we drop them explicitly and let the post-migration
                 # existence checks (below) recreate them from FTS_SQL /
                 # FTS_TRIGRAM_SQL, then backfill every message row. Fixes #16751.
-                for _trig in (
-                    "messages_fts_insert",
-                    "messages_fts_delete",
-                    "messages_fts_update",
-                    "messages_fts_trigram_insert",
-                    "messages_fts_trigram_delete",
-                    "messages_fts_trigram_update",
-                ):
-                    try:
-                        cursor.execute(f"DROP TRIGGER IF EXISTS {_trig}")
-                    except sqlite3.OperationalError:
-                        pass
-                for _tbl in ("messages_fts", "messages_fts_trigram"):
-                    try:
-                        cursor.execute(f"DROP TABLE IF EXISTS {_tbl}")
-                    except sqlite3.OperationalError:
-                        pass
-                # Recreate virtual tables + triggers with the new inline-mode
-                # schema that indexes content || tool_name || tool_calls.
-                cursor.executescript(FTS_SQL)
-                cursor.executescript(FTS_TRIGRAM_SQL)
-                # Backfill both indexes from every existing messages row.
-                cursor.execute(
-                    "INSERT INTO messages_fts(rowid, content) "
-                    "SELECT id, "
-                    "COALESCE(content, '') || ' ' || "
-                    "COALESCE(tool_name, '') || ' ' || "
-                    "COALESCE(tool_calls, '') "
-                    "FROM messages"
-                )
-                cursor.execute(
-                    "INSERT INTO messages_fts_trigram(rowid, content) "
-                    "SELECT id, "
-                    "COALESCE(content, '') || ' ' || "
-                    "COALESCE(tool_name, '') || ' ' || "
-                    "COALESCE(tool_calls, '') "
-                    "FROM messages"
-                )
-            if current_version < SCHEMA_VERSION:
+                if fts5_available:
+                    self._drop_fts_triggers(cursor)
+                    for _tbl in ("messages_fts", "messages_fts_trigram"):
+                        try:
+                            cursor.execute(f"DROP TABLE IF EXISTS {_tbl}")
+                        except sqlite3.OperationalError as exc:
+                            if not self._is_fts5_unavailable_error(exc):
+                                raise
+                            if not self._is_tokenizer_unavailable_error(exc):
+                                self._warn_fts5_unavailable(exc)
+                            fts5_available = False
+                            fts_migrations_complete = False
+                            break
+
+                    if fts5_available:
+                        # Recreate virtual tables + triggers with the new inline-mode
+                        # schema that indexes content || tool_name || tool_calls.
+                        if (
+                            self._ensure_fts_schema(cursor, "messages_fts", FTS_SQL)
+                            and self._ensure_fts_schema(
+                                cursor, "messages_fts_trigram", FTS_TRIGRAM_SQL
+                            )
+                        ):
+                            # Backfill both indexes from every existing messages row.
+                            cursor.execute(
+                                "INSERT INTO messages_fts(rowid, content) "
+                                "SELECT id, "
+                                "COALESCE(content, '') || ' ' || "
+                                "COALESCE(tool_name, '') || ' ' || "
+                                "COALESCE(tool_calls, '') "
+                                "FROM messages"
+                            )
+                            cursor.execute(
+                                "INSERT INTO messages_fts_trigram(rowid, content) "
+                                "SELECT id, "
+                                "COALESCE(content, '') || ' ' || "
+                                "COALESCE(tool_name, '') || ' ' || "
+                                "COALESCE(tool_calls, '') "
+                                "FROM messages"
+                            )
+                        else:
+                            fts_migrations_complete = False
+                else:
+                    fts_migrations_complete = False
+            if current_version < 12:
+                # v12: messages.active flag for rewind/undo soft-deletion.
+                # The declarative reconcile_columns() above adds the
+                # column itself; this UPDATE is belt-and-suspenders to
+                # ensure any rows that pre-existed the ADD COLUMN have
+                # active=1 rather than NULL.
+                try:
+                    cursor.execute(
+                        "UPDATE messages SET active = 1 WHERE active IS NULL"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+            if current_version < 16:
+                # v16: tag delegate subagent rows so pickers stay clean after
+                # parent deletes that used to orphan them (parent_session_id → NULL).
+                try:
+                    cursor.execute(
+                        "UPDATE sessions SET model_config = json_set("
+                        "COALESCE(model_config, '{}'), '$._delegate_from', parent_session_id) "
+                        f"WHERE parent_session_id IS NOT NULL "
+                        "AND json_extract(COALESCE(model_config, '{}'), '$._delegate_from') IS NULL "
+                        f"AND {_ephemeral_child_sql('sessions')}"
+                    )
+                    cursor.execute(
+                        "UPDATE sessions SET model_config = json_set("
+                        "COALESCE(model_config, '{}'), '$._delegate_from', '__orphaned__') "
+                        "WHERE parent_session_id IS NULL "
+                        "AND json_extract(COALESCE(model_config, '{}'), '$._delegate_from') IS NULL "
+                        "AND json_extract(COALESCE(model_config, '{}'), '$._branched_from') IS NULL "
+                        "AND title IS NULL "
+                        "AND message_count <= 25 "
+                        "AND EXISTS (SELECT 1 FROM messages m "
+                        "            WHERE m.session_id = sessions.id AND m.role = 'tool') "
+                        "AND NOT EXISTS (SELECT 1 FROM sessions ch "
+                        "                WHERE ch.parent_session_id = sessions.id)"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+            if current_version < SCHEMA_VERSION and fts_migrations_complete:
                 cursor.execute(
                     "UPDATE schema_version SET version = ?",
                     (SCHEMA_VERSION,),
