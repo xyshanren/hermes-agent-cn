@@ -701,11 +701,125 @@ def discord_skill_commands_by_category(
     _MAX_GROUPS = 25
     _MAX_PER_GROUP = 25
 
-    trimmed_categories: dict[str, list[tuple[str, str, str]]] = {}
-    group_count = 0
-    for cat in sorted(categories):
-        if group_count >= _MAX_GROUPS:
-            hidden += len(categories[cat])
+
+# ---------------------------------------------------------------------------
+# Slack native slash commands
+# ---------------------------------------------------------------------------
+
+# Slack slash command name constraints: lowercase a-z, 0-9, hyphens,
+# underscores. Max 32 chars. Slack app manifest accepts up to 50 slash
+# commands per app.
+_SLACK_MAX_SLASH_COMMANDS = 50
+_SLACK_NAME_LIMIT = 32
+_SLACK_INVALID_CHARS = re.compile(r"[^a-z0-9_\-]")
+_SLACK_RESERVED_COMMANDS = frozenset({
+    # Built-in Slack slash commands that cannot be registered by apps.
+    # https://slack.com/help/articles/201259356-Use-built-in-slash-commands
+    "me", "status", "away", "dnd", "shrug", "remind", "msg", "feed",
+    "who", "collapse", "expand", "leave", "join", "open", "search",
+    "topic", "mute", "pro", "shortcuts",
+})
+
+# High-value aliases that must survive Slack's 50-slash cap even when the
+# registry fills up. Without this, adding a new canonical command silently
+# clamps off low-priority aliases (they're added in the second pass), so a
+# long-standing native slash like /btw could disappear just because an
+# unrelated command landed. These claim their slots right after /hermes,
+# ahead of both canonical names and the rest of the aliases. Anything not
+# listed here still degrades gracefully (reachable via /hermes <command>).
+# Keep this list TIGHT: every pinned alias takes a slot a canonical command
+# would otherwise get, and the Telegram-parity test fails when a canonical
+# gets clamped ("reset" was unpinned for exactly that — /new keeps its
+# native slot, the alias spelling stays reachable via /hermes reset).
+_SLACK_PRIORITY_ALIASES = ("btw", "bg")
+
+# Canonical commands intentionally NOT given a native Slack slash slot. Slack
+# caps apps at 50 slash commands and the registry is at that ceiling; rather
+# than let the clamp silently drop whichever command sorts last (and break
+# Telegram parity), we explicitly route a few low-frequency commands through
+# ``/hermes <command>`` on Slack only. They remain native on every other
+# surface (CLI, TUI, Telegram, Discord). Keep this list TIGHT and intentional —
+# the telegram-parity test reads it so an entry here is a deliberate
+# "Slack-via-/hermes" decision, not a silent clamp.
+#   - credits: the billing/top-up surface; reached via /hermes credits on Slack.
+#   - debug: the log/report upload surface; reached via /hermes debug on Slack.
+_SLACK_VIA_HERMES_ONLY = frozenset({"credits", "debug"})
+
+
+def _sanitize_slack_name(raw: str) -> str:
+    """Convert a command name to a valid Slack slash command name.
+
+    Slack allows lowercase a-z, digits, hyphens, and underscores. Max 32
+    chars. Uppercase is lowercased; invalid chars are stripped.
+    """
+    name = raw.lower()
+    name = _SLACK_INVALID_CHARS.sub("", name)
+    name = name.strip("-_")
+    return name[:_SLACK_NAME_LIMIT]
+
+
+def slack_native_slashes() -> list[tuple[str, str, str]]:
+    """Return (slash_name, description, usage_hint) triples for Slack.
+
+    Every gateway-available command in ``COMMAND_REGISTRY`` is surfaced as
+    a standalone Slack slash command (e.g. ``/btw``, ``/stop``, ``/model``),
+    matching Discord's and Telegram's model where every command is a
+    first-class slash and not a ``/hermes <verb>`` subcommand.
+
+    Both canonical names and aliases are included so users can type any
+    documented form (e.g. ``/background``, ``/bg``, and ``/btw`` all work).
+    Plugin-registered slash commands are included too.
+
+    Commands whose sanitized name collides with a Slack built-in
+    (e.g. ``/status``, ``/me``, ``/join``) are silently skipped.  Users
+    can still reach them via ``/hermes <command>``.
+
+    Results are clamped to Slack's 50-command limit with duplicate-name
+    avoidance. ``/hermes`` is always reserved as the first entry so the
+    legacy ``/hermes <subcommand>`` form keeps working for anything that
+    gets dropped by the clamp or for free-form questions.
+    """
+    overrides = _resolve_config_gates()
+    entries: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+
+    # Reserve /hermes as the catch-all top-level command.
+    entries.append(("hermes", "Talk to Hermes or run a subcommand", "[subcommand] [args]"))
+    seen.add("hermes")
+
+    def _add(name: str, desc: str, hint: str) -> None:
+        slack_name = _sanitize_slack_name(name)
+        if not slack_name or slack_name in seen:
+            return
+        if slack_name in _SLACK_RESERVED_COMMANDS:
+            return
+        if slack_name in _SLACK_VIA_HERMES_ONLY:
+            # Intentionally Slack-via-/hermes only (see _SLACK_VIA_HERMES_ONLY).
+            return
+        if len(entries) >= _SLACK_MAX_SLASH_COMMANDS:
+            return
+        # Slack description cap is 2000 chars; keep it short.
+        entries.append((slack_name, desc[:140], hint[:100]))
+        seen.add(slack_name)
+
+    # Priority pass: pin high-value aliases (e.g. /btw, /bg, /reset) ahead of
+    # everything except /hermes, so a new canonical command can never silently
+    # clamp them off the 50-slash cap. Each alias borrows its parent command's
+    # description and hint.
+    _alias_to_cmd = {
+        alias: cmd
+        for cmd in COMMAND_REGISTRY
+        if _is_gateway_available(cmd, overrides)
+        for alias in cmd.aliases
+    }
+    for alias in _SLACK_PRIORITY_ALIASES:
+        cmd = _alias_to_cmd.get(alias)
+        if cmd is not None:
+            _add(alias, f"Alias for /{cmd.name} — {cmd.description}", cmd.args_hint or "")
+
+    # First pass: canonical names (so they win slots if we hit the cap).
+    for cmd in COMMAND_REGISTRY:
+        if not _is_gateway_available(cmd, overrides):
             continue
         entries = categories[cat][:_MAX_PER_GROUP]
         hidden += max(0, len(categories[cat]) - _MAX_PER_GROUP)
