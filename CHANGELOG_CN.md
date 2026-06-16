@@ -281,6 +281,8 @@ path-rule 精度从 ~80% 提升到 ~99%。
 > **8 commits · 37 files changed · 6,462 行删除 · 0 FAIL 新增**
 > 对应 D 方案 v6：A ✓ + B ✓ + C ✓ → 所有减法目标已完成
 
+> **2026-06-16 修正（v0.15.0+cn.9）**：T4 commit 实际只删除 2 个目录（copilot-acp + teams），非初版所述的"22 目录"——其他 20 个外国 plugin 已被上游 + 历史 cherry-pick 处理。详见 §C 修正说明。
+
 #### A — T1b：8 文件 import 站点改写后删除
 
 | Batch | 文件 | commit |
@@ -298,13 +300,20 @@ path-rule 精度从 ~80% 提升到 ~99%。
 |-------|------|--------|
 | 清理 MSGRAPH_WEBHOOK 枚举 + config 块 | `gateway/config.py`（-58 行） | `d5d671778` |
 
-#### C — T4：22 外国 plugin 目录删除
+#### C — T4：外国 plugin 目录清理
+
+**T4 commit 实际删除**（核对 commit `8dcf5bdf3` 后）：
+- 1 个 model-provider: `copilot-acp/`（cn.5 baseline 时已存在的非 CN provider）
+- 1 个 platform: `teams/`（cn.5 baseline 时已存在的非 CN platform）
+- **共 2 个目录**（cn.5 baseline 之前的 17+5=22 个外国 plugin 已被上游 + 历史 cherry-pick 流程处理；T4 commit 是最终扫尾）
 
 | 类型 | 目录 | commit |
 |------|------|--------|
-| 16 model-providers | anthropic, arcee, azure-foundry, bedrock, copilot, copilot-acp, gemini, google, gmi, huggingface, kilocode, nous, novita, nvidia, openai-codex, openrouter, xai | `8dcf5bdf3` |
-| 5 platforms | google_chat, irc, line, simplex, teams | `8dcf5bdf3` |
-| CN 保留 | 13 model-providers + 2 platforms（discord, photon） | — |
+| 1 model-provider | copilot-acp | `8dcf5bdf3` |
+| 1 platform | teams | `8dcf5bdf3` |
+| CN 保留 | 11 model-providers + 2 platforms（discord, photon） | — |
+
+> **修正说明**（v0.15.0+cn.9）：初版 CHANGELOG 误写"22 目录"——但 commit `8dcf5bdf3` 实际只删除了 2 个目录（cn.5 baseline 时仅剩这 2 个非 CN plugin）。其他 20 个外国 plugin 在上游 + 历史 cherry-pick 过程中已被处理。
 
 #### 删减统计
 
@@ -320,6 +329,7 @@ path-rule 精度从 ~80% 提升到 ~99%。
 
 - batch2（6/1~6/11 约 1428 个 upstream commit）分类 + merge
 - v0.15.0+cn.9 启动后评估 D 方案 D 项（run_agent.py 拆分重评）
+- v0.15.0+cn.9: 清理 `ai-gateway/` + `ollama-cloud/` 空壳（git untracked，本地文件系统残留）
 
 ### 升级指引
 
