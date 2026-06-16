@@ -103,13 +103,8 @@ from plugins.browser.firecrawl.provider import (  # noqa: F401
 )
 from tools.tool_backend_helpers import normalize_browser_cloud_provider
 
-# Camofox local anti-detection browser backend (optional).
-# When CAMOFOX_URL is set, all browser operations route through the
-# camofox REST API instead of the agent-browser CLI.
-try:
-    from tools.browser_camofox import is_camofox_mode as _is_camofox_mode
-except ImportError:
-    _is_camofox_mode = lambda: False  # noqa: E731
+# Camofox support removed in T1b jian-fa (v0.15.0+cn.8)
+_is_camofox_mode = lambda: False  # noqa: E731
 
 logger = logging.getLogger(__name__)
 
@@ -2354,11 +2349,6 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
             "blocked_by_policy": {"host": blocked["host"], "rule": blocked["rule"], "source": blocked["source"]},
         })
 
-    # Camofox backend — delegate after safety checks pass
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_navigate
-        return camofox_navigate(url, task_id)
-
     if auto_local_this_nav:
         logger.info(
             "browser_navigate: auto-routing %s to local Chromium sidecar "
@@ -2501,10 +2491,6 @@ def browser_snapshot(
     Returns:
         JSON string with page snapshot
     """
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_snapshot
-        return camofox_snapshot(full, task_id, user_task)
-
     effective_task_id = _last_session_key(task_id or "default")
 
     # Build command args based on full flag
@@ -2565,10 +2551,6 @@ def browser_click(ref: str, task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with click result
     """
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_click
-        return camofox_click(ref, task_id)
-
     effective_task_id = _last_session_key(task_id or "default")
 
     # Ensure ref starts with @
@@ -2603,10 +2585,6 @@ def browser_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with type result
     """
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_type
-        return camofox_type(ref, text, task_id)
-
     effective_task_id = _last_session_key(task_id or "default")
 
     # Ensure ref starts with @
@@ -2654,15 +2632,6 @@ def browser_scroll(direction: str, task_id: Optional[str] = None) -> str:
     # ~500px is roughly half a viewport of travel.
     _SCROLL_PIXELS = 500
 
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_scroll
-        # Camofox REST API doesn't support pixel args; use repeated calls
-        _SCROLL_REPEATS = 5
-        result = None
-        for _ in range(_SCROLL_REPEATS):
-            result = camofox_scroll(direction, task_id)
-        return result
-
     effective_task_id = _last_session_key(task_id or "default")
 
     result = _run_browser_command(effective_task_id, "scroll", [direction, str(_SCROLL_PIXELS)])
@@ -2690,10 +2659,6 @@ def browser_back(task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with navigation result
     """
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_back
-        return camofox_back(task_id)
-
     effective_task_id = _last_session_key(task_id or "default")
     result = _run_browser_command(effective_task_id, "back", [])
 
@@ -2723,10 +2688,6 @@ def browser_press(key: str, task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with key press result
     """
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_press
-        return camofox_press(key, task_id)
-
     effective_task_id = _last_session_key(task_id or "default")
     result = _run_browser_command(effective_task_id, "press", [key])
 
@@ -2765,11 +2726,6 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
     # --- JS evaluation mode ---
     if expression is not None:
         return _browser_eval(expression, task_id)
-
-    # --- Console output mode (original behaviour) ---
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_console
-        return camofox_console(clear, task_id)
 
     effective_task_id = _last_session_key(task_id or "default")
 
@@ -2811,9 +2767,6 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
 
 def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
     """Evaluate a JavaScript expression in the page context and return the result."""
-    if _is_camofox_mode():
-        return _camofox_eval(expression, task_id)
-
     effective_task_id = _last_session_key(task_id or "default")
 
     # --- Fast path: route through the supervisor's persistent CDP WS ---------
@@ -2899,39 +2852,6 @@ def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
     return json.dumps(_copy_fallback_warning(response, result), ensure_ascii=False, default=str)
 
 
-def _camofox_eval(expression: str, task_id: Optional[str] = None) -> str:
-    """Evaluate JS via Camofox's /tabs/{tab_id}/eval endpoint (if available)."""
-    from tools.browser_camofox import _ensure_tab, _post
-    try:
-        tab_info = _ensure_tab(task_id or "default")
-        tab_id = tab_info.get("tab_id") or tab_info.get("id")
-        resp = _post(f"/tabs/{tab_id}/evaluate", body={"expression": expression, "userId": tab_info["user_id"]})
-
-        # Camofox returns the result in a JSON envelope
-        raw_result = resp.get("result") if isinstance(resp, dict) else resp
-        parsed = raw_result
-        if isinstance(raw_result, str):
-            try:
-                parsed = json.loads(raw_result)
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        return json.dumps({
-            "success": True,
-            "result": parsed,
-            "result_type": type(parsed).__name__,
-        }, ensure_ascii=False, default=str)
-    except Exception as e:
-        error_msg = str(e)
-        # Graceful degradation — server may not support eval
-        if any(code in error_msg for code in ("404", "405", "501")):
-            return json.dumps({
-                "success": False,
-                "error": "JavaScript evaluation is not supported by this Camofox server. "
-                         "Use browser_snapshot or browser_vision to inspect page state.",
-            })
-        return tool_error(error_msg, success=False)
-
 
 def _maybe_start_recording(task_id: str):
     """Start recording if browser.record_sessions is enabled in config."""
@@ -2992,10 +2912,6 @@ def browser_get_images(task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with list of images (src and alt)
     """
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_get_images
-        return camofox_get_images(task_id)
-
     effective_task_id = _last_session_key(task_id or "default")
 
     # Use eval to run JavaScript that extracts images
@@ -3063,10 +2979,6 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
     Returns:
         JSON string with vision analysis results and screenshot_path
     """
-    if _is_camofox_mode():
-        from tools.browser_camofox import camofox_vision
-        return camofox_vision(question, annotate, task_id)
-
     import base64
     import uuid as uuid_mod
     from hermes_constants import get_hermes_dir
@@ -3378,18 +3290,6 @@ def _cleanup_single_browser_session(task_id: str) -> None:
     # Stop the CDP supervisor for this task FIRST so we close our WebSocket
     # before the backend tears down the underlying CDP endpoint.
     _stop_cdp_supervisor(task_id)
-
-    # Also clean up Camofox session if running in Camofox mode.
-    # Skip full close when managed persistence is enabled — the browser
-    # profile (and its session cookies) must survive across agent tasks.
-    # The inactivity reaper still frees idle resources.
-    if _is_camofox_mode():
-        try:
-            from tools.browser_camofox import camofox_close, camofox_soft_cleanup
-            if not camofox_soft_cleanup(task_id):
-                camofox_close(task_id)
-        except Exception as e:
-            logger.debug("Camofox cleanup for task %s: %s", task_id, e)
 
     logger.debug("cleanup_browser called for task_id: %s", task_id)
     logger.debug("Active sessions: %s", list(_active_sessions.keys()))
