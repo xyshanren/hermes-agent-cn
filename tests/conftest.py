@@ -874,6 +874,9 @@ collect_ignore_glob = [
     "tools/test_microsoft_graph_auth.py",
     "tools/test_microsoft_graph_client.py",
     "integration/test_ha_integration.py",
+    "gateway/test_session.py",              # imports teams_pipeline
+    "gateway/test_teams.py",                # imports teams_pipeline
+    "gateway/test_teams_pipeline_runtime_wiring.py",  # imports teams_pipeline
 ]
 
 # Tests removed alongside their modules (T1 jian-fa in v0.15.0+cn.6+).
