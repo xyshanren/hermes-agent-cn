@@ -68,6 +68,37 @@ dependencies = [
   # (which is a silent killer on Windows — see CONTRIBUTING.md) and
   # `os.killpg` (which doesn't exist on Windows).
   "psutil==7.2.2",
+  # Browser CDP supervisor + browser_dialog import this directly. Keep core
+  # so browser tool discovery doesn't fail on lean installs.
+  "websockets==15.0.1",
+  # .gitignore-aware file matching for desktop build stamp.
+  "pathspec==1.1.1",
+  "fastapi>=0.104.0,<1",
+  "uvicorn[standard]>=0.24.0,<1",
+  "ptyprocess>=0.7.0,<1; sys_platform != 'win32'",
+  "pywinpty>=2.0.0,<3; sys_platform == 'win32'",
+  # Image resize recovery for the vision tools. Pillow shrinks oversized images
+  # (>5 MB or >8000px) at embed time; without it the byte AND pixel-dimension
+  # shrink paths no-op, so an oversized image bakes into immutable history and
+  # bricks the session on Anthropic's non-retryable 400. Pure-wheel, no system
+  # libs required for the codecs we use, so it's safe to ship in the base
+  # install rather than gating it behind an extra + a mid-session lazy install
+  # (which deadlocked the CLI under prompt_toolkit — see #40490).
+  "Pillow==12.2.0",
+  # Windows log rotation. Stdlib ``RotatingFileHandler.doRollover()`` uses
+  # ``os.rename()`` which fails with ``PermissionError [WinError 32]`` on
+  # Windows whenever any other process holds an append-mode handle on
+  # ``agent.log`` (always the case in Hermes — TUI, gateway, ``hy_memory``
+  # server, MCP servers, and on-demand CLI commands all log from separate
+  # processes), pinning ``agent.log`` at the 5 MiB threshold and spamming
+  # stderr on every emit (see #44873). ``concurrent-log-handler`` wraps the
+  # rename in a cross-process file lock (via ``portalocker``: pywin32 on
+  # Windows) so only one process rotates at a time. ``hermes_logging.py``
+  # aliases it ONLY on Windows — POSIX renames an open file fine, so stdlib
+  # already works there and managed-mode perms depend on its exact lifecycle.
+  # Hence the ``sys_platform == 'win32'`` marker: the dep (and its portalocker
+  # / pywin32 tree) ships only where it's actually used.
+  "concurrent-log-handler==0.9.29; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
