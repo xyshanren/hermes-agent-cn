@@ -188,8 +188,7 @@ class TestOpenVikingSkillQuerySafety:
         )
 
         provider.sync_turn(skill_message, "Done.")
-        assert provider._sync_thread is not None
-        provider._sync_thread.join(timeout=5.0)
+        assert provider._drain_writers("session-1", timeout=5.0)
 
         assert RecordingVikingClient.calls == [
             (
@@ -205,7 +204,6 @@ class TestOpenVikingSkillQuerySafety:
                         {
                             "role": "assistant",
                             "parts": [{"type": "text", "text": "Done."}],
-                            "peer_id": "hermes",
                         },
                     ]
                 },
