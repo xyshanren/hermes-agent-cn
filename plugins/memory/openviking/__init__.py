@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ENDPOINT = "http://127.0.0.1:1933"
 _TIMEOUT = 30.0
+_SESSION_DRAIN_TIMEOUT = 10.0
+_DEFERRED_COMMIT_TIMEOUT = (_TIMEOUT * 2) + 5.0
 _REMOTE_RESOURCE_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
 _SYNC_TRACE_ENV = "HERMES_OPENVIKING_SYNC_TRACE"
 
@@ -812,7 +814,15 @@ class OpenVikingMemoryProvider(MemoryProvider):
         self._api_key = ""
         self._session_id = ""
         self._turn_count = 0
-        self._sync_thread: Optional[threading.Thread] = None
+        # Commit only after session writes drain. The set is keyed by the sid
+        # the writer is POSTing under (snapshotted at spawn), so on_session_end
+        # / on_session_switch see every still-alive writer for that sid even
+        # if later writes have replaced the latest-tracked thread.
+        self._inflight_writers: Dict[str, Set[threading.Thread]] = {}
+        self._inflight_lock = threading.Lock()
+        self._deferred_commit_sids: Set[str] = set()
+        self._deferred_commit_threads: Set[threading.Thread] = set()
+        self._deferred_commit_lock = threading.Lock()
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_thread: Optional[threading.Thread] = None
@@ -1045,22 +1055,18 @@ class OpenVikingMemoryProvider(MemoryProvider):
     def _text_part(content: str) -> Dict[str, str]:
         return {"type": "text", "text": content}
 
-    def _turn_batch_payload(self, user_content: str, assistant_content: str) -> Dict[str, Any]:
-        assistant_message: Dict[str, Any] = {
-            "role": "assistant",
-            "parts": [self._text_part(assistant_content)],
-        }
-        if self._agent:
-            assistant_message["peer_id"] = self._agent
+    @classmethod
+    def _turn_batch_payload(cls, user_content: str, assistant_content: str) -> Dict[str, Any]:
         return {
             "messages": [
-                {"role": "user", "parts": [self._text_part(user_content)]},
-                assistant_message,
+                {"role": "user", "parts": [cls._text_part(user_content)]},
+                {"role": "assistant", "parts": [cls._text_part(assistant_content)]},
             ]
         }
 
+    @classmethod
     def _post_session_turn(
-        self,
+        cls,
         client: _VikingClient,
         sid: str,
         user_content: str,
@@ -1068,7 +1074,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
     ) -> None:
         client.post(
             f"/api/v1/sessions/{sid}/messages/batch",
-            self._turn_batch_payload(user_content, assistant_content),
+            cls._turn_batch_payload(user_content, assistant_content),
         )
 
     def _session_has_pending_tokens(self, sid: str) -> bool:
@@ -1084,50 +1090,20 @@ class OpenVikingMemoryProvider(MemoryProvider):
         except (TypeError, ValueError):
             return False
 
-    def _has_committed_session(self, sid: str) -> bool:
-        with self._committed_session_lock:
-            return sid in self._committed_session_ids
-
-    def _mark_session_committed(self, sid: str) -> None:
-        with self._committed_session_lock:
-            self._committed_session_ids.add(sid)
-
-    def _session_needs_commit(self, sid: str, turn_count: int) -> bool:
-        # Already-committed sessions never need a second commit, regardless of
-        # the turn counter — a racing sync_turn can re-increment _turn_count
-        # after a commit+reset, so the committed-guard must win over turn_count.
-        if self._has_committed_session(sid):
-            return False
-        if turn_count > 0:
-            return True
-        return self._session_has_pending_tokens(sid)
-
     def _commit_session(self, sid: str, turn_count: int, *, context: str) -> bool:
         try:
-            self._client.post(
-                f"/api/v1/sessions/{sid}/commit",
-                {"keep_recent_count": 0},
-            )
-            self._mark_session_committed(sid)
+            self._client.post(f"/api/v1/sessions/{sid}/commit")
             logger.info("OpenViking session %s committed %s (%d turns)", sid, context, turn_count)
             return True
         except Exception as e:
             logger.warning("OpenViking session commit failed for %s: %s", sid, e)
             return False
 
-    def _finalize_session_async(self, sid: str, turn_count: int, *, context: str) -> None:
-        """Drain the old session's writers and commit it on a daemon thread.
-
-        Used by on_session_switch (and the deferred-commit fallback) so the
-        potentially-multi-second drain + pending-token GET + commit POST never
-        runs on the caller's command thread. Deduped by sid so a rapid second
-        switch can't stack two finalizers for the same session, and a no-op
-        once shutdown has begun so we don't POST against a torn-down client.
-        """
-        if not sid:
+    def _schedule_deferred_commit(self, sid: str, turn_count: int) -> None:
+        if not sid or turn_count <= 0:
             return
         with self._deferred_commit_lock:
-            if self._shutting_down or sid in self._deferred_commit_sids:
+            if sid in self._deferred_commit_sids:
                 return
             self._deferred_commit_sids.add(sid)
 
@@ -1135,19 +1111,14 @@ class OpenVikingMemoryProvider(MemoryProvider):
 
         def _finalize() -> None:
             try:
-                if self._shutting_down:
-                    return
                 if not self._drain_writers(sid, timeout=_DEFERRED_COMMIT_TIMEOUT):
                     logger.warning(
-                        "OpenViking writer for %s still alive after drain — "
+                        "OpenViking writer for %s still alive after deferred drain — "
                         "leaving session uncommitted",
                         sid,
                     )
                     return
-                if self._shutting_down:
-                    return
-                if self._session_needs_commit(sid, turn_count):
-                    self._commit_session(sid, turn_count, context=context)
+                self._commit_session(sid, turn_count, context="after deferred drain")
             finally:
                 with self._deferred_commit_lock:
                     self._deferred_commit_sids.discard(sid)
@@ -1164,280 +1135,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
             self._deferred_commit_threads.add(thread)
         thread.start()
 
-    def _invalidate_prefetch_state(self) -> None:
-        # Bump the generation under the same lock used by prefetch workers so
-        # late results from an older session are discarded deterministically.
-        with self._prefetch_lock:
-            self._prefetch_generation += 1
-            self._prefetch_result = ""
-            # Join EVERY tracked prefetch thread, not just the latest slot — a
-            # rapid re-queue can leave an older thread for the abandoned session
-            # still running (consistent with shutdown()).
-            workers = [t for t in self._prefetch_threads if t.is_alive()]
-        for t in workers:
-            t.join(timeout=3.0)
-        with self._prefetch_lock:
-            self._prefetch_result = ""
-
-    @staticmethod
-    def _message_text(content: Any) -> str:
-        """Extract text from OpenAI-style string/list content."""
-        return flatten_message_text(content)
-
-    @classmethod
-    def _message_matches_text(cls, message: Dict[str, Any], expected: Any) -> bool:
-        expected_text = cls._message_text(expected).strip()
-        if not expected_text:
-            return False
-        actual_text = cls._message_text(message.get("content")).strip()
-        return actual_text == expected_text
-
-    @classmethod
-    def _extract_current_turn_messages(
-        cls,
-        messages: Optional[List[Dict[str, Any]]],
-        user_content: str,
-        assistant_content: str,
-    ) -> List[Dict[str, Any]]:
-        """Slice the completed turn out of Hermes' full canonical transcript."""
-        if not messages:
-            return []
-
-        end_idx: Optional[int] = None
-        if cls._message_text(assistant_content).strip():
-            for idx in range(len(messages) - 1, -1, -1):
-                message = messages[idx]
-                if (
-                    isinstance(message, dict)
-                    and message.get("role") == "assistant"
-                    and cls._message_matches_text(message, assistant_content)
-                ):
-                    end_idx = idx
-                    break
-        if end_idx is None:
-            for idx in range(len(messages) - 1, -1, -1):
-                message = messages[idx]
-                if isinstance(message, dict) and message.get("role") == "assistant":
-                    end_idx = idx
-                    break
-        if end_idx is None:
-            end_idx = len(messages) - 1
-
-        start_idx: Optional[int] = None
-        if cls._message_text(user_content).strip():
-            for idx in range(end_idx, -1, -1):
-                message = messages[idx]
-                if (
-                    isinstance(message, dict)
-                    and message.get("role") == "user"
-                    and cls._message_matches_text(message, user_content)
-                ):
-                    start_idx = idx
-                    break
-        if start_idx is None:
-            for idx in range(end_idx, -1, -1):
-                message = messages[idx]
-                if isinstance(message, dict) and message.get("role") == "user":
-                    start_idx = idx
-                    break
-        if start_idx is None:
-            return []
-
-        return [message for message in messages[start_idx : end_idx + 1] if isinstance(message, dict)]
-
-    @staticmethod
-    def _tool_call_id(tool_call: Dict[str, Any]) -> str:
-        return str(tool_call.get("id") or tool_call.get("tool_call_id") or "")
-
-    @staticmethod
-    def _tool_call_name(tool_call: Dict[str, Any]) -> str:
-        function = tool_call.get("function")
-        if isinstance(function, dict):
-            return str(function.get("name") or "")
-        return str(tool_call.get("name") or "")
-
-    @staticmethod
-    def _is_openviking_recall_tool_name(tool_name: Any) -> bool:
-        return str(tool_name or "").strip().lower() in _OPENVIKING_RECALL_TOOL_NAMES
-
-    @staticmethod
-    def _tool_call_input(tool_call: Dict[str, Any]) -> Dict[str, Any]:
-        function = tool_call.get("function")
-        raw_args: Any = None
-        if isinstance(function, dict):
-            raw_args = function.get("arguments")
-        if raw_args is None:
-            raw_args = tool_call.get("args")
-        if raw_args is None:
-            return {}
-        if isinstance(raw_args, dict):
-            return raw_args
-        if isinstance(raw_args, str):
-            if not raw_args.strip():
-                return {}
-            try:
-                parsed = json.loads(raw_args)
-            except Exception:
-                return {"value": raw_args}
-            if isinstance(parsed, dict):
-                return parsed
-            return {"value": parsed}
-        return {"value": raw_args}
-
-    @classmethod
-    def _tool_result_status(cls, message: Dict[str, Any]) -> str:
-        raw_status = str(message.get("status") or message.get("tool_status") or "").lower()
-        if raw_status in _TOOL_STATUS_ERROR_ALIASES:
-            return _TOOL_STATUS_ERROR
-        if raw_status in _TOOL_STATUS_COMPLETED_ALIASES:
-            return _TOOL_STATUS_COMPLETED
-
-        text = cls._message_text(message.get("content")).strip()
-        if text:
-            try:
-                parsed = json.loads(text)
-            except Exception:
-                parsed = None
-            if isinstance(parsed, dict):
-                status = str(parsed.get("status") or "").lower()
-                exit_code = parsed.get("exit_code")
-                if (
-                    status in _TOOL_STATUS_ERROR_ALIASES
-                    or parsed.get("success") is False
-                    or bool(parsed.get("error"))
-                    or (isinstance(exit_code, int) and exit_code != 0)
-                ):
-                    return _TOOL_STATUS_ERROR
-
-        return _TOOL_STATUS_COMPLETED
-
-    @classmethod
-    def _messages_to_openviking_batch(
-        cls,
-        messages: List[Dict[str, Any]],
-        *,
-        assistant_peer_id: str = "",
-    ) -> List[Dict[str, Any]]:
-        """Convert Hermes canonical messages into OpenViking batch payloads."""
-        assistant_peer_id = str(assistant_peer_id or "").strip()
-        tool_calls_by_id: Dict[str, Dict[str, Any]] = {}
-        completed_tool_ids: set[str] = set()
-        skipped_tool_ids: set[str] = set()
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-            if message.get("role") == "tool":
-                tool_id = str(message.get("tool_call_id") or message.get("id") or "")
-                if tool_id:
-                    completed_tool_ids.add(tool_id)
-                    if cls._is_openviking_recall_tool_name(message.get("name")):
-                        skipped_tool_ids.add(tool_id)
-                continue
-            if message.get("role") != "assistant":
-                continue
-            for tool_call in message.get("tool_calls") or []:
-                if not isinstance(tool_call, dict):
-                    continue
-                tool_id = cls._tool_call_id(tool_call)
-                tool_name = cls._tool_call_name(tool_call)
-                if tool_id:
-                    tool_calls_by_id[tool_id] = {
-                        "tool_name": tool_name,
-                        "tool_input": cls._tool_call_input(tool_call),
-                    }
-                    if cls._is_openviking_recall_tool_name(tool_name):
-                        skipped_tool_ids.add(tool_id)
-
-        payload_messages: List[Dict[str, Any]] = []
-        pending_tool_parts: List[Dict[str, Any]] = []
-
-        def payload_message(role: str, parts: List[Dict[str, Any]]) -> Dict[str, Any]:
-            payload: Dict[str, Any] = {"role": role, "parts": parts}
-            if role == "assistant" and assistant_peer_id:
-                payload["peer_id"] = assistant_peer_id
-            return payload
-
-        def flush_tool_parts() -> None:
-            nonlocal pending_tool_parts
-            if pending_tool_parts:
-                payload_messages.append(payload_message("assistant", pending_tool_parts))
-                pending_tool_parts = []
-
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-
-            role = str(message.get("role") or "")
-            if role in {"system", "developer"}:
-                continue
-
-            if role == "tool":
-                tool_id = str(message.get("tool_call_id") or message.get("id") or "")
-                prior_call = tool_calls_by_id.get(tool_id, {})
-                tool_name = str(message.get("name") or prior_call.get("tool_name") or "")
-                if tool_id in skipped_tool_ids or cls._is_openviking_recall_tool_name(tool_name):
-                    continue
-                tool_part = {
-                    "type": "tool",
-                    "tool_id": tool_id,
-                    "tool_name": tool_name,
-                    "tool_input": prior_call.get("tool_input", {}),
-                    "tool_output": cls._message_text(message.get("content")),
-                    "tool_status": cls._tool_result_status(message),
-                }
-                pending_tool_parts.append(tool_part)
-                continue
-
-            if role not in {"user", "assistant"}:
-                continue
-
-            flush_tool_parts()
-            parts: List[Dict[str, Any]] = []
-            text = cls._message_text(message.get("content"))
-            if text:
-                parts.append({"type": "text", "text": text})
-
-            if role == "assistant":
-                for tool_call in message.get("tool_calls") or []:
-                    if not isinstance(tool_call, dict):
-                        continue
-                    tool_id = cls._tool_call_id(tool_call)
-                    tool_name = cls._tool_call_name(tool_call)
-                    if tool_id in skipped_tool_ids or cls._is_openviking_recall_tool_name(tool_name):
-                        continue
-                    if tool_id in completed_tool_ids:
-                        continue
-                    # Reuse the tool_input parsed in the pre-scan when available
-                    # (non-empty ids are cached); fall back to parsing for the
-                    # uncached empty-id case so we never drop arguments.
-                    prior_call = tool_calls_by_id.get(tool_id) if tool_id else None
-                    tool_input = (
-                        prior_call["tool_input"]
-                        if prior_call is not None
-                        else cls._tool_call_input(tool_call)
-                    )
-                    parts.append({
-                        "type": "tool",
-                        "tool_id": tool_id,
-                        "tool_name": tool_name,
-                        "tool_input": tool_input,
-                        "tool_status": "pending",
-                    })
-
-            if parts:
-                payload_messages.append(payload_message(role, parts))
-
-        flush_tool_parts()
-        return payload_messages
-
-    def sync_turn(
-        self,
-        user_content: str,
-        assistant_content: str,
-        *,
-        session_id: str = "",
-        messages: Optional[List[Dict[str, Any]]] = None,
-    ) -> None:
+    def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Record the conversation turn in OpenViking's session (non-blocking)."""
         if not self._client:
             return
@@ -1446,24 +1144,25 @@ class OpenVikingMemoryProvider(MemoryProvider):
 
         def _sync():
             try:
-                client = _VikingClient(
-                    self._endpoint, self._api_key,
-                    account=self._account, user=self._user, agent=self._agent,
+                client = self._new_client()
+                self._post_session_turn(
+                    client,
+                    sid,
+                    user_content[:4000],
+                    assistant_content[:4000],
                 )
-                sid = self._session_id
-
-                # Add user message
-                client.post(f"/api/v1/sessions/{sid}/messages", {
-                    "role": "user",
-                    "content": user_content[:4000],  # trim very long messages
-                })
-                # Add assistant message
-                client.post(f"/api/v1/sessions/{sid}/messages", {
-                    "role": "assistant",
-                    "content": assistant_content[:4000],
-                })
             except Exception as e:
-                logger.debug("OpenViking sync_turn failed: %s", e)
+                logger.debug("OpenViking sync_turn failed, reconnecting: %s", e)
+                try:
+                    client = self._new_client()
+                    self._post_session_turn(
+                        client,
+                        sid,
+                        user_content[:4000],
+                        assistant_content[:4000],
+                    )
+                except Exception as retry_error:
+                    logger.warning("OpenViking sync_turn failed: %s", retry_error)
 
         # Wait for any previous sync to finish before starting a new one
         if self._sync_thread and self._sync_thread.is_alive():
@@ -1483,20 +1182,80 @@ class OpenVikingMemoryProvider(MemoryProvider):
         if not self._client:
             return
 
-        # Wait for any pending sync to finish first — do this before the
-        # turn_count check so the last turn's messages are flushed even if
-        # the count hasn't been incremented yet.
-        if self._sync_thread and self._sync_thread.is_alive():
-            self._sync_thread.join(timeout=10.0)
-
-        if self._turn_count == 0:
+        sid = self._session_id
+        # Commit only after session writes drain.
+        if not self._drain_writers(sid, timeout=_SESSION_DRAIN_TIMEOUT):
+            logger.warning(
+                "OpenViking writer for %s still alive after drain — skipping commit",
+                sid,
+            )
             return
 
-        try:
-            self._client.post(f"/api/v1/sessions/{self._session_id}/commit")
-            logger.info("OpenViking session %s committed (%d turns)", self._session_id, self._turn_count)
-        except Exception as e:
-            logger.warning("OpenViking session commit failed: %s", e)
+        if self._turn_count == 0 and not self._session_has_pending_tokens(sid):
+            return
+
+        if self._commit_session(sid, self._turn_count, context="on session end"):
+            # Mark clean so a follow-up on_session_switch skips its own commit.
+            self._turn_count = 0
+
+    def on_session_switch(
+        self,
+        new_session_id: str,
+        *,
+        parent_session_id: str = "",
+        reset: bool = False,
+        **kwargs,
+    ) -> None:
+        """Commit the old session and rotate cached state to the new session_id.
+
+        Fires on /resume, /branch, /reset, /new, and context compression.
+        Without this hook, ``_session_id`` stays stuck at the value
+        ``initialize()`` cached, so subsequent ``sync_turn()`` writes land in
+        the already-closed old session and ``on_session_end()`` tries to
+        commit it a second time. The new session never accumulates messages,
+        and memory extraction never fires for it. See hermes-agent#28296.
+
+        Flushes any in-flight sync under the old session_id, commits the old
+        session if it has pending turns (same extraction semantics as
+        ``on_session_end``), drains and clears any stale prefetch result,
+        then rotates ``_session_id`` and resets ``_turn_count``.
+        """
+        new_id = str(new_session_id or "").strip()
+        if not new_id or not self._client:
+            return
+
+        old_session_id = self._session_id
+        old_turn_count = self._turn_count
+
+        # Commit only after session writes drain.
+        writers_drained = True
+        if old_session_id:
+            writers_drained = self._drain_writers(old_session_id, timeout=_SESSION_DRAIN_TIMEOUT)
+            if not writers_drained:
+                logger.warning(
+                    "OpenViking writer for %s still alive after drain — "
+                    "skipping commit-on-switch",
+                    old_session_id,
+                )
+
+        if writers_drained and old_session_id and old_turn_count > 0:
+            self._commit_session(old_session_id, old_turn_count, context="on switch")
+        elif not writers_drained:
+            self._schedule_deferred_commit(old_session_id, old_turn_count)
+
+        # Drop prefetch results from older switch generations.
+        self._prefetch_generation += 1
+        if self._prefetch_thread and self._prefetch_thread.is_alive():
+            self._prefetch_thread.join(timeout=3.0)
+        with self._prefetch_lock:
+            self._prefetch_result = ""
+
+        self._session_id = new_id
+        self._turn_count = 0
+        logger.debug(
+            "OpenViking on_session_switch: old=%s new=%s parent=%s reset=%s",
+            old_session_id, new_id, parent_session_id, reset,
+        )
 
     def _build_memory_uri(self, subdir: str) -> str:
         """Build a viking:// memory URI under the configured user/agent/subdir."""
@@ -1557,11 +1316,22 @@ class OpenVikingMemoryProvider(MemoryProvider):
             return tool_error(str(e))
 
     def shutdown(self) -> None:
-        # Wait for background threads to finish
-        for t in (self._sync_thread, self._prefetch_thread):
-            if t and t.is_alive():
+        # Wait for every in-flight writer across all tracked sessions.
+        with self._inflight_lock:
+            all_workers = [
+                t for workers in self._inflight_writers.values() for t in workers
+            ]
+        with self._deferred_commit_lock:
+            deferred_workers = list(self._deferred_commit_threads)
+        for t in all_workers:
+            if t.is_alive():
                 t.join(timeout=5.0)
-        # Clear atexit reference so it doesn't double-commit
+        for t in deferred_workers:
+            if t.is_alive():
+                t.join(timeout=5.0)
+        if self._prefetch_thread and self._prefetch_thread.is_alive():
+            self._prefetch_thread.join(timeout=5.0)
+        # Clear atexit reference so it doesn't double-commit.
         global _last_active_provider
         if _last_active_provider is self:
             _last_active_provider = None
@@ -1620,7 +1390,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
         if args.get("scope"):
             payload["target_uri"] = args["scope"]
         if args.get("limit"):
-            payload["top_k"] = args["limit"]
+            payload["limit"] = args["limit"]
 
         resp = self._client.post("/api/v1/search/find", payload)
         result = resp.get("result", {})
