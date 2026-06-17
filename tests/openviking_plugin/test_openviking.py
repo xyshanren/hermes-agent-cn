@@ -1,6 +1,7 @@
 """Tests for plugins/memory/openviking/__init__.py — URI normalization and payload handling."""
 
 import json
+from typing import Any, cast
 
 from plugins.memory.openviking import OpenVikingMemoryProvider
 
@@ -187,7 +188,8 @@ class TestOpenVikingSkillQuerySafety:
         )
 
         provider.sync_turn(skill_message, "Done.")
-        assert provider._drain_writers("session-1", timeout=5.0)
+        assert provider._sync_thread is not None
+        provider._sync_thread.join(timeout=5.0)
 
         assert RecordingVikingClient.calls == [
             (
