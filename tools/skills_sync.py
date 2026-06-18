@@ -316,6 +316,55 @@ def sync_skills(quiet: bool = False) -> dict:
     }
 
 
+def _rmtree_writable(path: Path) -> None:
+    """Remove a directory tree, making read-only entries writable first.
+
+    Handles immutable package sources (Nix store, deb/rpm installs) that
+    preserve read-only permissions on copied files *and* directories
+    (``r-xr-xr-x``).  Removing a child requires write permission on its
+    parent directory, so the retry handler makes the failing path **and its
+    parent** writable before re-attempting.  See #34860, #34972.
+    """
+    # Defense in depth (#48200): refuse to rmtree anything outside
+    # ``HERMES_HOME/skills/`` to prevent the catastrophic wipe of
+    # ``~/.hermes/`` (``.env``, ``MEMORY.md``, ``kanban.db``, custom
+    # skills, scripts, …) that an earlier incident observed. Five call
+    # sites in this file invoke this helper; if any one of them ever
+    # computes a destination outside the skills root — through a bad
+    # path join, a missing ``HERMES_HOME`` default, a malicious
+    # bundled-manifest entry, or a mid-flight exception that leaves a
+    # stale path in scope — this guard turns the resulting
+    # ``shutil.rmtree(~/.hermes)`` into a loud, recoverable ``ValueError``
+    # instead of silently destroying the user's install.
+    target = Path(path).resolve()
+    skills_root = SKILLS_DIR.resolve()
+    # Every legitimate caller passes a skill directory or its ``.bak``
+    # sibling — always a strict child of the skills root. The skills root
+    # itself must never be removed: a ``dest`` that collapses to
+    # ``SKILLS_DIR`` (e.g. a relative path resolving to ``.``) would wipe
+    # every installed skill, and its ``.bak`` sibling lands one level up in
+    # ``HERMES_HOME``. Require a strict-child relationship so both escape
+    # into the skills root and out of it are refused.
+    if skills_root not in target.parents:
+        raise ValueError(
+            f"refusing to rmtree {target!r}: not strictly under {skills_root!r} "
+            f"(scope guard — see #48200)"
+        )
+    import stat
+
+    def _on_error(func, fpath, exc_info):
+        # Unlinking a child requires the parent dir to be writable, so chmod
+        # the parent as well as the failing path, then retry.
+        for target in (os.path.dirname(fpath), fpath):
+            try:
+                os.chmod(target, stat.S_IRWXU)
+            except OSError:
+                pass
+        func(fpath)
+
+    shutil.rmtree(path, onerror=_on_error)
+
+
 def reset_bundled_skill(name: str, restore: bool = False) -> dict:
     """
     Reset a bundled skill's manifest tracking so future syncs work normally.
