@@ -279,6 +279,78 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
 # Add new patterns here when a model family needs explicit steering.
 TOOL_USE_ENFORCEMENT_MODELS = ("gpt", "codex", "gemini", "gemma", "grok", "glm", "qwen", "deepseek")
 
+# Universal "finish the job" guidance — applied to ALL models, not gated
+# by model family.  Addresses two cross-model failure modes:
+#   1. Stopping after a stub: writing a tiny file or running one command
+#      and then ending the turn with a description of the plan instead
+#      of the finished artifact.  (Observed on Opus during a real
+#      Sarasota real-estate build task: 3 API calls, 85-byte file,
+#      one terminal command, finish_reason=stop.)
+#   2. Fabricating output when a real path is blocked.  When `pip` or a
+#      tool fails, some models will synthesize plausible-looking results
+#      (fake addresses, fake JSON, fake numbers) instead of reporting
+#      the blocker.  (Observed on DeepSeek v4-flash on the same task:
+#      pushed through PEP-668 wall, then returned fabricated listings.)
+#
+# Short on purpose.  This block is shipped to every user, every session,
+# in the cached system prompt — token cost is paid once at install and
+# then amortised across all sessions via prefix caching.  Keep it tight.
+TASK_COMPLETION_GUIDANCE = (
+    "# Finishing the job\n"
+    "When the user asks you to build, run, or verify something, the deliverable is "
+    "a working artifact backed by real tool output — not a description of one. "
+    "Do not stop after writing a stub, a plan, or a single command. Keep working "
+    "until you have actually exercised the code or produced the requested result, "
+    "then report what real execution returned.\n"
+    "If a tool, install, or network call fails and blocks the real path, say so "
+    "directly and try an alternative (different package manager, different "
+    "approach, ask the user). NEVER substitute plausible-looking fabricated "
+    "output (made-up data, invented file contents, synthesised API responses) "
+    "for results you couldn't actually produce. Reporting a blocker honestly "
+    "is always better than inventing a result."
+)
+
+# Universal parallel-tool-call guidance — applied to ALL models.
+#
+# Why this matters for cost: every assistant turn resends the entire
+# accumulated conversation (and, on cache-friendly providers, re-reads the
+# cached prefix and pays for the newly-appended turn). A model that issues
+# one tool call per turn multiplies the number of round-trips — and therefore
+# the resent context — for any task that needs several independent reads,
+# searches, or safe lookups. Batching independent calls into a single
+# assistant response collapses N turns into one, cutting both latency and the
+# resent-context cost that compounds over a long conversation.
+#
+# The hermes-agent runtime already executes a batch of tool calls
+# concurrently when they are independent (read-only tools always; path-scoped
+# file ops when their targets don't overlap — see
+# run_agent._execute_tool_calls / tool_dispatch_helpers). The missing piece
+# was telling the *model* to emit those calls together in the first place.
+# Until now the only batching steer in the prompt lived in
+# GOOGLE_MODEL_OPERATIONAL_GUIDANCE — Gemini/Gemma got it, every other model
+# got nothing. This block makes the steer universal; the now-redundant
+# Google-only bullet has been dropped so no model receives it twice.
+#
+# Short on purpose — shipped in the cached system prompt to every user, every
+# session. Token cost is paid once at install and amortised across all
+# sessions via prefix caching. Keep it tight.
+#
+# Ported from cline/cline#11514 ("encourage parallel tool calls"), adapted
+# from Cline's TypeScript tool-surface guidance to hermes-agent's Python
+# prompt-assembly architecture.
+PARALLEL_TOOL_CALL_GUIDANCE = (
+    "# Parallel tool calls\n"
+    "When you need several pieces of information that don't depend on each "
+    "other, request them together in a single response instead of one tool "
+    "call per turn. Independent reads, searches, web fetches, and read-only "
+    "commands should be batched into the same assistant turn — the runtime "
+    "executes independent calls concurrently, and batching avoids resending "
+    "the whole conversation on every extra round-trip.\n"
+    "Only serialize calls when a later call genuinely depends on an earlier "
+    "call's result (e.g. you must read a file before you can patch it). When "
+    "in doubt and the calls are independent, batch them."
+)
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.
@@ -360,9 +432,10 @@ GOOGLE_MODEL_OPERATIONAL_GUIDANCE = (
     "package.json, requirements.txt, Cargo.toml, etc. before importing.\n"
     "- **Conciseness:** Keep explanatory text brief — a few sentences, not "
     "paragraphs. Focus on actions and results over narration.\n"
-    "- **Parallel tool calls:** When you need to perform multiple independent "
-    "operations (e.g. reading several files), make all the tool calls in a "
-    "single response rather than sequentially.\n"
+    # Parallel-tool-call steering now lives in the universal
+    # PARALLEL_TOOL_CALL_GUIDANCE block (injected for all models), so it is no
+    # longer duplicated here — keeping it would send Gemini/Gemma the same
+    # instruction twice.
     "- **Non-interactive commands:** Use flags like -y, --yes, --non-interactive "
     "to prevent CLI tools from hanging on prompts.\n"
     "- **Keep going:** Work autonomously until the task is fully resolved. "
