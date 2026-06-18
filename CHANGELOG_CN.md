@@ -254,6 +254,48 @@ pytest tests/gateway/ -q
 
 ---
 
+## v0.15.0+cn.10 (2026-06-18) — D3 依赖补完 + EMPTY 审计
+
+> **D3 依赖补完**: 4 个 dashboard_auth 缺失文件 (registry + audit + cookies + prefix) 从 upstream 检出.
+> **EMPTY 审计**: 12 个 EMPTY commits 审计完成 (9 PASS + 2 FAIL + 1 PENDING) — 见下方 "CN 产品决策偏离".
+> 当前 HEAD: `a0d5751b9`
+> 前置 tag: v0.15.0+cn.9 (`f5acb2d98`)
+
+### D3 依赖补完 (4 commits)
+
+| Commit | 文件 | 作用 |
+|--------|------|------|
+| `a21a2b0f3` | `hermes_cli/dashboard_auth/registry.py` | dashboard_auth 插件注册表 |
+| `d451a4b8a` | `hermes_cli/dashboard_auth/audit.py` | dashboard_auth 审计日志 |
+| `e6168c32d` | `hermes_cli/dashboard_auth/cookies.py` | dashboard_auth cookie 处理 |
+| `a0d5751b9` | `hermes_cli/dashboard_auth/prefix.py` | dashboard_auth 路由前缀 |
+
+### EMPTY 审计 (scout 跑 `research/cn-10-empty-audit.md`)
+
+| 状态 | 数量 | 处理 |
+|------|:----:|------|
+| ✅ PASS (真的一致) | 9 | 永久 skip upstream |
+| ❌ FAIL (CN 与 upstream 方向相反) | 2 | **CN 产品决策保留**, 见下 |
+| ⚠️ PENDING (目标文件不存在) | 1 | **CN 不需要**, tests mock 覆盖, 永久 skip |
+
+### CN 产品决策偏离 (有意的, 不修)
+
+| upstream | upstream 改动 | CN 现状 | CN 决策理由 |
+|----------|---------------|---------|-------------|
+| `bba9b519a` (upstream 45149) | 删除 subagent wall-clock timeout (600→None) | 反而加超时 (300→600) | CN 平台用户杂, 防 subagent 跑死安全网更稳 |
+| `2681c5a12` (upstream 45566) | 删除 `hermes gateway start --platform photon` 兼容 | 仍用 `--platform photon` | CN 渠道多, 兼容老用户 |
+| `4eca569bf` | 在 `hermes_cli/managed_uv.py` 加 `rebuild_venv()` stub | `managed_uv.py` 不存在 | CN tests 通过 mock 覆盖, 无需该文件 |
+
+**后续策略**: 这 3 个偏离是 CN 自己的产品决策, 跟 upstream 走偏是有意为之. 不修代码. 7 月批如 upstream 推相关 PR, CN 仍按自己决策. T-V2 报告 §1.5 同步记录.
+
+### 测试基线 (cn.10)
+
+- 核心修复 113 tests passing in 10.07s (test_i18n + test_curator + test_set_runtime_main + test_branch_command)
+- D3 dashboard_auth 4 模块 importable
+- 6 个 D3 测试永久 skip (依赖 teams_pipeline / Nous / OpenRouter / holographic 等 CN 移除模块)
+
+---
+
 ## v0.15.0+cn.7 (2026-06-15) — 方案 D 首次人工 merge（11 upstream KEEP commits）
 
 > **本版本** = D 方案首批 ~200 manual 冲突清理，经过 v1→v2→v3 三轮 path-rule 精炼，从 928 个 upstream commit 中筛出 **56 个 KEEP**，首批 cherry-pick **11 个**。
