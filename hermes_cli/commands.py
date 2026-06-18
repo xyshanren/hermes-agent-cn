@@ -101,7 +101,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
                cli_only=True),
     CommandDef("model", "查看当前模型（启动时绑定，会话中不可切换）", "配置"),
     CommandDef("provider", "显示可用模型提供商及当前选择", "配置"),
-
+    CommandDef("gquota", "查看 Google Gemini Code Assist 配额使用情况", "信息"),
     CommandDef("personality", "设置预定义人格", "配置",
                args_hint="[名称]"),
     CommandDef("statusbar", "切换上下文/模型状态栏", "配置",

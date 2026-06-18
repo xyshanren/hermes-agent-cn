@@ -131,6 +131,12 @@ ALIASES: Dict[str, str] = {
     "llama.cpp": "custom",
     "llama-cpp": "custom",
 
+    # bedrock
+    "aws": "bedrock",
+    "aws-bedrock": "bedrock",
+    "amazon-bedrock": "bedrock",
+    "amazon": "bedrock",
+
     # embedded — 嵌入式 CPU 推理 (GGUF + llama-cpp-python)
     "embedded": "embedded",
     "cpu": "embedded",
@@ -144,6 +150,7 @@ ALIASES: Dict[str, str] = {
 
 _LABEL_OVERRIDES: Dict[str, str] = {
     "local": "本地端点",
+    "bedrock": "AWS Bedrock",
 }
 
 

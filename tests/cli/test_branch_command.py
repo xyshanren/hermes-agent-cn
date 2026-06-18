@@ -222,4 +222,4 @@ class TestBranchCommandDef:
         """The branch command should be in the Session category."""
         from hermes_cli.commands import COMMAND_REGISTRY
         branch = next(c for c in COMMAND_REGISTRY if c.name == "branch")
-        assert branch.category == "Session"
+        assert branch.category == "会话"
