@@ -4467,6 +4467,160 @@ class AIAgent:
         _save_trajectory_to_file(trajectory, self.model, completed)
 
     @staticmethod
+    def _is_entitlement_failure(
+        error_context: Optional[Dict[str, Any]],
+        status_code: Optional[int],
+    ) -> bool:
+        """Detect subscription/entitlement 403s that masquerade as auth failures.
+
+        Returned True only when the body text matches a known entitlement
+        shape AND the status is 401/403.  Refreshing an OAuth token cannot
+        fix an unsubscribed account, so callers should surface the error
+        instead of looping the credential pool.
+
+        Current matches:
+          * xAI OAuth: "do not have an active Grok subscription" /
+            "out of available resources" / "does not have permission" + "grok"
+
+        Disambiguator for xAI (#29344): the same ``code`` text ("The caller
+        does not have permission to execute the specified operation") is
+        returned for BOTH an unsubscribed account AND a stale OAuth access
+        token.  xAI ships an explicit signal in the ``error`` field that
+        tells the two apart: a ``[WKE=unauthenticated:...]`` suffix (and/or
+        the ``OAuth2 access token could not be validated`` phrasing) means
+        the credentials failed validation — that's recoverable by refreshing
+        the token, NOT by surfacing an entitlement message.  When either
+        signal is present we return False eagerly so the credential-pool
+        refresh path runs, letting long-running TUI sessions recover from
+        stale tokens without an exit/reopen cycle.
+
+        Extend here for new providers as we discover them (Anthropic's
+        Claude Max OAuth entitlement errors look distinct enough today that
+        the existing 1M-context-beta branch handles them; revisit if other
+        subscription tiers start producing the same loop signature).
+        """
+        if status_code not in {401, 403, None}:
+            return False
+        if not isinstance(error_context, dict):
+            return False
+        # Build a single lowercase haystack covering every field shape the
+        # body might land in.  ``_extract_api_error_context`` normalises to
+        # ``message``/``reason``, but callers (and the test suite) may also
+        # hand us the raw body with ``code``/``error`` keys; cover both so
+        # the WKE disambiguator below fires regardless of entry point.
+        message = str(error_context.get("message") or "").lower()
+        reason = str(error_context.get("reason") or "").lower()
+        code = str(error_context.get("code") or "").lower()
+        err = str(error_context.get("error") or "").lower()
+        haystack = f"{message} {reason} {code} {err}"
+        if not haystack.strip():
+            return False
+        # xAI's authoritative disambiguator for "stale token" vs
+        # "unsubscribed account".  Both conditions share the same
+        # permission-denied ``code`` text; only one carries this suffix.
+        # Bail out before the entitlement keyword checks so a stale OAuth
+        # token routes through the credential-refresh path instead of the
+        # surface-error-as-entitlement path.  See #29344 for the long-
+        # running TUI failure mode this closes.
+        if "[wke=unauthenticated:" in haystack:
+            return False
+        if "oauth2 access token could not be validated" in haystack:
+            return False
+        if "do not have an active grok subscription" in haystack:
+            return True
+        if "out of available resources" in haystack and "grok" in haystack:
+            return True
+        if "does not have permission" in haystack and "grok" in haystack:
+            return True
+        return False
+
+    @staticmethod
+    def _decorate_xai_entitlement_error(detail: str) -> str:
+        """Append a neutral hint when xAI's OAuth surface returns the
+        permission-denied 403.
+
+        xAI's ``/v1/responses`` endpoint replies to several distinct failure
+        modes with the SAME body::
+
+            {"code": "The caller does not have permission to execute the
+             specified operation", "error": "You have either run out of
+             available resources or do not have an active Grok subscription.
+             Manage subscriptions at https://grok.com/?_s=usage or subscribe
+             at https://grok.com/supergrok"}
+
+        That body covers several real causes we cannot distinguish without
+        more info from xAI.  The most common (and least obvious) one is
+        that **X Premium+ does NOT include API access** — only standalone
+        SuperGrok subscribers can use Hermes against xai-oauth.  Lots of
+        users see Grok in their X app, assume it works here too, and hit
+        this 403 with no idea why.  Lead the hint with that.
+
+        Other possible causes:
+          * No Grok subscription at all
+          * SuperGrok tier doesn't include the requested model (e.g.
+            grok-4.3 may need a higher tier)
+          * Monthly quota exhausted (the ``?_s=usage`` URL hints at this)
+
+        Surface the raw xAI text verbatim and point at
+        https://grok.com/?_s=usage where the user can see WHICH applies.
+
+        Matched once per detail string — won't double-decorate if the
+        upstream already concatenated the same text.
+        """
+        if not detail:
+            return detail
+        lower = detail.lower()
+        is_entitlement = (
+            "do not have an active grok subscription" in lower
+            or ("out of available resources" in lower and "grok" in lower)
+            or ("does not have permission" in lower and "grok" in lower)
+        )
+        if not is_entitlement:
+            return detail
+        hint = (
+            " — xAI rejected this OAuth account. NOTE: X Premium+ does NOT "
+            "include xAI API access — only standalone SuperGrok subscribers "
+            "can use this provider. Other possible causes: no Grok "
+            "subscription, your tier doesn't include this model, or your "
+            "quota is exhausted. Check https://grok.com/?_s=usage to see "
+            "which, or run `/model` to switch providers."
+        )
+        # Idempotency: detect prior decoration by a substring unique to the
+        # hint (not present in xAI's own body text).
+        if "X Premium+ does NOT include" in detail:
+            return detail
+        return f"{detail}{hint}"
+
+    @staticmethod
+    def _coerce_api_error_detail(value: Any) -> str:
+        """Return a display-safe string for structured provider error fields."""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            for key in ("message", "detail", "error", "code", "type"):
+                nested = value.get(key)
+                if isinstance(nested, str) and nested.strip():
+                    return nested
+            for key in ("message", "detail", "error", "code", "type"):
+                if key in value:
+                    nested_detail = AIAgent._coerce_api_error_detail(value[key])
+                    if nested_detail:
+                        return nested_detail
+            try:
+                return json.dumps(value, ensure_ascii=False, sort_keys=True)
+            except TypeError:
+                return str(value)
+        if isinstance(value, (list, tuple)):
+            parts = [
+                AIAgent._coerce_api_error_detail(item)
+                for item in value
+            ]
+            return "; ".join(part for part in parts if part)
+        if value is None:
+            return ""
+        return str(value)
+
+    @staticmethod
     def _summarize_api_error(error: Exception) -> str:
         """Extract a human-readable one-liner from an API error.
 
@@ -4499,7 +4653,8 @@ class AIAgent:
             if msg:
                 status_code = getattr(error, "status_code", None)
                 prefix = f"HTTP {status_code}: " if status_code else ""
-                return f"{prefix}{msg[:300]}"
+                msg = AIAgent._coerce_api_error_detail(msg)
+                return AIAgent._decorate_xai_entitlement_error(f"{prefix}{msg[:300]}")
 
         # Fallback: truncate the raw string but give more room than 200 chars
         status_code = getattr(error, "status_code", None)
