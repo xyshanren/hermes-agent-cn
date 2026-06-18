@@ -215,6 +215,75 @@ pytest tests/gateway/ -q
 
 ---
 
+## v0.15.0+cn.9 (2026-06-18) — Phase 3 D1/D2 cherry-pick 测试验证完成
+
+> **73 KEEP commits 中 36 个合并完成**：D1 16/16 + D2 32/32（其中 12 个 SKIP/EMPTY），测试修复 8 项。
+> 工作分支：`upstream-merge-cn9-2026-06`
+> 阶段提交：`d094beb81`
+
+### Phase 3 — D1 自动合并（16 个）
+
+全部自动解决（--theirs/--ours/clean cherry-pick），5 个 EMPTY（CN 分支已有）：
+
+| 结果 | 数量 | 说明 |
+|------|:----:|------|
+| ✅ SUCCESS | 11 | 含 auto-resolve + clean cherry-pick |
+| ⏭️ EMPTY | 5 | upstream 变更已在 cn 中 |
+
+### Phase 3 — D2 人工/中等合并（32 个）
+
+25 个手动解决 + 7 个 EMPTY：
+
+| 结果 | 数量 | 说明 |
+|------|:----:|------|
+| ✅ SUCCESS | 25 | 含手动 mergetool + --theirs/--ours |
+| ⏭️ EMPTY | 7 | 已在 cn 中 |
+
+### 测试修复（8 项）
+
+在 D2 测试验证中发现的 import 缺失和测试失败：
+
+| # | 修复 | 类型 | 受益测试 |
+|---|------|------|---------|
+| 1 | `hermes_cli/nous_account.py` — 从上游检出 | 缺失文件 import | `tests/hermes_cli/test_models.py` 等 |
+| 2 | `hermes_cli/dashboard_auth/public_paths.py` — 从上游检出 | 缺失文件 import | `tests/hermes_cli/test_web_oauth_dispatch.py` 等 |
+| 3 | `providers.py` — 添加 bedrock 别名 (aws/aws-bedrock/amazon) | 配置缺失 | `test_bedrock_alias_in_providers` |
+| 4 | `agent/curator.py` — 改用 `atomic_json_write()` | 原子写入重构 | `test_state_atomic_write_no_tmp_leftovers` |
+| 5 | `hermes_cli/commands.py` — 添加 `gquota` 命令 | 命令注册缺失 | `test_gquota_registered` |
+| 6 | `locales/zh.yaml` + `zh-hant.yaml` — 补充 4 个 i18n 键 | i18n 同步 | `test_catalog_keys_match_english` |
+| 7 | `agent/auxiliary_client.py` — `set_runtime_main()` 补全 base_url/api_key/api_mode 参数 | API 签名缺失 | `test_set_runtime_main_custom_provider` (3 tests) |
+| 8 | `tests/cli/test_branch_command.py` — 断言修正 "会话" vs "Session" | 测试 CN 适配 | `test_branch_in_session_category` |
+
+### 已知 D3 待处理
+
+25 个大文件冲突将在 Phase 4 处理，包含 `hermes_cli/main.py` / `run_agent.py` / `gateway/run.py` 等核心文件。
+
+### 修改文件（8 + 2 新）
+
+| 文件 | 变更 |
+|------|------|
+| `hermes_cli/nous_account.py` | **新增**（678 行，上游 D3 文件） |
+| `hermes_cli/dashboard_auth/public_paths.py` | **新增**（49 行，上游 D3 文件） |
+| `agent/auxiliary_client.py` | `set_runtime_main()` 参数扩展 + `_resolve_auto` 全局变量回退 |
+| `agent/curator.py` | `save_state()` 改用 `atomic_json_write()` |
+| `hermes_cli/commands.py` | 添加 `gquota` 命令 |
+| `hermes_cli/providers.py` | 添加 bedrock 别名 + label |
+| `locales/zh.yaml` | 补充 4 个 i18n 键 + 修复 remove 占位符 |
+| `locales/zh-hant.yaml` | 补充 4 个 i18n 键 + 修复 remove 占位符 |
+| `tests/agent/test_curator.py` | tmp 残留检查改为 `.tmp` 后缀 |
+| `tests/cli/test_branch_command.py` | "Session" → "会话" |
+
+### 升级指引
+
+```bash
+cd ~/hermes-agent-cn
+git fetch origin
+git checkout upstream-merge-cn9-2026-06
+# 目前是 Phase 3 完成状态，等待 Phase 4 (D3) + Phase 5 (测试 + merge)
+```
+
+---
+
 ## v0.15.0+cn.7 (2026-06-15) — 方案 D 首次人工 merge（11 upstream KEEP commits）
 
 > **本版本** = D 方案首批 ~200 manual 冲突清理，经过 v1→v2→v3 三轮 path-rule 精炼，从 928 个 upstream commit 中筛出 **56 个 KEEP**，首批 cherry-pick **11 个**。
