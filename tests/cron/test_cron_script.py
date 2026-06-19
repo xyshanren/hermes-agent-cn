@@ -139,9 +139,7 @@ class TestRunJobScript:
         from tools.environments.local import _HERMES_PROVIDER_ENV_BLOCKLIST
         from cron.scheduler import _run_job_script
 
-        # sorted() so the probed var is deterministic across runs
-        # (frozenset iteration order varies with PYTHONHASHSEED).
-        blocked_var = sorted(_HERMES_PROVIDER_ENV_BLOCKLIST)[0]
+        blocked_var = next(iter(_HERMES_PROVIDER_ENV_BLOCKLIST))
         monkeypatch.setenv(blocked_var, "must_not_leak")
 
         script = cron_env / "scripts" / "env_probe.py"
