@@ -1059,36 +1059,41 @@ class SessionDB:
         """Return True if *ancestor_id* is a compression predecessor of
         *descendant_id* (walking parent links up the continuation chain).
 
-        The continuation edge is the canonical one shared with
-        :func:`_ephemeral_child_sql` / :meth:`set_session_archived`
-        (``_COMPRESSION_CHILD_SQL``): a parent → child edge counts only when the
+        Uses the same edge definition as :meth:`get_compression_tip`: a
+        parent → child edge counts as a compression continuation only when the
         parent ended with ``end_reason = 'compression'`` and the child started
-        at or after the parent's ``ended_at``, which distinguishes continuations
+        at or after the parent's ``ended_at`` (which distinguishes continuations
         from delegate subagents / branch children that also carry a
-        ``parent_session_id``. Expressed as a single recursive CTE rather than a
-        per-hop Python walk so the edge definition lives in exactly one place.
+        ``parent_session_id``).
         """
         if not ancestor_id or not descendant_id or ancestor_id == descendant_id:
             return False
-        # Walk parent links up from the descendant, following only compression
-        # continuation edges, and check whether ancestor_id is reached.
-        edge = _COMPRESSION_CHILD_SQL.format(a="child")
-        row = conn.execute(
-            f"""
-            WITH RECURSIVE ancestors(id) AS (
-                SELECT ?
-                UNION
-                SELECT parent.id
-                FROM ancestors a
-                JOIN sessions child ON child.id = a.id
-                JOIN sessions parent ON parent.id = child.parent_session_id
-                WHERE {edge}
-            )
-            SELECT 1 FROM ancestors WHERE id = ? AND id != ? LIMIT 1
-            """,
-            (descendant_id, ancestor_id, descendant_id),
-        ).fetchone()
-        return row is not None
+        current = descendant_id
+        # Bound the walk defensively, mirroring get_compression_tip.
+        for _ in range(100):
+            row = conn.execute(
+                "SELECT parent_session_id, started_at FROM sessions WHERE id = ?",
+                (current,),
+            ).fetchone()
+            if row is None or not row["parent_session_id"]:
+                return False
+            parent_id = row["parent_session_id"]
+            parent = conn.execute(
+                "SELECT ended_at, end_reason FROM sessions WHERE id = ?",
+                (parent_id,),
+            ).fetchone()
+            if (
+                parent is None
+                or parent["end_reason"] != "compression"
+                or parent["ended_at"] is None
+                or row["started_at"] is None
+                or row["started_at"] < parent["ended_at"]
+            ):
+                return False
+            if parent_id == ancestor_id:
+                return True
+            current = parent_id
+        return False
 
     def set_session_title(self, session_id: str, title: str) -> bool:
         """Set or update a session's title.
@@ -1108,9 +1113,29 @@ class SessionDB:
                 )
                 conflict = cursor.fetchone()
                 if conflict:
-                    raise ValueError(
-                        f"Title '{title}' is already in use by session {conflict['id']}"
-                    )
+                    conflict_id = conflict["id"]
+                    # A compression continuation is the live, projected-forward
+                    # head of its conversation; its compressed predecessors are
+                    # ended and hidden from the session list (list_sessions_rich
+                    # projects roots → tip). When the title that "conflicts" is
+                    # held by such a hidden ancestor, the user has no way to free
+                    # it — renaming the visible tip back to the base name would
+                    # dead-end with "already in use by <session they can't see>".
+                    # Treat this as a transfer: move the title off the ancestor
+                    # onto the continuation. Uniqueness is preserved (still only
+                    # one session carries the exact title) and the parent-link
+                    # lineage is untouched.
+                    if self._is_compression_ancestor(
+                        conn, ancestor_id=conflict_id, descendant_id=session_id
+                    ):
+                        conn.execute(
+                            "UPDATE sessions SET title = NULL WHERE id = ?",
+                            (conflict_id,),
+                        )
+                    else:
+                        raise ValueError(
+                            f"Title '{title}' is already in use by session {conflict_id}"
+                        )
             cursor = conn.execute(
                 "UPDATE sessions SET title = ? WHERE id = ?",
                 (title, session_id),
