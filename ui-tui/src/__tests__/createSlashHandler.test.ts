@@ -25,7 +25,10 @@ describe('createSlashHandler', () => {
   beforeEach(() => {
     resetOverlayState()
     resetUiState()
-    envState.dashboardTuiMode = false
+    delete process.env.HERMES_TUI_INLINE
+    delete process.env.HERMES_HOME
+    delete process.env.HERMES_WRITE_SAFE_ROOT
+    delete process.env.HERMES_DISABLE_LAZY_INSTALLS
   })
 
   it('opens the resume picker locally', () => {
@@ -52,17 +55,25 @@ describe('createSlashHandler', () => {
   })
 
   it('keeps hosted dashboard chat alive for /exit', () => {
-    envState.dashboardTuiMode = true
+    process.env.HERMES_TUI_INLINE = '1'
+    process.env.HERMES_HOME = '/opt/data/profiles/worker'
+    process.env.HERMES_WRITE_SAFE_ROOT = '/opt/data'
+    process.env.HERMES_DISABLE_LAZY_INSTALLS = '1'
     const ctx = buildCtx()
 
     expect(createSlashHandler(ctx)('/exit')).toBe(true)
     expect(ctx.session.die).not.toHaveBeenCalled()
     expect(ctx.gateway.gw.request).not.toHaveBeenCalled()
-    expect(ctx.transcript.sys).toHaveBeenCalledWith(DASHBOARD_EXIT_DISABLED_MESSAGE)
+    expect(ctx.transcript.sys).toHaveBeenCalledWith(
+      'exit is disabled in hosted dashboard chat — use /new to start a fresh session'
+    )
   })
 
   it('keeps /quit available outside hosted dashboard chat', () => {
-    envState.dashboardTuiMode = false
+    process.env.HERMES_TUI_INLINE = '1'
+    process.env.HERMES_HOME = '/Users/example/.hermes'
+    process.env.HERMES_WRITE_SAFE_ROOT = '/Users/example/.hermes'
+    process.env.HERMES_DISABLE_LAZY_INSTALLS = '1'
     const ctx = buildCtx()
 
     expect(createSlashHandler(ctx)('/quit')).toBe(true)

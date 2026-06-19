@@ -76,10 +76,19 @@ const DETAILS_USAGE =
 
 const DETAILS_SECTION_USAGE = 'usage: /details <section> [hidden|collapsed|expanded|reset]'
 
-// Shown when /exit or /quit is refused in the hosted dashboard chat. Kept as a
-// constant so the test asserts against the same source of truth as production.
-export const DASHBOARD_EXIT_DISABLED_MESSAGE =
-  'exit is disabled in hosted dashboard chat — use /new to start a fresh session'
+const truthyEnv = (v?: string) => /^(?:1|true|yes|on)$/i.test((v ?? '').trim())
+
+const hostedInlineDashboardChat = () => {
+  const hermesHome = (process.env.HERMES_HOME ?? '').trim()
+  const hostedHome = hermesHome === '/opt/data' || hermesHome.startsWith('/opt/data/')
+
+  return (
+    process.env.HERMES_TUI_INLINE === '1' &&
+    hostedHome &&
+    process.env.HERMES_WRITE_SAFE_ROOT === '/opt/data' &&
+    truthyEnv(process.env.HERMES_DISABLE_LAZY_INSTALLS)
+  )
+}
 
 export const coreCommands: SlashCommand[] = [
   {
@@ -119,15 +128,8 @@ export const coreCommands: SlashCommand[] = [
     help: 'exit hermes',
     name: 'quit',
     run: (_arg, ctx) => {
-      // In the hosted dashboard chat there is no in-page restart path after
-      // the PTY child exits, so quitting bricks the tab until a refresh. The
-      // keyboard idle-exit (Ctrl+C / Ctrl+D) and SIGINT handling already refuse
-      // to die in this mode (see useInputHandlers + entry.tsx); gate /exit and
-      // /quit on the same DASHBOARD_TUI_MODE flag. Unlike the keyboard path
-      // (which auto-starts a fresh chat), the explicit quit command refuses and
-      // instructs the user to run /new themselves.
-      if (DASHBOARD_TUI_MODE) {
-        ctx.transcript.sys(DASHBOARD_EXIT_DISABLED_MESSAGE)
+      if (hostedInlineDashboardChat()) {
+        ctx.transcript.sys('exit is disabled in hosted dashboard chat — use /new to start a fresh session')
 
         return
       }
