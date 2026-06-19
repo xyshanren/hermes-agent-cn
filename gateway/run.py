@@ -16733,16 +16733,40 @@ class GatewayRunner:
                 with _cache_lock:
                     cached = _cache.get(session_key)
                     if cached and cached[1] == _sig:
-                        agent = cached[0]
-                        # Refresh LRU order so the cap enforcement evicts
-                        # truly-oldest entries, not the one we just used.
-                        if hasattr(_cache, "move_to_end"):
-                            try:
-                                _cache.move_to_end(session_key)
-                            except KeyError:
-                                pass
-                        self._init_cached_agent_for_turn(agent, _interrupt_depth)
-                        logger.debug("Reusing cached agent for session %s", session_key)
+                        # cached[2] is the message_count at cache time;
+                        # stale when a second process appended rows.
+                        _cached_mc = cached[2] if len(cached) > 2 else None
+                        if (
+                            _cached_mc is not None
+                            and _current_msg_count is not None
+                            and _current_msg_count != _cached_mc
+                        ):
+                            # Cross-process write detected — discard stale
+                            # agent so it rebuilds from fresh DB transcript.
+                            logger.info(
+                                "Agent cache invalidated for session %s: "
+                                "message_count changed (%s -> %s), "
+                                "possible cross-process write",
+                                session_key, _cached_mc, _current_msg_count,
+                            )
+                            evicted = self._agent_cache.pop(session_key, None)
+                            _ev_agent = evicted[0] if isinstance(evicted, tuple) and evicted else None
+                            if _ev_agent and _ev_agent is not _AGENT_PENDING_SENTINEL:
+                                self._cleanup_agent_resources(_ev_agent)
+                        else:
+                            agent = cached[0]
+                            # Refresh LRU order so the cap enforcement evicts
+                            # truly-oldest entries, not the one we just used.
+                            if hasattr(_cache, "move_to_end"):
+                                try:
+                                    _cache.move_to_end(session_key)
+                                except KeyError:
+                                    pass
+                            self._init_cached_agent_for_turn(agent, _interrupt_depth)
+                            # Refresh agent max_iterations from current config
+                            # (cached agent may have been created with old config)
+                            agent.max_iterations = max_iterations
+                            logger.debug("Reusing cached agent for session %s", session_key)
 
             if agent is None:
                 # Config changed or first message — create fresh agent
