@@ -40,6 +40,7 @@ from urllib.request import url2pathname
 
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
+from utils import atomic_json_write, env_var_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,83 @@ _MEMORY_WRITE_TARGET_SUBDIR_MAP = {
     "user": "preferences",
     "memory": "patterns",
 }
+_LOCAL_OPENVIKING_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_LOCAL_OPENVIKING_AUTOSTART_TIMEOUT = 60.0
+_OPENVIKING_SERVER_LOG_RELATIVE_PATH = Path("logs") / "openviking-server.log"
+_OPENVIKING_RESPONDED_FAILURE_PREFIX = "OpenViking server responded"
+_SETUP_CANCELLED = object()
+
+
+@dataclass(frozen=True)
+class _OvcliProfile:
+    source: str
+    name: str
+    path: Path
+    data: dict
+    values: dict
+    is_active: bool = False
+
+
+class _OpenVikingHTTPError(RuntimeError):
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _sanitize_openviking_error_message(message: str, status_code: Optional[int] = None) -> str:
+    text = (message or "").strip()
+    status = f"HTTP {status_code}" if status_code else "HTTP error"
+    looks_like_html = bool(re.search(r"^\s*<(!doctype|html|head|body)\b", text, flags=re.IGNORECASE))
+    if looks_like_html:
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE | re.DOTALL)
+        if title_match:
+            title = re.sub(r"\s+", " ", title_match.group(1)).strip()
+            if "|" in title:
+                title = title.split("|", 1)[1].strip()
+            if status_code and title.startswith(f"{status_code}:"):
+                title = title.split(":", 1)[1].strip()
+            if title:
+                return f"{status}: {title}"
+        return f"{status}: OpenViking endpoint returned an HTML error page."
+
+    if len(text) > 300:
+        return text[:297].rstrip() + "..."
+    return text or status
+
+
+def _format_openviking_exception(error: Exception) -> str:
+    status_code = None
+    if isinstance(error, _OpenVikingHTTPError):
+        status_code = error.status_code
+    else:
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None)
+    return _sanitize_openviking_error_message(str(error), status_code)
+
+
+def _derive_openviking_user_text(content: Any) -> str:
+    """Strip Hermes slash-skill scaffolding before sending content to OpenViking.
+
+    Defense-in-depth: MemoryManager already strips skill scaffolding for the
+    whole provider fan-out (see ``MemoryManager._strip_skill_scaffolding``), so
+    in normal operation this receives already-clean text and passes it through
+    unchanged. It stays here so OpenViking is correct if its hooks are ever
+    invoked outside the manager. Delegates to the canonical extractor in
+    ``agent.skill_commands`` — no duplicated marker literals, no drift risk.
+    """
+    return extract_user_instruction_from_skill_message(content) or ""
+
+
+def _sync_trace_enabled() -> bool:
+    return env_var_enabled(_SYNC_TRACE_ENV)
+
+
+def _preview(value: Any, limit: int = 160) -> str:
+    text = "" if value is None else str(value)
+    text = text.replace("\n", "\\n")
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
 
 
 # ---------------------------------------------------------------------------
