@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_ENDPOINT = "http://127.0.0.1:1933"
 _TIMEOUT = 30.0
 _REMOTE_RESOURCE_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
+_SYNC_TRACE_ENV = "HERMES_OPENVIKING_SYNC_TRACE"
 
 # Maps the viking_remember `category` enum to a viking:// subdirectory.
 # Keep in sync with REMEMBER_SCHEMA.parameters.properties.category.enum.
@@ -362,14 +363,6 @@ _OPENVIKING_RECALL_TOOL_NAMES = {
     READ_SCHEMA["name"],
     BROWSE_SCHEMA["name"],
 }
-
-# Canonical tool_status values emitted in OpenViking batch tool parts.
-_TOOL_STATUS_COMPLETED = "completed"
-_TOOL_STATUS_ERROR = "error"
-_TOOL_STATUS_PENDING = "pending"
-# Inbound status aliases (from varied tool-result shapes) -> canonical above.
-_TOOL_STATUS_ERROR_ALIASES = {"error", "failed", "failure"}
-_TOOL_STATUS_COMPLETED_ALIASES = {"completed", "complete", "success", "succeeded"}
 
 
 def _zip_directory(dir_path: Path) -> Path:
