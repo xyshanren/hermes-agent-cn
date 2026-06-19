@@ -1046,7 +1046,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
                         "tool_id": tool_id,
                         "tool_name": tool_name,
                         "tool_input": tool_input,
-                        "tool_status": _TOOL_STATUS_PENDING,
+                        "tool_status": "pending",
                     })
 
             if parts:
