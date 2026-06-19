@@ -76,6 +76,14 @@ const DETAILS_USAGE =
 
 const DETAILS_SECTION_USAGE = 'usage: /details <section> [hidden|collapsed|expanded|reset]'
 
+// Shown when /exit or /quit is refused in the hosted dashboard chat. Kept as a
+// constant so the test asserts against the same source of truth as production.
+export const DASHBOARD_EXIT_DISABLED_MESSAGE =
+  'exit is disabled in hosted dashboard chat — use /new to start a fresh session'
+
+export const DASHBOARD_UPDATE_DISABLED_MESSAGE =
+  'update is disabled in hosted dashboard chat — the hosted environment is managed separately'
+
 export const coreCommands: SlashCommand[] = [
   {
     help: 'list commands + hotkeys',
@@ -120,6 +128,12 @@ export const coreCommands: SlashCommand[] = [
     help: 'update Hermes Agent to the latest version (exits TUI)',
     name: 'update',
     run: (_arg, ctx) => {
+      if (DASHBOARD_TUI_MODE) {
+        ctx.transcript.sys(DASHBOARD_UPDATE_DISABLED_MESSAGE)
+
+        return
+      }
+
       ctx.transcript.sys('exiting TUI to run update...')
       // Exit code 42 signals the Python wrapper to exec `hermes update`.
       // Use dieWithCode for proper cleanup (gateway kill + Ink unmount).
