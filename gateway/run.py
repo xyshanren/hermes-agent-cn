@@ -14413,7 +14413,15 @@ class GatewayRunner:
                 if metadata:
                     result = await adapter.send(str(home.chat_id), message, metadata=metadata)
                 else:
-                    result = await adapter.send(str(home.chat_id), message)
+                    _startup_meta = _non_conversational_metadata(platform=platform)
+                    if _startup_meta:
+                        result = await adapter.send(
+                            str(home.chat_id),
+                            message,
+                            metadata=_startup_meta,
+                        )
+                    else:
+                        result = await adapter.send(str(home.chat_id), message)
                 if result is not None and getattr(result, "success", True) is False:
                     logger.warning(
                         "Home-channel startup notification failed for %s:%s: %s",
