@@ -2768,6 +2768,8 @@ def _run_portal_one_shot(config: dict) -> None:
     # setup calls, so `hermes portal` == quick setup's Nous step.
     try:
         from hermes_cli.main import _model_flow_nous
+    except ImportError:
+        _model_flow_nous = None
 
     if already_logged_in:
         print_success("  Already logged into Nous Portal.")

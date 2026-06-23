@@ -13,6 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# ShellFileOperations.write_file() requires bash — skip entire file on Windows.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="requires bash on Windows")
+
 from tools.environments.local import LocalEnvironment
 from tools.file_operations import (
     PatchResult,

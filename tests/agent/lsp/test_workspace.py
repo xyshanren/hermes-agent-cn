@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
+
+# normalize_path / ~ expansion requires bash — skip entire file on Windows.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="requires bash on Windows")
 
 from agent.lsp.workspace import (
     clear_cache,
