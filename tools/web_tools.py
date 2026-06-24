@@ -133,15 +133,35 @@ def _load_web_config() -> dict:
     except (ImportError, Exception):
         return {}
 
-def _get_backend() -> str:
+# Recognized web backend names (config values accepted in ``web.backend`` /
+# ``web.search_backend`` / ``web.extract_backend``). Kept as a single source of
+# truth for config validation across the selection helpers.
+_KNOWN_WEB_BACKENDS = frozenset(
+    {"parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs", "xai"}
+)
+
+# Backends that only service web_search (their provider's ``supports_extract()``
+# is False). They are skipped during *extract* auto-detect so a search-only
+# credential (e.g. SEARXNG_URL) does not shadow the keyless Parallel free-MCP
+# fallback, which would otherwise leave web_extract broken on a no-key install.
+_SEARCH_ONLY_BACKENDS = frozenset({"searxng", "brave-free", "ddgs", "xai"})
+
+
+def _get_backend(capability: str = "search") -> str:
     """Determine which web backend to use (shared fallback).
 
     Reads ``web.backend`` from config.yaml (set by ``hermes tools``).
     Falls back to whichever API key is present for users who configured
     keys manually without running setup.
+
+    ``capability`` ("search" | "extract") only affects auto-detect: for
+    ``extract`` we skip search-only backends (``_SEARCH_ONLY_BACKENDS``) so a
+    search-only credential never shadows the keyless Parallel free-MCP extract
+    fallback. An explicit ``web.backend`` value is honored as-is (explicit wins,
+    surfacing that backend's own search-only error rather than rerouting).
     """
     configured = (_load_web_config().get("backend") or "").lower().strip()
-    if configured in {"parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs", "xai"}:
+    if configured in _KNOWN_WEB_BACKENDS:
         return configured
 
     # Fallback for manual / legacy config — pick the highest-priority
@@ -150,7 +170,8 @@ def _get_backend() -> str:
     # pre-empted by a Nous OAuth token whose subscription tier may not
     # actually grant web-search access (the gateway then fails at runtime
     # with "no subscription" and the tool returns an error to the agent
-    # without falling back). Free-tier backends trail the paid ones.
+    # without falling back). Free-tier backends (searxng / brave-free /
+    # keyless parallel / ddgs) trail the keyed ones.
     backend_candidates = (
         ("tavily", _has_env("TAVILY_API_KEY")),
         ("exa", _has_env("EXA_API_KEY")),
@@ -159,13 +180,24 @@ def _get_backend() -> str:
         ("firecrawl", _is_tool_gateway_ready()),
         ("searxng", _has_env("SEARXNG_URL")),
         ("brave-free", _has_env("BRAVE_SEARCH_API_KEY")),
+        # Keyless Parallel free MCP — always available, the intended no-key
+        # default for both search and extract. Ahead of ddgs (search-only, so it
+        # can't service web_extract); ddgs stays reachable via web.backend=ddgs.
+        ("parallel", True),
         ("ddgs", _ddgs_package_importable()),
     )
     for backend, available in backend_candidates:
-        if available:
-            return backend
+        if not available:
+            continue
+        # For extract, skip search-only backends so the keyless Parallel
+        # free-MCP fallback (which can fetch URLs) is reached instead.
+        if capability == "extract" and backend in _SEARCH_ONLY_BACKENDS:
+            continue
+        return backend
 
-    return "firecrawl"  # default (backward compat)
+    # Defensive terminal (the keyless ``parallel`` candidate above is always
+    # available, so this is effectively unreachable).
+    return "parallel"
 
 
 def _get_search_backend() -> str:
@@ -203,7 +235,7 @@ def _get_capability_backend(capability: str) -> str:
     specific = (cfg.get(f"{capability}_backend") or "").lower().strip()
     if specific and _is_backend_available(specific):
         return specific
-    return _get_backend()
+    return _get_backend(capability=capability)
 
 
 def _is_backend_available(backend: str) -> bool:
@@ -211,7 +243,9 @@ def _is_backend_available(backend: str) -> bool:
     if backend == "exa":
         return _has_env("EXA_API_KEY")
     if backend == "parallel":
-        return _has_env("PARALLEL_API_KEY")
+        # Parallel is always available via the keyless free MCP. The
+        # key-gated path is used when PARALLEL_API_KEY is present.
+        return True
     if backend == "firecrawl":
         return check_firecrawl_api_key()
     if backend == "tavily":
@@ -1490,14 +1524,17 @@ async def web_crawl_tool(
 
 # Convenience function to check Firecrawl credentials
 def check_web_api_key() -> bool:
-    """Check whether the configured web backend is available."""
+    """Check whether the configured web backend is available.
+
+    The Parallel free Search MCP is always available (no key needed), so
+    this returns True when no explicit backend is configured or the
+    auto-detected backend is parallel.
+    """
     configured = _load_web_config().get("backend", "").lower().strip()
-    if configured in {"exa", "parallel", "firecrawl", "tavily", "searxng", "brave-free", "ddgs", "xai"}:
+    if configured in _KNOWN_WEB_BACKENDS:
         return _is_backend_available(configured)
-    return any(
-        _is_backend_available(backend)
-        for backend in ("exa", "parallel", "firecrawl", "tavily", "searxng", "brave-free", "ddgs", "xai")
-    )
+    # Keyless Parallel MCP is the default fallback — web works out of the box.
+    return True
 
 
 def check_auxiliary_model() -> bool:
