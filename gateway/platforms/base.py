@@ -15,6 +15,7 @@ import re
 import socket as _socket
 import subprocess
 import sys
+import time
 import uuid
 from abc import ABC, abstractmethod
 from urllib.parse import urlsplit
@@ -1257,6 +1258,17 @@ def cleanup_document_cache(max_age_hours: int = 24) -> int:
             except OSError:
                 pass
     return removed
+
+
+def _float_env(name: str, default: float) -> float:
+    """Read an env var as float, falling back to ``default`` on typos/empty."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 class MessageType(Enum):
@@ -2633,6 +2645,22 @@ class BasePlatformAdapter(ABC):
 
         return ''.join(chars)
 
+    @staticmethod
+    def _mask_json_string_media(content: str) -> str:
+        """Replace content inside JSON string values with spaces to prevent
+        MEDIA: false positives from serialized tool results (#34375).
+
+        Preserves character count so regex match offsets stay valid.
+        """
+        chars = list(content)
+        # Match double-quoted JSON string values following `:`, `,`, or `[`
+        for m in re.finditer(r'(?<=[:,\[])\s*("((?:[^"\\]|\\.)*)")', content):
+            start = m.start(2)  # skip opening "
+            end = m.end(2)      # before closing "
+            for i in range(start, end):
+                if chars[i] != '\n':
+                    chars[i] = ' '
+        return ''.join(chars)
 
     @staticmethod
     def extract_media(content: str) -> Tuple[List[Tuple[str, bool]], str]:
@@ -3892,6 +3920,7 @@ class BasePlatformAdapter(ABC):
 
                 # Extract MEDIA:<path> tags (from TTS tool) before other processing
                 media_files, response = self.extract_media(response)
+                media_files = self.filter_media_delivery_paths(media_files)
 
                 # Extract image URLs and send them as native platform attachments
                 images, text_content = self.extract_images(response)
