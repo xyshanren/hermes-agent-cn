@@ -8321,6 +8321,27 @@ class GatewayRunner(GatewayKanbanWatchersMixin, GatewaySlashCommandsMixin):
             except Exception as exc:
                 logger.debug("@ context reference expansion failed: %s", exc)
 
+        # P0-4: inject human-readable timestamp prefix into user message
+        try:
+            from gateway.message_timestamps import (
+                coerce_message_timestamp as _coerce_msg_ts,
+                render_user_content_with_timestamp as _render_msg_ts,
+                strip_leading_message_timestamps as _strip_msg_ts,
+            )
+            try:
+                from hermes_time import get_timezone as _get_evt_tz
+                _evt_tz = _get_evt_tz()
+            except ImportError:
+                _evt_tz = None
+
+            if message_text and isinstance(message_text, str):
+                _clean_message_text, _embedded_ts = _strip_msg_ts(message_text, tz=_evt_tz)
+                _event_epoch = _coerce_msg_ts(getattr(event, "timestamp", None), tz=_evt_tz)
+                _persist_ts = _event_epoch if _event_epoch is not None else _embedded_ts
+                message_text = _render_msg_ts(_clean_message_text, _persist_ts, tz=_evt_tz)
+        except Exception as _ts_err:
+            logger.debug("Message timestamp injection failed (non-fatal): %s", _ts_err)
+
         return message_text
 
     def _consume_pending_native_image_paths(self, session_key: str) -> List[str]:
@@ -14457,6 +14478,18 @@ class GatewayRunner(GatewayKanbanWatchersMixin, GatewaySlashCommandsMixin):
                         # provider-specific echo requirements survive session
                         # reload.  See ``_ASSISTANT_REPLAY_FIELDS`` for the full
                         # whitelist and rationale.
+                        # P0-4: render human-readable timestamp for user messages
+                        if role == "user":
+                            try:
+                                from gateway.message_timestamps import render_user_content_with_timestamp as _render_msg_ts
+                                try:
+                                    from hermes_time import get_timezone as _get_msg_tz
+                                    _msg_tz = _get_msg_tz()
+                                except ImportError:
+                                    _msg_tz = None
+                                content = _render_msg_ts(content, msg.get("timestamp"), tz=_msg_tz)
+                            except Exception:
+                                pass
                         entry = _build_replay_entry(role, content, msg)
                         agent_history.append(entry)
             
