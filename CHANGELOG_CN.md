@@ -1,3 +1,55 @@
+# CHANGELOG — hermes-agent-cn
+
+> hermes-agent-cn 中文版变更记录。  
+> 当前文件聚焦 v0.17.0 阶段（cn.11 起）。早期历史见 [docs/archive/CHANGELOG_CN_v015.md](docs/archive/CHANGELOG_CN_v015.md) 和下方"历史记录"章节。
+
+---
+
+## 历史记录
+
+### v0.15.0 系列（2026-04 ~ 2026-06，259+ commits cherry-pick）
+
+**主线**: 一次性还清 8 周 upstream 债，259 个 commits cherry-pick 进来。
+
+| Tag | 范围 | 关键里程碑 |
+|-----|------|-----------|
+| v0.15.0+cn.4 ~ cn.5 | D1 cherry-pick | cherry_pick 工具链 v1→v5 演进 |
+| v0.15.0+cn.6 | bitwarden cleanup | EXCLUDE_THEIRS 首创 |
+| v0.15.0+cn.7 | 10 upstream KEEP commits merge | |
+| v0.15.0+cn.8 | 减法（jian-fa）完成 | 大文件按 hunks 拆分（cli.py/run_agent.py）|
+| v0.15.0+cn.9 | Phase 3 D1/D2 test verification | |
+| v0.15.0+cn.10 | D3 dashboard_auth 4 files | CN product decision drift |
+
+**Cherry-pick 工具链 7 个版本**:
+- v1 试水（手工挑，10 commit）→ v2 自动化（巨型 refactor 过滤 + SED）
+- v3 优化（依赖锁 AUTO-OURS）→ v4 SPLIT（大文件按 hunks）
+- v5 单标（test_voice_command.py 修复）→ v6 累积（EXCLUDE_MANUAL 78 个）
+- v7 bug 修（空 cherry-pick 自动 skip + timeout 30s）→ 累计 259 commits
+
+**主推平台保留**: feishu（飞书）/ weixin（微信）；降权保留 wecom/yuanbao/dingtalk。
+
+**完整记录**: [docs/archive/CHANGELOG_CN_v015.md](docs/archive/CHANGELOG_CN_v015.md)（1364 行）
+
+### v0.12.0 ~ v0.14.0 系列（2026-02 ~ 2026-04，Phase 1-7）
+
+**主线**: 本地化 + model routing + 语义防火墙 + MemPalace 集成
+
+| 阶段 | 关键能力 |
+|------|---------|
+| v0.12.0-cn.1~8 | quickstart、install all、tier management、SilliconFlow 集成 |
+| v0.12.0-cn.9~11 | quickstart ollama base_url 修复、deep fix |
+| v0.13.0 | 多模型 routing 框架 |
+| v0.14.0+cn.2 | dual-router unification、SmartRouter v2 多后端能力感知 |
+| v0.14.0+cn.3 | toolsets.py 语法错误修复 |
+| Phase 5-7 | 语义防火墙（doctor 段）+ MemPalace + graphify 集成 |
+
+**注意**: 此阶段完整记录未归档（太老，cn.11 之前 git 历史可查）。如需重建可执行：
+```bash
+git show 7fab46364:CHANGELOG_CN.md > /tmp/CHANGELOG_CN_pre_v015.md
+```
+
+---
+
 # CHANGELOG — v0.17.0+cn.11
 
 > **Phase 1 of v0.17.0 merge**. Release tag: `v0.17.0+cn.11` on `cn-merge` branch.
