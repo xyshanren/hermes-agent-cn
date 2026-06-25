@@ -27,8 +27,10 @@ Rust) writing UTF-16 to the Win32 console API and letting the terminal
 sort it out.  Python doesn't get that luxury.
 """
 
-from __future__ import annotations
 
+
+from __future__ import annotations
+from typing import Any
 import os
 import sys
 

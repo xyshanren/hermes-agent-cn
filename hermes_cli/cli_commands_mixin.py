@@ -12,8 +12,10 @@ Import discipline (mirrors gateway/slash_commands.py, PR #41886):
     loaded, so the mixin module never imports ``cli`` at top level (no cycle).
 """
 
-from __future__ import annotations
 
+
+from __future__ import annotations
+from typing import Any
 import json
 import os
 import sys

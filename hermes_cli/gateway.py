@@ -4,6 +4,8 @@ Gateway subcommand for hermes CLI.
 Handles: hermes gateway [run|start|stop|restart|status|install|uninstall|setup]
 """
 
+from typing import Any
+
 import asyncio
 import logging
 import os

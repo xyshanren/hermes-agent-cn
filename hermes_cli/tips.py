@@ -2,6 +2,8 @@
 
 import random
 
+from typing import Any
+
 
 # ---------------------------------------------------------------------------
 # Tip corpus — one-liners covering slash commands, CLI flags, config,

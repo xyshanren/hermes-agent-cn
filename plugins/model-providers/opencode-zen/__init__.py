@@ -7,6 +7,8 @@ Both use per-model api_mode routing:
     (this profile)
 """
 
+from typing import Any
+
 from providers import register_provider
 from providers.base import ProviderProfile
 

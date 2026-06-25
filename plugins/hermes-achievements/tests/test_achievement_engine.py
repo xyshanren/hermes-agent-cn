@@ -2,6 +2,8 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+from typing import Any
+
 MODULE_PATH = Path(__file__).resolve().parents[1] / "dashboard" / "plugin_api.py"
 spec = importlib.util.spec_from_file_location("plugin_api", MODULE_PATH)
 plugin_api = importlib.util.module_from_spec(spec)
