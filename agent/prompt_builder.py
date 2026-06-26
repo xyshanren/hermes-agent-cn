@@ -1400,6 +1400,34 @@ def build_skills_system_prompt(
             except Exception as e:
                 logger.debug("Could not read external skill description %s: %s", desc_file, e)
 
+    # ── Optional tier-based filtering ────────────────────────────────
+    # When skills.tier_management is enabled, separate skills into active
+    # (builtin + frequent) and archived sections.
+    tier_data = _load_tier_data()
+    if tier_data:
+        active_skills: set[str] = set()
+        archived_skills: set[str] = set()
+        for cat_skills in skills_by_category.values():
+            for name, _desc in cat_skills:
+                tier = tier_data.get(name, "archived")
+                if tier in ("builtin", "frequent"):
+                    active_skills.add(name)
+                else:
+                    archived_skills.add(name)
+
+        filtered: dict[str, list[tuple[str, str]]] = {}
+        archived: list[tuple[str, str]] = []
+        for category in sorted(skills_by_category.keys()):
+            for name, desc in skills_by_category[category]:
+                if name in active_skills:
+                    filtered.setdefault(category, []).append((name, desc))
+                else:
+                    archived.append((name, desc))
+        skills_by_category = filtered
+        _archived_list = archived
+    else:
+        _archived_list = None
+
     # Posture-driven category pruning (e.g. non-coding skills while pairing on
     # code). Match on the top-level category segment so nested categories
     # ("social-media/twitter") are pruned with their parent.
@@ -1420,7 +1448,7 @@ def build_skills_system_prompt(
                 "outside this list.)"
             )
 
-    if not skills_by_category:
+    if not skills_by_category and not _archived_list:
         result = ""
     else:
         index_lines = []
