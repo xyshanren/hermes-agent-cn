@@ -3410,6 +3410,21 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         self._background_tasks: Dict[str, threading.Thread] = {}
         self._background_task_counter = 0
 
+    def _claim_active_session(self, surface: str = "cli", *, stderr: bool = False) -> bool:
+        """No-op stub: full active-session lease mechanism not cherry-picked.
+
+        Always returns True (success) so callers proceed. The full impl
+        (PR #43036 sibling, feat(sessions): add optional max session cap)
+        lives upstream but was not pulled into cn; one-shot CLI runs are
+        short-lived and don't compete for the global slot, so the no-op
+        is safe.
+        """
+        return True
+
+    def _release_active_session(self) -> None:
+        """No-op stub matching _claim_active_session — see note there."""
+        return
+
     def _invalidate(self, min_interval: float = 0.25) -> None:
         """Throttled UI repaint for high-frequency background updates.
 

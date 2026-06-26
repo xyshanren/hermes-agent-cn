@@ -29,11 +29,49 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 logger = logging.getLogger(__name__)
 
+
+def _delegate_from_json(col: str = "model_config") -> str:
+    return f"json_extract(COALESCE({col}, '{{}}'), '$._delegate_from')"
+
+
+# A child session counts as a /branch (kept visible, never cascade-deleted) if
+# it carries the stable marker OR the legacy end_reason heuristic holds.
+_BRANCH_CHILD_SQL = (
+    "json_extract(COALESCE({a}.model_config, '{{}}'), '$._branched_from') IS NOT NULL"
+    " OR EXISTS (SELECT 1 FROM sessions p"
+    "            WHERE p.id = {a}.parent_session_id"
+    "            AND p.end_reason = 'branched'"
+    "            AND {a}.started_at >= p.ended_at)"
+)
+
+_COMPRESSION_CHILD_SQL = (
+    "EXISTS (SELECT 1 FROM sessions p"
+    "        WHERE p.id = {a}.parent_session_id"
+    "        AND p.end_reason = 'compression'"
+    "        AND {a}.started_at >= p.ended_at)"
+)
+
+# Rows that surface in pickers: roots + branch children (subagent runs and
+# compression continuations stay hidden).
+_LISTABLE_CHILD_SQL = f"(s.parent_session_id IS NULL OR {_BRANCH_CHILD_SQL.format(a='s')})"
+
+
+def _ephemeral_child_sql(alias: str = "s") -> str:
+    """Subagent runs (cascade-delete targets), not branches or compression tips."""
+    branch = _BRANCH_CHILD_SQL.format(a=alias)
+    compression = _COMPRESSION_CHILD_SQL.format(a=alias)
+    return (
+        f"({alias}.parent_session_id IS NOT NULL"
+        f" AND NOT ({branch})"
+        f" AND NOT ({compression}))"
+    )
+
+
 T = TypeVar("T")
 
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # ---------------------------------------------------------------------------
 # WAL-compatibility fallback
@@ -746,6 +784,7 @@ class SessionDB:
             # backfills, index changes tied to a specific version step) stay
             # in a version-gated chain. Column additions are handled by
             # _reconcile_columns() above and no longer need entries here.
+            fts_migrations_complete = True  # init; set False by FTS migration failures
             if current_version < 10 and SCHEMA_VERSION < 11:
                 # v10: trigram FTS5 table for CJK/substring search. The
                 # virtual table + triggers are created unconditionally via
@@ -914,6 +953,7 @@ class SessionDB:
         system_prompt: str = None,
         user_id: str = None,
         parent_session_id: str = None,
+        cwd: Optional[str] = None,  # accepted but not yet persisted (no cwd column in schema)
     ) -> None:
         """Shared INSERT OR IGNORE for session rows."""
         def _do(conn):

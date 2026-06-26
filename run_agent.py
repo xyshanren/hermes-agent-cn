@@ -110,6 +110,9 @@ from agent.process_bootstrap import (
 from agent.iteration_budget import IterationBudget
 
 
+_OPENAI_CLS_CACHE: Optional[type] = None
+
+
 def _load_openai_cls() -> type:
     """Import and cache ``openai.OpenAI``."""
     global _OPENAI_CLS_CACHE
@@ -1102,6 +1105,7 @@ class AIAgent:
         save_trajectories: bool = False,
         verbose_logging: bool = False,
         quiet_mode: bool = False,
+        tool_progress_mode: str = "all",
         ephemeral_system_prompt: str = None,
         log_prefix_chars: int = 100,
         log_prefix: str = "",
@@ -1118,6 +1122,7 @@ class AIAgent:
         thinking_callback: callable = None,
         reasoning_callback: callable = None,
         clarify_callback: callable = None,
+        read_terminal_callback: callable = None,
         step_callback: callable = None,
         stream_delta_callback: callable = None,
         interim_assistant_callback: callable = None,
@@ -1133,6 +1138,7 @@ class AIAgent:
         prefill_messages: List[Dict[str, Any]] = None,
         platform: str = None,
         user_id: str = None,
+        user_id_alt: str = None,
         user_name: str = None,
         chat_id: str = None,
         chat_name: str = None,
@@ -1803,63 +1809,7 @@ class AIAgent:
         self.tools = get_tool_definitions(
             enabled_toolsets=enabled_toolsets,
             disabled_toolsets=disabled_toolsets,
-            save_trajectories=save_trajectories,
-            verbose_logging=verbose_logging,
             quiet_mode=quiet_mode,
-            tool_progress_mode=tool_progress_mode,
-            ephemeral_system_prompt=ephemeral_system_prompt,
-            log_prefix_chars=log_prefix_chars,
-            log_prefix=log_prefix,
-            providers_allowed=providers_allowed,
-            providers_ignored=providers_ignored,
-            providers_order=providers_order,
-            provider_sort=provider_sort,
-            provider_require_parameters=provider_require_parameters,
-            provider_data_collection=provider_data_collection,
-            openrouter_min_coding_score=openrouter_min_coding_score,
-            session_id=session_id,
-            tool_progress_callback=tool_progress_callback,
-            tool_start_callback=tool_start_callback,
-            tool_complete_callback=tool_complete_callback,
-            thinking_callback=thinking_callback,
-            reasoning_callback=reasoning_callback,
-            clarify_callback=clarify_callback,
-            read_terminal_callback=read_terminal_callback,
-            step_callback=step_callback,
-            stream_delta_callback=stream_delta_callback,
-            interim_assistant_callback=interim_assistant_callback,
-            tool_gen_callback=tool_gen_callback,
-            status_callback=status_callback,
-            notice_callback=notice_callback,
-            notice_clear_callback=notice_clear_callback,
-            event_callback=event_callback,
-            max_tokens=max_tokens,
-            reasoning_config=reasoning_config,
-            service_tier=service_tier,
-            request_overrides=request_overrides,
-            prefill_messages=prefill_messages,
-            platform=platform,
-            user_id=user_id,
-            user_id_alt=user_id_alt,
-            user_name=user_name,
-            chat_id=chat_id,
-            chat_name=chat_name,
-            chat_type=chat_type,
-            thread_id=thread_id,
-            gateway_session_key=gateway_session_key,
-            skip_context_files=skip_context_files,
-            load_soul_identity=load_soul_identity,
-            skip_memory=skip_memory,
-            session_db=session_db,
-            parent_session_id=parent_session_id,
-            iteration_budget=iteration_budget,
-            fallback_model=fallback_model,
-            credential_pool=credential_pool,
-            checkpoints_enabled=checkpoints_enabled,
-            checkpoint_max_snapshots=checkpoint_max_snapshots,
-            checkpoint_max_total_size_mb=checkpoint_max_total_size_mb,
-            checkpoint_max_file_size_mb=checkpoint_max_file_size_mb,
-            pass_session_id=pass_session_id,
         )
         
         # Show tool configuration and store valid tool names for validation
@@ -9244,113 +9194,6 @@ class AIAgent:
             max_dimension=max_dimension,
         )
 
-        Mutates ``api_messages`` in place. Returns True if any image part was
-        actually replaced, False if there were no image parts to shrink or
-        Pillow couldn't help (caller should surface the original error).
-
-        Strategy: look for ``image_url`` / ``input_image`` parts carrying a
-        ``data:image/...;base64,...`` payload.  For each one whose encoded
-        size exceeds 4 MB (a safe target that slides under Anthropic's 5 MB
-        ceiling with header overhead), write the base64 to a tempfile, call
-        ``vision_tools._resize_image_for_vision`` to produce a smaller data
-        URL, and substitute it in place.
-
-        Non-data-URL images (http/https URLs) are not touched — the provider
-        fetches those itself and the size limit is different.
-        """
-        if not api_messages:
-            return False
-
-        try:
-            from tools.vision_tools import _resize_image_for_vision
-        except Exception as exc:
-            logger.warning("image-shrink recovery: vision_tools unavailable — %s", exc)
-            return False
-
-        # 4 MB target leaves comfortable headroom under Anthropic's 5 MB.
-        # Non-Anthropic providers we haven't observed rejecting are fine with
-        # much larger; shrinking to 4 MB here loses quality but only fires
-        # after a confirmed provider rejection, so the alternative is failure.
-        target_bytes = 4 * 1024 * 1024
-        changed_count = 0
-
-        def _shrink_data_url(url: str) -> Optional[str]:
-            """Return a smaller data URL, or None if shrink can't help."""
-            if not isinstance(url, str) or not url.startswith("data:"):
-                return None
-            if len(url) <= target_bytes:
-                # This specific image wasn't the oversized one.
-                return None
-            try:
-                header, _, data = url.partition(",")
-                mime = "image/jpeg"
-                if header.startswith("data:"):
-                    mime_part = header[len("data:"):].split(";", 1)[0].strip()
-                    if mime_part.startswith("image/"):
-                        mime = mime_part
-                import base64 as _b64
-                raw = _b64.b64decode(data)
-                suffix = {
-                    "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp",
-                    "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/bmp": ".bmp",
-                }.get(mime, ".jpg")
-                tmp = tempfile.NamedTemporaryFile(
-                    prefix="hermes_shrink_", suffix=suffix, delete=False,
-                )
-                try:
-                    tmp.write(raw)
-                    tmp.close()
-                    resized = _resize_image_for_vision(
-                        Path(tmp.name),
-                        mime_type=mime,
-                        max_base64_bytes=target_bytes,
-                    )
-                finally:
-                    try:
-                        Path(tmp.name).unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                if not resized or len(resized) >= len(url):
-                    # Shrink didn't help (or made it bigger — corrupt input?).
-                    return None
-                return resized
-            except Exception as exc:
-                logger.warning("image-shrink recovery: re-encode failed — %s", exc)
-                return None
-
-        for msg in api_messages:
-            if not isinstance(msg, dict):
-                continue
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            for part in content:
-                if not isinstance(part, dict):
-                    continue
-                ptype = part.get("type")
-                if ptype not in {"image_url", "input_image"}:
-                    continue
-                image_value = part.get("image_url")
-                # OpenAI chat.completions: {"image_url": {"url": "data:..."}}
-                # OpenAI Responses: {"image_url": "data:..."}
-                if isinstance(image_value, dict):
-                    url = image_value.get("url", "")
-                    resized = _shrink_data_url(url)
-                    if resized:
-                        image_value["url"] = resized
-                        changed_count += 1
-                elif isinstance(image_value, str):
-                    resized = _shrink_data_url(image_value)
-                    if resized:
-                        part["image_url"] = resized
-                        changed_count += 1
-
-        if changed_count:
-            logger.info(
-                "image-shrink recovery: re-encoded %d image part(s) to fit under %.0f MB",
-                changed_count, target_bytes / (1024 * 1024),
-            )
-        return changed_count > 0
 
     def _anthropic_preserve_dots(self) -> bool:
         """True when using an anthropic-compatible endpoint that preserves dots in model names.

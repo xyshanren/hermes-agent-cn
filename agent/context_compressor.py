@@ -34,6 +34,13 @@ from agent.redact import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
+HISTORICAL_TASK_HEADING = "## Historical Task Snapshot"
+HISTORICAL_IN_PROGRESS_HEADING = "## Historical In-Progress State"
+HISTORICAL_PENDING_ASKS_HEADING = "## Historical Pending User Asks"
+HISTORICAL_REMAINING_WORK_HEADING = "## Historical Remaining Work"
+
+
+
 SUMMARY_PREFIX = (
     "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted "
     "into the summary below. This is a handoff from a previous context "
