@@ -956,6 +956,12 @@ class PluginManager:
         # Plugin-registered auxiliary tasks: key → {key, display_name,
         # description, defaults, plugin}. See PluginContext.register_auxiliary_task.
         self._aux_tasks: Dict[str, Dict[str, Any]] = {}
+        # Middleware callbacks registered by plugins, keyed by kind
+        # (e.g. 'llm_request', 'tool_execution'). The hermes_cli/middleware.py
+        # framework reads from this dict via PluginManager._middleware.
+        # Initialized here so _get_middleware_callbacks() in middleware.py
+        # never sees AttributeError on first call.
+        self._middleware: Dict[str, List[Callable]] = {}
         # Slack Block Kit action handlers registered by plugins. Each entry
         # is (matcher, callback, plugin_name); the Slack adapter wires them
         # into its slack_bolt App at connect() time. ``matcher`` is whatever
@@ -1628,6 +1634,58 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> List[Any]:
     Returns a list of non-``None`` return values from plugin callbacks.
     """
     return get_plugin_manager().invoke_hook(hook_name, **kwargs)
+
+
+# === Middleware API ===
+# The hermes_cli/middleware.py framework (added in v0.17.0+cn.13) reads from
+# PluginManager._middleware. The public helpers below give it a stable
+# import path. CN 0 LLM 路径拦截 strategy: in cn, no plugin auto-registers
+# middleware, so has_middleware() always returns False and invoke_middleware()
+# returns [] at runtime. The contract surface is exposed so plugins MAY
+# register (observer only by default; the framework never mutates the LLM
+# call path on its own).
+
+def has_middleware(kind: str) -> bool:
+    """Return True when at least one plugin has registered middleware for *kind*.
+
+    Valid kinds: 'llm_request', 'llm_execution', 'tool_request', 'tool_execution'
+    (also 'api_request'/'api_execution' as compat aliases for llm_*).
+    """
+    mgr = get_plugin_manager()
+    return bool(mgr._middleware.get(kind))
+
+
+def invoke_middleware(kind: str, **kwargs: Any) -> List[Any]:
+    """Invoke all registered middleware for *kind*, return list of non-None results.
+
+    Returns an empty list if no middleware is registered (the common case
+    under CN's observer-only policy). Callers should treat an empty list
+    as "no change" and proceed with the default behavior.
+    """
+    mgr = get_plugin_manager()
+    callbacks = mgr._middleware.get(kind, [])
+    results: List[Any] = []
+    for cb in callbacks:
+        try:
+            r = cb(**kwargs)
+        except Exception:
+            # Fail-open: a buggy plugin must not break the LLM/tool path.
+            logger.debug("middleware callback raised for %s", kind, exc_info=True)
+            continue
+        if r is not None:
+            results.append(r)
+    return results
+
+
+def register_middleware(kind: str, callback: Callable[..., Any]) -> None:
+    """Register a middleware callback for *kind*.
+
+    Plugins that want to observe the LLM or tool path can call this from
+    their ``register_fn(ctx)`` hook. The callback receives the same kwargs
+    that apply_*/run_* pass (request / args / original_* / context).
+    """
+    mgr = get_plugin_manager()
+    mgr._middleware.setdefault(kind, []).append(callback)
 
 
 
