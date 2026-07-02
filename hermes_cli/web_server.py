@@ -19,17 +19,26 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import secrets
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
+import mimetypes
+from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from dataclasses import dataclass
 
 import yaml
 
@@ -60,7 +69,16 @@ from gateway.status import get_running_pid, read_runtime_status
 from utils import env_var_enabled
 
 try:
-    from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+    from fastapi import (
+        FastAPI,
+        File,
+        Form,
+        HTTPException,
+        Request,
+        UploadFile,
+        WebSocket,
+        WebSocketDisconnect,
+    )
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
@@ -554,6 +572,52 @@ class MessagingPlatformUpdate(BaseModel):
 class AudioTranscriptionRequest(BaseModel):
     data_url: str
     mime_type: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Restored Pydantic classes from upstream HEAD (08be8e5ef)
+# ---------------------------------------------------------------------------
+# The cn branch was missing these 6 BaseModel classes after the cherry-pick
+# split (see fix(cn) commits 8e253d90b / 70c6f7cf8 / a13843285 in the cn
+# history). They're referenced by module-level @app.post handlers below
+# (e.g. upload_managed_file, telegram onboarding, memory provider config),
+# so they must be defined before those handlers — we keep them adjacent to
+# the other BaseModel blocks for readability. No behavioural change versus
+# upstream; just restoring definitions that cn cherry-pick split dropped.
+# ---------------------------------------------------------------------------
+
+
+class MemoryProviderConfigUpdate(BaseModel):
+    values: Dict[str, str] = {}
+
+
+class TelegramOnboardingStart(BaseModel):
+    bot_name: Optional[str] = None
+
+
+class TelegramOnboardingApply(BaseModel):
+    allowed_user_ids: List[str]
+    profile: Optional[str] = None
+
+
+class ManagedFileUpload(BaseModel):
+    path: str
+    data_url: str
+    overwrite: bool = True
+
+
+class ManagedDirectoryCreate(BaseModel):
+    path: str
+
+
+class ManagedFileDelete(BaseModel):
+    path: str
+    recursive: bool = False
+
+
+# ---------------------------------------------------------------------------
+# End restored Pydantic classes
+# ---------------------------------------------------------------------------
 
 
 class ModelAssignment(BaseModel):
@@ -1373,16 +1437,16 @@ async def get_status(profile: Optional[str] = None):
     gateway_running = gateway_pid is not None
     remote_health_body: dict | None = None
 
-        if not gateway_running and _GATEWAY_HEALTH_URL:
-            loop = asyncio.get_running_loop()
-            alive, remote_health_body = await loop.run_in_executor(
-                None, _probe_gateway_health
-            )
-            if alive:
-                gateway_running = True
-                # PID from the remote container (display only — not locally valid)
-                if remote_health_body:
-                    gateway_pid = remote_health_body.get("pid")
+    if not gateway_running and _GATEWAY_HEALTH_URL:
+        loop = asyncio.get_running_loop()
+        alive, remote_health_body = await loop.run_in_executor(
+            None, _probe_gateway_health
+        )
+        if alive:
+            gateway_running = True
+            # PID from the remote container (display only — not locally valid)
+            if remote_health_body:
+                gateway_pid = remote_health_body.get("pid")
 
         gateway_state = None
         gateway_platforms: dict = {}
@@ -2223,6 +2287,149 @@ async def transcribe_audio_upload(payload: AudioTranscriptionRequest):
         "transcript": str(result.get("transcript") or "").strip(),
         "provider": result.get("provider"),
     }
+
+
+# ---------------------------------------------------------------------------
+# S13-agent: OpenAI-compatible /v1/audio/transcriptions (NEEDS_BACKLOG §需求 2)
+# ---------------------------------------------------------------------------
+#
+# tray `hermes_proxy_transcribe` Rust command posts multipart to
+# ${GATEWAY_URL}/v1/audio/transcriptions — this handler is the missing target.
+# Accepts multipart/form-data with `file` (required) and `model` (optional),
+# returns OpenAI shape {"text": "..."}, with OpenAI-shaped {"error": {...}}
+# on failure. Local mode uses faster-whisper; cloud modes (groq / openai /
+# mistral / elevenlabs) are all funnelled through transcribe_audio() in
+# tools.transcription_tools per stt.provider config.
+
+
+def _openai_error_response(
+    message: str,
+    *,
+    type_: str,
+    code: str,
+    status_code: int,
+):
+    """Build an OpenAI-shape error JSONResponse without raising."""
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "message": message,
+                "type": type_,
+                "param": None,
+                "code": code,
+            }
+        },
+    )
+
+
+def _transcribe_via_provider(file_path: str, model: Optional[str]) -> Dict[str, Any]:
+    """Wrapper around tools.transcription_tools.transcribe_audio with optional model.
+
+    Imported lazily here so that S13 failures don't crash unrelated dashboard
+    pages if tools.transcription_tools is unavailable for any reason.
+    """
+    from tools.transcription_tools import transcribe_audio
+
+    if model:
+        return transcribe_audio(file_path, model=model)
+    return transcribe_audio(file_path)
+
+
+@app.post("/v1/audio/transcriptions")
+async def transcriptions_openai(
+    file: UploadFile = File(..., description="Audio file to transcribe"),
+    model: Optional[str] = Form(
+        None,
+        description="STT model override. If omitted, uses stt.provider default.",
+    ),
+):
+    """OpenAI Whisper-compatible speech-to-text endpoint (S13-agent, Phase 1).
+
+    Form fields:
+      - file: the audio file (required, multipart upload)
+      - model: optional model override (e.g. "whisper-1", "gpt-4o-transcribe",
+               "distil-whisper-large-v3-en" for groq, etc.)
+
+    Returns OpenAI shape:
+      {"text": "<transcript>"}
+
+    Errors return OpenAI shape:
+      {"error": {"message": "...", "type": "...", "code": "...", "param": null}}
+    """
+    if not file.filename:
+        return _openai_error_response(
+            "Missing 'file' part in multipart upload",
+            type_="invalid_request_error",
+            code="missing_file",
+            status_code=400,
+        )
+
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        return _openai_error_response(
+            "Audio file is empty",
+            type_="invalid_request_error",
+            code="empty_audio_file",
+            status_code=400,
+        )
+    if len(audio_bytes) > _MAX_TRANSCRIPTION_UPLOAD_BYTES:
+        return _openai_error_response(
+            (
+                f"Audio file is larger than the {_MAX_TRANSCRIPTION_UPLOAD_BYTES // (1024 * 1024)} MB "
+                "limit"
+            ),
+            type_="invalid_request_error",
+            code="audio_too_large",
+            status_code=413,
+        )
+
+    mime_type = (file.content_type or "audio/wav").strip()
+    suffix = _audio_extension_for_mime(mime_type) or ".wav"
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="hermes-stt-",
+            suffix=suffix,
+            delete=False,
+        ) as tmp:
+            tmp.write(audio_bytes)
+            temp_path = tmp.name
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, _transcribe_via_provider, temp_path, model
+        )
+    except Exception as exc:  # noqa: BLE001 — surface anything to client
+        _log.exception("S13 transcription failed")
+        return _openai_error_response(
+            f"Transcription failed: {exc}",
+            type_="server_error",
+            code="transcription_failed",
+            status_code=500,
+        )
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+    if not result.get("success"):
+        error_msg = result.get("error") or "Transcription failed"
+        return _openai_error_response(
+            error_msg,
+            type_="invalid_request_error",
+            code="transcription_failed",
+            status_code=400,
+        )
+
+    _log.info(
+        "[S13] transcriptions: ok provider=%s bytes=%d",
+        result.get("provider"),
+        len(audio_bytes),
+    )
+    return {"text": str(result.get("transcript") or "").strip()}
 
 
 class TTSSpeakRequest(BaseModel):
