@@ -1,8 +1,8 @@
 # hermes-agent-cn 需求 Backlog (2026-06-26)
 
-> **状态**: 📋 收集阶段, 不执行
+> **状态**: 🔄 部分完成 (1/5 done): **S13-agent ✅ 2026-07-02** (commit `016383af8`); §3 S14 / §4 S12 / §5 S15 / 6.x 杂项 pending, 等用户拍板续作
 > **触发来源**: hermes-tray v2.0 (S12-S15) 路线图重新对边界时, 识别出 hermes-agent 需要补齐的能力
-> **执行条件**: hermes-tray 现阶段开发告一段落后, 累积本 backlog + 用户拍板, 一次执行
+> **执行条件**: ✅ 已触发 (S13 完成 2026-07-02; 累积 backlog 继续等用户拍板续作 + hermes-tray v0.1.3 集成决策)
 
 ---
 
@@ -53,7 +53,13 @@ hermes-tray T-Q-S12-light 只发了 model name 给 agent. 但用户在 tray 上�
 
 ---
 
-## 需求 2: S13-agent — `/v1/audio/transcriptions` 端点
+## 需求 2: S13-agent — `/v1/audio/transcriptions` 端点 ✅ DONE (2026-07-02)
+
+> **状态**: ✅ Done — commit `016383af8` on `cn` branch, pushed to `origin/cn` 2026-07-02.
+> **实现细节**: 见 `tests/test_s13_audio_transcriptions.py` (8/8 passed in 2.17s) + `CHANGELOG_CN.md` v0.17.0+cn.18 段.
+> **关键变更**: `hermes_cli/web_server.py` 加 `transcriptions_openai` multipart handler + `_openai_error_response` / `_transcribe_via_provider` 两个 helper + 1 个 route (`POST /v1/audio/transcriptions`).
+
+---
 
 ### 来源
 hermes-tray T-Q-S13 的 `hermes_proxy_transcribe` Rust command 已实现 multipart 转发, 但**指向的端点必须存在**. tray 默认 POST `${GATEWAY_URL}/v1/audio/transcriptions`, 期望响应 `{"text": "..."}`. 当前 gateway **没有**这个端点.
@@ -191,17 +197,22 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 
 按用户指示, **等 hermes-tray 现阶段开发告一段落** (T-Q-S12~S15 已完) 后, 按以下顺序一次执行:
 
-| Phase | 任务 | 工作量 | 依赖 |
+| Phase | 任务 | 工作量 | 状态 |
 |---|---|---|---|
-| Phase 1 | S13-agent (STT 端点) | 2-3 天 | tray T-Q-S13 验证需要 |
-| Phase 2 | S14-agent (Vision token + 路由 metadata) | 2-3 天 | tray T-Q-S14 验证需要 |
-| Phase 3 | S12-agent (Cost-aware routing + metadata 推送) | 3-5 天 | tray T-Q-S12-light 验证需要 |
-| Phase 4 | S15-agent (Plugin marketplace MVP) | 1-7 天 (看范围) | 独立 |
+| Phase 1 | S13-agent (STT 端点) | 2-3 天 | ✅ done 2026-07-02 (commit `016383af8`) |
+| Phase 2 | S14-agent (Vision token + 路由 metadata) | 2-3 天 | ⏸ pending (等 hermes-tray T-Q-S14 真实集成验证) |
+| Phase 3 | S12-agent (Cost-aware routing + metadata 推送) | 3-5 天 | ⏸ pending |
+| Phase 4 | S15-agent (Plugin marketplace MVP) | 1-7 天 (看范围) | ⏸ pending (独立产品决策) |
+| 5.x | 路由元数据可视化 / SSE 压缩 / model_to_provider 索引 | 0.5-1 天 | ⏸ pending (见 §5 各项) |
 
-**Phase 1 + 2 + 3 是 hermes-tray S12-S14 的**配套**, 必须做才能让 tray 的新功能完整工作. Phase 4 是独立产品决策.**
+**Phase 1 ✅ 完成**. Phase 2 + 3 是 hermes-tray S12-S14 的**配套**, 必须做才能让 tray 的新功能完整工作. Phase 4 + 5.x 是独立产品决策. 续作须用户拍板 + 集成验证策略定 (v0.1.3 plan).**
 
 ---
 
 ## 触发: 重新评估
 
-执行完后, 把本文件标记为 📦 **ARCHIVED**, 移到 `docs/archive/NEEDS_BACKLOG_v017.md` (或类似路径). 新需求开新文件.
+**当前: 1/5 项完成 (S13 done 2026-07-02).**
+
+文件**不整体 archive**（按原 L207 预设 "执行完后 才搬"，但只完成 1/5 不算 "执行完"）。续作 (S14/S12/S15) 继续在本文件累计；后续如用户拍板 "全部停" 或 "全部完成"，再 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`.
+
+新需求开新文件（按 L208 指引不变）。

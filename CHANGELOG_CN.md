@@ -329,6 +329,112 @@ hermes: no final response was produced; treating the run as failed.
 - v0.17.0 冻结后仍有 bug 报告 → 单独开 release/v0.17.x patch 分支
 - cherry-pick 工具链 v8 计划：增加 "split-hunk 完整性检查"（对比 upstream commit 改动的所有文件/函数定义是否都已 cherry-pick）
 - Bug 3（API call 返回空）已确认非代码 bug，是 provider API key/网络/权限问题
+
+---
+
+# CHANGELOG — v0.17.0+cn.18 (NEEDS_BACKLOG Phase 1: S13 STT 端点)
+
+> **阶段**: NEEDS_BACKLOG §需求 2 done; web_server.py 累积 cherry-pick 残缺清理
+> **日期**: 2026-07-02
+> **Commit**: `016383af8` on `cn` branch（pushed to `origin/cn` 同日）
+> **Tag**: 未发（计划合并到下次 release +cn.18 跟 hermes-tray v0.1.3 集成后定版本号）
+
+## 审核门状态
+
+| Gate | 状态 | 说明 |
+|------|------|------|
+| G6.1 编译 | ✅ 通过 | `hermes_cli/web_server.py` import 不再 crash（8 stdlib imports + 6 Pydantic class + 2 indent bug + `@dataclass` 装饰器 import 全部恢复） |
+| G6.2 routes 注册 | ✅ 通过 | import 失败前 = 0 routes; 现在 = **205 routes** 注册成功 |
+| G6.3 测试 | ✅ 通过 | `tests/test_s13_audio_transcriptions.py` 8/8 passed in 2.17s（happy path + 4 验证分支 + crash 隔离 + helper shape） |
+| G6.4 集成 | ⏸ defer | hermes-tray T-Q-S13 真实端到端集成留待 v0.1.3 plan |
+
+## 背景
+
+NEEDS_BACKLOG.md §需求 2 把 S13-agent 列为 Phase 1 首选——hermes-tray `hermes_proxy_transcribe` Rust command 一直在 POST `${GATEWAY_URL}/v1/audio/transcriptions`，但目的地不存在，所以 tray 端 T-Q-S13 语音输入只能走 placeholder STT。
+
+本次 commit = **建 endpoint + 修复 web_server.py 累积 cherry-pick 残缺**。后者是 collateral：cn branch 之前 12 个 `fix(cn): cherry-pick 拆分丢的 ...` commit 把 `web_server.py` 留下 8 个 stdlib imports + 6 个 Pydantic class 缺失 + 3 处 indent/decorator 错，连 import 都通不过，更别说注册路由。
+
+所有 collateral 修复定义从 **upstream HEAD `08be8e5ef`** 恢复（用户上游最稳定的 "after D3 cherry-pick" 节点）。
+
+## 新增功能
+
+### S13-agent: `POST /v1/audio/transcriptions` (multipart, OpenAI-compat)
+
+接 multipart/form-data：
+
+| Form field | Type | Required | 用途 |
+|---|---|---|---|
+| `file` | UploadFile | ✅ | 音频文件（mp3 / wav / m4a / ogg / ... 25 MB 上限复用 `_MAX_TRANSCRIPTION_UPLOAD_BYTES`）|
+| `model` | str | ❌ | STT model override（如 `whisper-1` / `distil-whisper-large-v3-en` for groq）|
+
+成功响应 (200)：
+
+```json
+{"text": "<transcript>"}
+```
+
+错误响应 (OpenAI-shape)：
+
+```json
+{"error": {"message": "...", "type": "invalid_request_error", "param": null, "code": "audio_too_large"}}
+```
+
+错误 case mapping：
+
+| Status | Type | Code | 触发 |
+|---|---|---|---|
+| 400 | invalid_request_error | empty_audio_file | 上传空文件 |
+| 400 | invalid_request_error | missing_file | 没有 file part |
+| 400 | invalid_request_error | transcription_failed | `transcribe_audio` 返回 success=False |
+| 413 | invalid_request_error | audio_too_large | > 25 MB |
+| 500 | server_error | transcription_failed | upstream 抛异常 |
+
+内部 lazy-import `tools.transcription_tools.transcribe_audio()`，**复用既有 STT pipeline 0 新增 STT 实现**：
+
+| Provider | 实现 | Notes |
+|---|---|---|
+| local | faster-whisper | free, 本地 ONNX-like |
+| groq | cloud | free tier |
+| openai | Whisper API | paid |
+| mistral | Voxtral Transcribe | paid |
+| elevenlabs | Scribe | paid |
+
+Provider 选择走 `stt.provider` config（`config.py:1594-1610` 已有）和 `_load_stt_config()` 现有逻辑，**S13 endpoint 不引入新配置**。
+
+## 累计指标
+
+| 指标 | 数值 |
+|------|------|
+| S13 endpoint route | 1 (`POST /v1/audio/transcriptions`) |
+| 测试 | 8 (TestClient + monkeypatch) |
+| `web_server.py` collateral fixes | 8 stdlib imports + 6 Pydantic class + 2 indent bug + 1 `@dataclass` import |
+| 修复前 app routes | 0 (import crash) |
+| 修复后 app routes | **205** |
+| 0 新 STT 实现 | 1 个 endpoint, 0 个新 STT pipeline |
+
+## 风险模式（备忘）
+
+本次新增到未来 cherry-pick 残缺检查清单：
+
+| Pattern | 检测方式 |
+|---|---|
+| fastapi 装饰器用的 stdlib 名字 (`re` / `shutil` / `mimetypes` / `zipfile` / `urllib.error` / `datetime` / `contextlib`) 缺 import | AST scan: `import name in source and name not in file imports` |
+| `BaseModel` 子类被 `@app.post(handler_payload)` 引用但文件没定义 | AST scan: payload types used in route signatures but absent |
+| indent 错（orphan body + 错缩进 if 块） | `python -c "import ast; ast.parse(open(path).read())"` |
+| `@dataclass(frozen=True)` 用了 `from dataclasses import dataclass` | 简单 grep |
+
+可以考虑加到 `.githooks/pre-commit` 或 `scripts/cherry-pick-integrity-check.py`。
+
+## 下一步
+
+- NEEDS_BACKLOG.md §需求 2 完成 → 该文件 1/5 项 done，**不整体 archive**，继续等用户拍板 §3 / §4 / §5
+- 候选下一个 NEEDS_BACKLOG 任务：
+  - S14-agent Vision fallback + image token (2-3 天) — 配合 hermes-tray T-Q-S14
+  - S12-agent Cost-aware routing (3-5 天) — 配合 hermes-tray T-Q-S12-light
+  - S15-agent Plugin marketplace MVP (1-7 天, 看范围) — 独立产品决策
+  - 5.x 杂项 (路由元数据 / SSE 压缩 / model_to_provider 索引) — 用户提过的延伸
+- hermes-tray v0.1.3 plan 时把 S5+ quick capture (commit 1764d10) + S13 STT upgrade (commit 016383af8) 整合到 release draft
+
 - 等待 8 月 upstream v0.18.0 发布
 
 ---
