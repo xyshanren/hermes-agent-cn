@@ -114,6 +114,42 @@ class TestSessionLifecycle:
         assert session["input_tokens"] == 300
         assert session["output_tokens"] == 150
 
+    def test_update_token_counts_tracks_image_tokens_incremental(self, db):
+        """image_tokens accumulates across incremental updates and is exposed
+        in get_session so SSE prompt_tokens_details.image_tokens can be
+        reconstructed from the DB on session reload.
+        """
+        db.create_session(session_id="s1", source="cli")
+        db.update_token_counts("s1", input_tokens=500, output_tokens=200, image_tokens=1200)
+        db.update_token_counts("s1", input_tokens=500, output_tokens=200, image_tokens=800)
+
+        session = db.get_session("s1")
+        assert session["image_tokens"] == 2000
+        assert session["input_tokens"] == 1000  # prompt tokens unchanged
+
+    def test_update_token_counts_image_tokens_absolute_overwrites(self, db):
+        """absolute=True replaces the image_tokens value (used for sync flows)."""
+        db.create_session(session_id="s1", source="cli")
+        db.update_token_counts("s1", input_tokens=500, output_tokens=200, image_tokens=1200)
+        db.update_token_counts("s1", input_tokens=500, output_tokens=200,
+                               image_tokens=300, absolute=True)
+
+        session = db.get_session("s1")
+        assert session["image_tokens"] == 300
+        assert session["input_tokens"] == 500  # absolute resets the input bucket too
+
+    def test_sessions_schema_reconciles_image_tokens_column(self, db):
+        """Schema reconciliation adds image_tokens to pre-existing sessions
+        tables on next init (column-ADD is handled declaratively by
+        _reconcile_columns, no version-gated migration needed).
+        """
+        # Drop image_tokens from a fresh DB to simulate a pre-S14 legacy schema.
+        db._conn.execute("ALTER TABLE sessions DROP COLUMN image_tokens")
+        # Re-run init — should add the column back via declarative reconciliation.
+        db._init_schema()
+        cols = {row[1] for row in db._conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        assert "image_tokens" in cols
+
     def test_update_token_counts_tracks_api_call_count(self, db):
         """api_call_count increments with each update_token_counts call."""
         db.create_session(session_id="s1", source="cli")

@@ -252,6 +252,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     cache_read_tokens INTEGER DEFAULT 0,
     cache_write_tokens INTEGER DEFAULT 0,
     reasoning_tokens INTEGER DEFAULT 0,
+    image_tokens INTEGER DEFAULT 0,
     billing_provider TEXT,
     billing_base_url TEXT,
     billing_mode TEXT,
@@ -1037,6 +1038,7 @@ class SessionDB:
         cache_read_tokens: int = 0,
         cache_write_tokens: int = 0,
         reasoning_tokens: int = 0,
+        image_tokens: int = 0,
         estimated_cost_usd: Optional[float] = None,
         actual_cost_usd: Optional[float] = None,
         cost_status: Optional[str] = None,
@@ -1069,6 +1071,7 @@ class SessionDB:
                    cache_read_tokens = ?,
                    cache_write_tokens = ?,
                    reasoning_tokens = ?,
+                   image_tokens = ?,
                    estimated_cost_usd = COALESCE(?, 0),
                    actual_cost_usd = CASE
                        WHEN ? IS NULL THEN actual_cost_usd
@@ -1090,6 +1093,7 @@ class SessionDB:
                    cache_read_tokens = cache_read_tokens + ?,
                    cache_write_tokens = cache_write_tokens + ?,
                    reasoning_tokens = reasoning_tokens + ?,
+                   image_tokens = image_tokens + ?,
                    estimated_cost_usd = COALESCE(estimated_cost_usd, 0) + COALESCE(?, 0),
                    actual_cost_usd = CASE
                        WHEN ? IS NULL THEN actual_cost_usd
@@ -1110,6 +1114,7 @@ class SessionDB:
             cache_read_tokens,
             cache_write_tokens,
             reasoning_tokens,
+            image_tokens,
             estimated_cost_usd,
             actual_cost_usd,
             actual_cost_usd,

@@ -37,6 +37,82 @@ def test_normalize_usage_openai_subtracts_cached_prompt_tokens():
     assert normalized.input_tokens == 1200
     assert normalized.cache_read_tokens == 1800
     assert normalized.output_tokens == 700
+    assert normalized.image_tokens == 0  # absent field → 0, not NaN
+
+
+def test_normalize_usage_openai_extracts_image_tokens_from_prompt_tokens_details():
+    """OpenAI Chat Completions reports image input cost as
+    prompt_tokens_details.image_tokens. We extract it into CanonicalUsage.image_tokens
+    so SSE usage payloads can surface it (OpenAI's standard shape).
+    Regression guard: a 1.2k-image-attachment turn would otherwise show 0 image cost
+    in the tray and the cost estimator would undercount the input.
+    """
+    usage = SimpleNamespace(
+        prompt_tokens=5000,
+        completion_tokens=300,
+        prompt_tokens_details=SimpleNamespace(
+            cached_tokens=2000,
+            image_tokens=1200,
+        ),
+    )
+
+    normalized = normalize_usage(usage, provider="openai", api_mode="chat_completions")
+
+    assert normalized.image_tokens == 1200
+    # image_tokens does NOT reduce input_tokens — prompt_tokens already includes them.
+    # input_tokens = 5000 - 2000 (cache) = 3000
+    assert normalized.input_tokens == 3000
+    assert normalized.cache_read_tokens == 2000
+    assert normalized.prompt_tokens == 5000  # matches upstream prompt_total
+
+
+def test_normalize_usage_codex_extracts_image_tokens_from_input_tokens_details():
+    """Codex Responses uses input_tokens_details (not prompt_tokens_details)."""
+    usage = SimpleNamespace(
+        input_tokens=4000,
+        output_tokens=200,
+        input_tokens_details=SimpleNamespace(
+            cached_tokens=1000,
+            image_tokens=800,
+        ),
+    )
+
+    normalized = normalize_usage(usage, provider="openai-codex", api_mode="codex_responses")
+
+    assert normalized.image_tokens == 800
+    # input_tokens = 4000 - 1000 (cache) = 3000
+    assert normalized.input_tokens == 3000
+
+
+def test_normalize_usage_anthropic_keeps_image_tokens_zero():
+    """Anthropic native does not expose image_tokens in the usage object.
+    Pre-flight image cost comes from the request side (estimate_messages_tokens_rough).
+    """
+    usage = SimpleNamespace(
+        input_tokens=1000,
+        output_tokens=200,
+        cache_read_input_tokens=300,
+        cache_creation_input_tokens=100,
+    )
+
+    normalized = normalize_usage(usage, provider="anthropic", api_mode="anthropic_messages")
+
+    assert normalized.image_tokens == 0
+    assert normalized.input_tokens == 1000
+
+
+def test_normalize_usage_handles_missing_details_object():
+    """Defensive: if response has prompt_tokens_details=None, image_tokens stays 0."""
+    usage = SimpleNamespace(
+        prompt_tokens=500,
+        completion_tokens=100,
+        prompt_tokens_details=None,
+    )
+
+    normalized = normalize_usage(usage, provider="openai", api_mode="chat_completions")
+
+    assert normalized.image_tokens == 0
+    assert normalized.input_tokens == 500
 
 
 def test_normalize_usage_openai_reads_top_level_anthropic_cache_fields():

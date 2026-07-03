@@ -1510,6 +1510,10 @@ def run_conversation(
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
                         "total_tokens": total_tokens,
+                        "prompt_tokens_details": {
+                            "image_tokens": canonical_usage.image_tokens,
+                            "cached_tokens": canonical_usage.cache_read_tokens,
+                        },
                     }
                     agent.context_compressor.update_from_response(usage_dict)
 
@@ -1533,6 +1537,7 @@ def run_conversation(
                     agent.session_cache_read_tokens += canonical_usage.cache_read_tokens
                     agent.session_cache_write_tokens += canonical_usage.cache_write_tokens
                     agent.session_reasoning_tokens += canonical_usage.reasoning_tokens
+                    agent.session_image_tokens += canonical_usage.image_tokens
 
                     # Log API call details for debugging/observability
                     _cache_pct = ""
@@ -1581,6 +1586,7 @@ def run_conversation(
                                 cache_read_tokens=canonical_usage.cache_read_tokens,
                                 cache_write_tokens=canonical_usage.cache_write_tokens,
                                 reasoning_tokens=canonical_usage.reasoning_tokens,
+                                image_tokens=canonical_usage.image_tokens,
                                 estimated_cost_usd=float(cost_result.amount_usd)
                                 if cost_result.amount_usd is not None else None,
                                 cost_status=cost_result.status,
@@ -4162,6 +4168,7 @@ def run_conversation(
         "cache_read_tokens": agent.session_cache_read_tokens,
         "cache_write_tokens": agent.session_cache_write_tokens,
         "reasoning_tokens": agent.session_reasoning_tokens,
+        "image_tokens": agent.session_image_tokens,
         "prompt_tokens": agent.session_prompt_tokens,
         "completion_tokens": agent.session_completion_tokens,
         "total_tokens": agent.session_total_tokens,

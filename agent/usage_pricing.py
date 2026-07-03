@@ -33,6 +33,7 @@ class CanonicalUsage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    image_tokens: int = 0
     request_count: int = 1
     raw_usage: Optional[dict[str, Any]] = None
 
@@ -725,6 +726,7 @@ def normalize_usage(
         output_tokens = _to_int(getattr(response_usage, "output_tokens", 0))
         cache_read_tokens = _to_int(getattr(response_usage, "cache_read_input_tokens", 0))
         cache_write_tokens = _to_int(getattr(response_usage, "cache_creation_input_tokens", 0))
+        details = None  # Anthropic native does not expose prompt_tokens_details
     elif mode == "codex_responses":
         input_total = _to_int(getattr(response_usage, "input_tokens", 0))
         output_tokens = _to_int(getattr(response_usage, "output_tokens", 0))
@@ -761,12 +763,18 @@ def normalize_usage(
     if output_details:
         reasoning_tokens = _to_int(getattr(output_details, "reasoning_tokens", 0))
 
+    # image_tokens — extract from OpenAI-style prompt_tokens_details.image_tokens
+    # (chat completions) or input_tokens_details.image_tokens (codex responses).
+    # Anthropic native does not report this bucket, so it stays 0 there.
+    image_tokens = _to_int(getattr(details, "image_tokens", 0)) if details is not None else 0
+
     return CanonicalUsage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
         reasoning_tokens=reasoning_tokens,
+        image_tokens=image_tokens,
     )
 
 
