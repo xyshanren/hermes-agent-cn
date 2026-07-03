@@ -198,10 +198,17 @@ def set_latency(
     *,
     latency_ms: Optional[int],
 ) -> None:
-    """Record the wall-clock time for the call (milliseconds)."""
+    """Record the wall-clock time for the call (milliseconds).
+
+    ``None`` and ``0`` are both treated as "no measurement" — a 0ms
+    latency in SSE consumers almost always means "the call never finished"
+    (e.g. an error path) and showing ``latency_ms=0`` in the UI is more
+    confusing than omitting the field entirely.  Negative values are
+    clamped to 0 (defensive against bad clocks).
+    """
     if not isinstance(routing_out, dict):
         return
-    if latency_ms is None:
+    if latency_ms is None or latency_ms == 0:
         return
     try:
         routing_out["latency_ms"] = max(0, int(latency_ms))

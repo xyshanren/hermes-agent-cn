@@ -437,6 +437,15 @@ def _build_main_agent_routing_decision(
     if api_duration and api_duration > 0:
         set_latency(out, latency_ms=int(api_duration * 1000))
 
+    # Strip keys we did not actually populate so the in-memory dict matches
+    # the SSE payload (RoutingDecision.to_dict already drops None values,
+    # but tests assert directly against the dict).  ``mode`` / ``fallback_used``
+    # / ``retries`` are always present — they're scalar/bool and the front-end
+    # checks them in conditional rendering.
+    for key in ("cost_estimate_usd", "latency_ms", "rule_id"):
+        if out.get(key) is None:
+            out.pop(key, None)
+
     return out
 
 

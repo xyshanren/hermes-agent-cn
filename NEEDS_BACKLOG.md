@@ -1,8 +1,8 @@
 # hermes-agent-cn 需求 Backlog (2026-06-26)
 
-> **状态**: 🔄 部分完成 (2/5 done): **S13-agent ✅ 2026-07-02** (commit `016383af8`); **S14-agent ✅ 2026-07-03** (commits `a716f33e6` + `125cc93c0` + `8882270e7`); §4 S12 / §5 S15 / 6.x 杂项 pending, 等用户拍板续作
+> **状态**: 🔄 部分完成 (3/5 done): **S13-agent ✅ 2026-07-02** (commit `016383af8`); **S14-agent ✅ 2026-07-03** (commits `a716f33e6` + `125cc93c0` + `8882270e7`); **S12-agent Phase 1 ✅ 2026-07-03** (commits `4cd26c480` partial + this session 完成 mutation hooks; CHANGELOG v0.17.0+cn.20); §4 S15 / §5 5.x 杂项 pending, 等用户拍板续作
 > **触发来源**: hermes-tray v2.0 (S12-S15) 路线图重新对边界时, 识别出 hermes-agent 需要补齐的能力
-> **执行条件**: ✅ 已触发 (S13 完成 2026-07-02; 累积 backlog 继续等用户拍板续作 + hermes-tray v0.1.3 集成决策)
+> **执行条件**: ✅ 已触发 (S13 + S14 + S12 P1 完成; 累积 backlog 继续等用户拍板续作 + hermes-tray v0.1.5 集成决策)
 
 ---
 
@@ -25,6 +25,8 @@
 ---
 
 ## 需求 1: S12-agent — Cost-aware / Latency-aware 路由增强
+
+> **状态**: 🔄 Phase 1 ✅ done (2026-07-03); Phase 2 (cost-aware fallback) + Phase 3 (tray T-Q-S9 真值替换) pending, 等用户拍板 + hermes-tray v0.1.5 集成决策
 
 ### 来源
 hermes-tray T-Q-S12-light 只发了 model name 给 agent. 但用户在 tray 上看不到**为什么选了某个 provider**, 也不知道某次响应的 cost / latency 来源于哪个 provider. 需要 agent 端有:
@@ -50,6 +52,27 @@ hermes-tray T-Q-S12-light 只发了 model name 给 agent. 但用户在 tray 上�
 
 ### 工作量估计
 3-5 天 (基于 PLAN_CN M2 已有的 4 策略基础)
+
+### Phase 1 — Routing metadata 收集 + SSE 推送 ✅ done 2026-07-03
+
+**实现**: `agent/routing_decision.py` (RoutingDecision dataclass + 7 helpers) + `agent/auxiliary_client.py` mutation hooks (transient retry / temperature retry / max_tokens retry / Nous refresh / auth refresh / credential-pool recovery / cross-provider fallback 全部走 record_fallback + resolve_routing + set_latency + increment_retries + set_rule_id) + `agent/conversation_loop.py` `_build_main_agent_routing_decision` (main agent path 不走 call_llm, 自行合成) + `usage_dict["routing_decision"]` 推到 SSE (OpenAI usage 扩展, 旧前端零影响)。
+
+**测试**: 43 new cases (`tests/agent/test_routing_decision.py` + `tests/agent/test_conversation_loop_routing_decision.py` + `tests/agent/test_auxiliary_client_routing_decision.py`), 全过 (1.79s)。
+
+**OpenAI 兼容**: `routing_decision` 是 usage 的扩展字段, 不破坏现有客户端。OpenRouter / OpenAI / Anthropic SDK 都忽略未知 usage key, tray opt-in 后读 `usage.routing_decision.{mode, primary_provider, resolved_provider, fallback_used, fallback_reason, fallback_provider, cost_estimate_usd, latency_ms, retries, rule_id}`。
+
+### Phase 2 — cost-aware fallback (cost > $X 自动切 cheap model) — pending
+
+候选实现:
+- `agent/auxiliary_client.py` 加 `_check_cost_threshold_and_switch(model, usage_so_far)` helper, 在 call_llm 末尾如果 cost > threshold 自动改 `agent._fallback_activated = True` 并激活下一个 fallback_chain entry。
+- 配置入口: `config.yaml` `agent.cost_aware_fallback: { enabled: true, per_request_max_usd: 0.05, per_session_max_usd: 1.0 }`。
+- 估计: 1-2 天。
+
+### Phase 3 — tray T-Q-S9 读真值替换 char/4 heuristic — pending (hermes-tray 侧)
+
+不在 agent 范围。`hermes-tray` v0.1.5 plan 时集成:
+- tray 端读 `usage.routing_decision.cost_estimate_usd` 直接用真值, 替换 char/4 估算。
+- 显示 fallback 痕迹: "本轮由 deepseek-v3 服务 (fallback to anthropic after 3 retries, latency 2.4s, $0.012)"。
 
 ---
 
@@ -222,19 +245,20 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 | Phase | 任务 | 工作量 | 状态 |
 |---|---|---|---|
 | Phase 1 | S13-agent (STT 端点) | 2-3 天 | ✅ done 2026-07-02 (commit `016383af8`) |
-| Phase 2 | S14-agent (Vision token + 路由 metadata) | 2-3 天 | ⏸ pending (等 hermes-tray T-Q-S14 真实集成验证) |
-| Phase 3 | S12-agent (Cost-aware routing + metadata 推送) | 3-5 天 | ⏸ pending |
+| Phase 2 | S14-agent (Vision token + 路由 metadata) | 2-3 天 | ✅ done 2026-07-03 (commits `a716f33e6`+`125cc93c0`+`8882270e7`; 待推 origin/cn) |
+| Phase 3 | S12-agent Phase 1 (Routing metadata 收集 + SSE 推送) | 3-5 天 (Phase 1 拆出) | ✅ done 2026-07-03 (commits `4cd26c480` partial + S12 P1 mutation hooks; CHANGELOG v0.17.0+cn.20) |
+| Phase 3b | S12-agent Phase 2 (cost-aware fallback rule) | 1-2 天 | ⏸ pending (用户拍板 + threshold 配置策略) |
 | Phase 4 | S15-agent (Plugin marketplace MVP) | 1-7 天 (看范围) | ⏸ pending (独立产品决策) |
 | 5.x | 路由元数据可视化 / SSE 压缩 / model_to_provider 索引 | 0.5-1 天 | ⏸ pending (见 §5 各项) |
 
-**Phase 1 ✅ 完成**. Phase 2 + 3 是 hermes-tray S12-S14 的**配套**, 必须做才能让 tray 的新功能完整工作. Phase 4 + 5.x 是独立产品决策. 续作须用户拍板 + 集成验证策略定 (v0.1.3 plan).**
+**Phase 1 (S13) + Phase 2 (S14) + Phase 3 P1 (S12 metadata) ✅ 完成** (3/5 done). Phase 3b (S12 cost-aware rule) + Phase 4 (S15 plugin) + 5.x 杂项是独立产品决策, 续作须用户拍板 + 集成验证策略定 (v0.1.5 plan).**
 
 ---
 
 ## 触发: 重新评估
 
-**当前: 2/5 项完成 (S13 done 2026-07-02; S14 done 2026-07-03, 3 commits on cn branch 待推 origin/cn).**
+**当前: 3/5 项完成 (S13 done 2026-07-02; S14 done 2026-07-03, 3 commits on cn branch 待推 origin/cn; S12 Phase 1 done 2026-07-03, 2 commits on cn branch 待推 origin/cn).**
 
-文件**不整体 archive**（按原 L207 预设 "执行完后 才搬"，但只完成 1/5 不算 "执行完"）。续作 (S14/S12/S15) 继续在本文件累计；后续如用户拍板 "全部停" 或 "全部完成"，再 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`.
+文件**不整体 archive**（按原 L207 预设 "执行完后 才搬"，但只完成 3/5 不算 "执行完"）。续作 (S12 P2/S15/5.x) 继续在本文件累计；后续如用户拍板 "全部停" 或 "全部完成"，再 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`.
 
 新需求开新文件（按 L208 指引不变）。
