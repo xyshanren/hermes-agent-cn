@@ -259,6 +259,27 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 
 **结论**: S15 MVP done。完整 marketplace (5-7d) 留给未来真有第三方 plugin 攻击报告或生态需求时再做。
 
+### 跨项目依赖: tray-side S15 UI blocked on cn REST API (2026-07-03)
+
+**现状 (重要发现)**: `/api/dashboard/plugins` 是 **dashboard UI 插件** (themes/widgets), **不是 S15 plugin marketplace 范围**. S15 完整 marketplace 还没有 REST API — 当前只有 7 个 CLI 子命令 (`hermes plugin install/list/enable/disable/toggle/update/remove`).
+
+**Tray v0.1.5 范围决策** (2026-07-03 17:19): **不做 S15 plugin list UI**, 只做 S12/S14 metadata 增强. 详见 `D:\work\workspace\MiniMax\HANDOFF.md` §2.1 v0.1.5 scope 段.
+
+**Tray-side S15 UI 工作量** (等 cn REST API 出来后):
+- cn REST API 添加 (1-2d): `GET /api/plugins` + `POST /api/plugins/{name}/{enable,disable}` + `POST /api/plugins/install` + `DELETE /api/plugins/{name}`
+- tray Settings 插件 tab (1-2d): list + toggle + install 表单 + 卸载 + 错误处理
+
+**触发条件** (任一即开始, 缺一不动):
+1. cn 完整 marketplace 启动 + 4 个 REST endpoint 加好
+2. 用户实际装了 2+ 个第三方 plugin (跟现状"只用 13 个内置"区分)
+3. 出现 plugin 相关 security incident 或 feature request
+
+**为什么不跟 v0.1.5 一起发**:
+- v0.1.5 应 2-3 天小步快跑, S15 强绑拖到 5-8 天不值
+- 强绑 = 串行依赖 (cn REST API 先 → tray UI 后), 没并行空间
+- 现状 13 个内置 plugin tray 看不到也不损失 (用户用 CLI 装新 plugin 是罕见操作)
+- 独立产品决策性质, 不该跟 metadata 增强混一个 release
+
 ---
 
 ## 需求 5: 其它 (hermes-tray 现开发期可能新触发)
