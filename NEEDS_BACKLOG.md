@@ -233,7 +233,7 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 
 ## 触发: 重新评估
 
-**当前: 1/5 项完成 (S13 done 2026-07-02).**
+**当前: 2/5 项完成 (S13 done 2026-07-02; S14 done 2026-07-03, 3 commits on cn branch 待推 origin/cn).**
 
 文件**不整体 archive**（按原 L207 预设 "执行完后 才搬"，但只完成 1/5 不算 "执行完"）。续作 (S14/S12/S15) 继续在本文件累计；后续如用户拍板 "全部停" 或 "全部完成"，再 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`.
 
