@@ -115,10 +115,11 @@ def test_background_review_summarizer_receives_captured_messages_after_close(mon
             # must have snapshot them before this runs.
             self._session_messages = []
 
-    def fake_summarize(review_messages, prior_snapshot):
+    def fake_summarize(review_messages, prior_snapshot, notification_mode="on"):
         events.append("summarize")
         captured["review_messages"] = list(review_messages)
         captured["prior_snapshot"] = list(prior_snapshot)
+        captured["notification_mode"] = notification_mode
         return []
 
     monkeypatch.setattr(run_agent_module, "AIAgent", FakeReviewAgent)

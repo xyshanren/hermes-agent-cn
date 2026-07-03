@@ -237,6 +237,7 @@ _COMBINED_REVIEW_PROMPT = (
 def summarize_background_review_actions(
     review_messages: List[Dict],
     prior_snapshot: List[Dict],
+    notification_mode: str = "on",
 ) -> List[str]:
     """Build the human-facing action summary for a background review pass.
 
@@ -246,9 +247,23 @@ def summarize_background_review_actions(
     don't re-surface stale results from the prior conversation that the
     review agent inherited via ``conversation_history`` (issue #14944).
 
+    ``notification_mode`` controls verbosity (matches upstream feature from
+    commit 20b1f4f3f, originally added to ``cn-merge`` branch and cherry-
+    picked here onto ``cn``'s diverged local implementation):
+
+    * ``"off"`` — return ``[]`` immediately, no chat notifications
+      (still logged to stdout / HA log by the caller).
+    * ``"on"`` (default) — generic 1-line summary per action, e.g.
+      ``"Memory updated"``. Preserves the pre-feature behaviour.
+    * ``"verbose"`` — include action indicators and content previews
+      (capped at 120 chars for adds/replaces, 60 for removes).
+
     Matching is by ``tool_call_id`` when available, with a content-equality
     fallback for tool messages that lack one.
     """
+    if notification_mode == "off":
+        return []
+    verbose = notification_mode == "verbose"
     existing_tool_call_ids = set()
     existing_tool_contents = set()
     for prior in prior_snapshot or []:
