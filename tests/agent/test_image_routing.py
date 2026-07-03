@@ -9,14 +9,18 @@ from unittest.mock import patch
 import pytest
 
 from agent.image_routing import (
+    DEFAULT_MAX_IMAGES_PER_REQUEST,
     _coerce_capability_bool,
     _coerce_mode,
     _explicit_aux_vision_override,
     _lookup_supports_vision,
     _supports_vision_override,
     build_native_content_parts,
+    count_image_parts,
     decide_image_input_mode,
     extract_image_refs,
+    get_max_images_per_request,
+    validate_image_count,
 )
 
 
@@ -637,3 +641,108 @@ class TestBuildNativeContentPartsURLs:
         )
         assert parts[0]["type"] == "text"
         assert parts[0]["text"].startswith("What do you see in this image?")
+
+
+# ─── Multi-image limit (S14 phase 3) ─────────────────────────────────────────
+
+
+def _image_part(idx: int) -> dict:
+    return {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{idx}"}}
+
+
+class TestCountImageParts:
+    def test_empty_list_returns_zero(self):
+        assert count_image_parts([]) == 0
+
+    def test_non_list_returns_zero(self):
+        assert count_image_parts(None) == 0
+        assert count_image_parts({"content": []}) == 0
+        assert count_image_parts("not a list") == 0
+
+    def test_counts_image_url_parts(self):
+        msgs = [
+            {"role": "user", "content": [_image_part(1), _image_part(2)]},
+            {"role": "assistant", "content": "ok"},
+        ]
+        assert count_image_parts(msgs) == 2
+
+    def test_counts_anthropic_stashed_blocks(self):
+        msgs = [
+            {
+                "role": "user",
+                "content": "see these",
+                "_anthropic_content_blocks": [
+                    {"type": "image", "source": {"type": "base64", "data": "x"}},
+                    {"type": "text", "text": "..."},
+                ],
+            },
+        ]
+        assert count_image_parts(msgs) == 1
+
+    def test_counts_input_image_parts(self):
+        msgs = [
+            {"role": "user", "content": [
+                {"type": "text", "text": "look"},
+                {"type": "input_image", "image": "x"},
+            ]},
+        ]
+        assert count_image_parts(msgs) == 1
+
+
+class TestGetMaxImagesPerRequest:
+    def test_default_when_no_model_or_config(self):
+        assert get_max_images_per_request() == DEFAULT_MAX_IMAGES_PER_REQUEST
+
+    def test_config_override_takes_precedence(self):
+        cfg = {"agent": {"vision_max_images": 50}}
+        assert get_max_images_per_request(model="gpt-5", cfg=cfg) == 50
+        assert get_max_images_per_request(model="claude-opus-4-6", cfg=cfg) == 50
+
+    def test_config_override_invalid_falls_through(self):
+        cfg = {"agent": {"vision_max_images": "not-a-number"}}
+        # Falls through to model-aware lookup.
+        assert get_max_images_per_request(model="gpt-5", cfg=cfg) == 16
+
+    def test_model_substring_match_for_openai(self):
+        assert get_max_images_per_request(model="gpt-4o-2024-08-06") == 16
+        assert get_max_images_per_request(model="openai/gpt-5.3-codex") == 16
+
+    def test_model_substring_match_for_claude_4(self):
+        # Claude 4 family allows more (per Anthropic docs).
+        assert get_max_images_per_request(model="claude-opus-4-6") == 100
+        assert get_max_images_per_request(model="claude-sonnet-4.5") == 100
+
+    def test_model_substring_match_for_claude_3(self):
+        assert get_max_images_per_request(model="claude-3-5-sonnet-20240620") == 20
+
+    def test_unknown_model_uses_default(self):
+        assert get_max_images_per_request(model="brand-new-fancy-vision-model") == DEFAULT_MAX_IMAGES_PER_REQUEST
+
+
+class TestValidateImageCount:
+    def test_under_limit_no_reject(self):
+        msgs = [{"role": "user", "content": [_image_part(1)] * 5}]
+        info = validate_image_count(msgs, model="gpt-5")
+        assert info["image_count"] == 5
+        assert info["max_images"] == 16
+        assert info["would_reject"] is False
+
+    def test_over_limit_rejects(self):
+        msgs = [{"role": "user", "content": [_image_part(1)] * 50}]
+        info = validate_image_count(msgs, model="gpt-5")
+        assert info["image_count"] == 50
+        assert info["max_images"] == 16
+        assert info["would_reject"] is True
+
+    def test_at_limit_does_not_reject(self):
+        msgs = [{"role": "user", "content": [_image_part(1)] * 16}]
+        info = validate_image_count(msgs, model="gpt-5")
+        assert info["would_reject"] is False  # boundary: == is allowed
+
+    def test_config_override_relaxes_limit(self):
+        msgs = [{"role": "user", "content": [_image_part(1)] * 20}]
+        cfg = {"agent": {"vision_max_images": 50}}
+        info = validate_image_count(msgs, model="gpt-5", cfg=cfg)
+        assert info["image_count"] == 20
+        assert info["max_images"] == 50
+        assert info["would_reject"] is False

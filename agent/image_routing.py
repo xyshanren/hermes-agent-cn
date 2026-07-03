@@ -317,6 +317,130 @@ def decide_image_input_mode(
     return "text"
 
 
+# ─── Multi-image limit helpers (S14 phase 3) ────────────────────────────────
+
+# Per-provider/model cap on image_url parts in a single chat-completions
+# request. Bumped conservatively: most providers reject at the listed value
+# (often with a cryptic 400 "too many images"), and going over costs an
+# expensive round-trip. The conservative default (16) matches OpenAI
+# Chat Completions for GPT-4o, the most common failure mode.
+DEFAULT_MAX_IMAGES_PER_REQUEST = 16
+
+# Model-aware overrides. Keys are matched as substrings against the model
+# slug so /claude-opus-4-6, anthropic/claude-opus-4.6, etc. all resolve.
+# Sources: OpenAI Chat Completions docs, Anthropic Messages API docs.
+_MODEL_MAX_IMAGES: Dict[str, int] = {
+    "gpt-4o": 16,
+    "gpt-4-turbo": 16,
+    "gpt-5": 16,
+    "o1": 16,
+    "o3": 16,
+    "claude-opus-4": 100,
+    "claude-sonnet-4": 100,
+    "claude-haiku-4": 100,
+    "claude-3-7": 20,
+    "claude-3-5": 20,
+    "claude-3": 20,
+    "gemini-2": 16,
+    "gemini-1.5": 16,
+}
+
+
+def count_image_parts(messages: Any) -> int:
+    """Count image parts across a list of chat-completions messages.
+
+    Walks both the OpenAI-style content list (image_url / input_image parts)
+    and the Anthropic-style _anthropic_content_blocks stash. Used by the
+    pre-flight check in run_agent to reject requests with too many images
+    before they hit the upstream provider (which would 400 with a cryptic
+    message).
+
+    Returns 0 if ``messages`` is not iterable.
+    """
+    if not isinstance(messages, list):
+        return 0
+    total = 0
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                ptype = part.get("type")
+                if ptype in {"image_url", "image", "input_image"}:
+                    total += 1
+        stashed = msg.get("_anthropic_content_blocks")
+        if isinstance(stashed, list):
+            for part in stashed:
+                if isinstance(part, dict) and part.get("type") == "image":
+                    total += 1
+    return total
+
+
+def get_max_images_per_request(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> int:
+    """Return the maximum number of image parts allowed in a single request.
+
+    Lookup order:
+      1. config.yaml ``agent.vision_max_images`` (explicit override)
+      2. model substring match in ``_MODEL_MAX_IMAGES``
+      3. ``DEFAULT_MAX_IMAGES_PER_REQUEST`` (conservative fallback)
+    """
+    # 1. Config override
+    if isinstance(cfg, dict):
+        try:
+            v = (cfg.get("agent") or {}).get("vision_max_images")
+            if v is not None:
+                n = int(v)
+                if n > 0:
+                    return n
+        except (TypeError, ValueError):
+            pass
+
+    # 2. Model substring match
+    if isinstance(model, str) and model:
+        model_lower = model.lower()
+        for needle, limit in _MODEL_MAX_IMAGES.items():
+            if needle in model_lower:
+                return limit
+
+    # 3. Default
+    return DEFAULT_MAX_IMAGES_PER_REQUEST
+
+
+def validate_image_count(
+    messages: Any,
+    *,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
+    """Return a dict describing the image count and the applicable limit.
+
+    Shape::
+
+        {"image_count": N, "max_images": M, "would_reject": N > M}
+
+    Use this in run_agent's pre-flight check to decide whether to fail
+    fast with a 422-style error vs. send the request and let the upstream
+    provider reject it. Returning the dict (rather than raising) keeps
+    the helper composable for both the check and the routing_decision
+    telemetry.
+    """
+    image_count = count_image_parts(messages)
+    max_images = get_max_images_per_request(provider=provider, model=model, cfg=cfg)
+    return {
+        "image_count": image_count,
+        "max_images": max_images,
+        "would_reject": image_count > max_images,
+    }
+
+
 # Image size handling is REACTIVE rather than proactive: we attempt native
 # attachment at full size regardless of provider, and rely on
 # ``run_agent._try_shrink_image_parts_in_messages`` to shrink + retry if

@@ -1072,6 +1072,31 @@ class AIAgent:
     for AI models that support function calling.
     """
 
+
+class TooManyImagesError(Exception):
+    """Raised when a chat-completions request carries more image parts than
+    the active model accepts in a single request.
+
+    The agent's pre-flight check (``_validate_image_count_or_raise``) raises
+    this with a clear, actionable message instead of letting the request
+    reach the upstream provider and fail with a cryptic 400. Users see a
+    specific hint pointing at ``config.agent.vision_max_images`` and the
+    ``vision_analyze`` tool.
+    """
+
+    def __init__(self, *, image_count: int, max_images: int, provider: str, model: str):
+        self.image_count = image_count
+        self.max_images = max_images
+        self.provider = provider
+        self.model = model
+        super().__init__(
+            f"Request has {image_count} image parts, but the active model "
+            f"({provider}/{model}) accepts at most {max_images} per request. "
+            f"Either reduce the number of images, raise the limit via "
+            f"config.yaml agent.vision_max_images, or pre-analyze the images "
+            f"with the vision_analyze tool and submit the descriptions as text."
+        )
+
     _TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER = (
         "[hermes-agent: tool call arguments were corrupted in this session and "
         "have been dropped to keep the conversation alive. See issue #15236.]"
@@ -9118,6 +9143,54 @@ class AIAgent:
             )
         return transformed
 
+    def _validate_image_count_or_raise(self, api_messages: list) -> None:
+        """Pre-flight check: reject the turn if the message list carries more
+        images than the active model accepts in a single request.
+
+        Without this, a user pasting 50 screenshots gets a cryptic upstream
+        400 (\"too many image parts\") with no actionable message. The check
+        here raises ``TooManyImagesError`` with a clear hint pointing at
+        config.agent.vision_max_images and vision_analyze.
+
+        Vision-mode auto (the default) sees the limit enforced; the existing
+        text-mode path replaces images with vision_analyze descriptions, so
+        for non-vision models this check still fires (giving a clearer error
+        than \"model does not support image input\") but the user can switch
+        image_input_mode=text to bypass.
+        """
+        try:
+            from agent.image_routing import validate_image_count
+        except ImportError:
+            return  # helper missing — fail open, don't break the run
+
+        cfg = None
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config()
+        except Exception:
+            pass
+
+        info = validate_image_count(
+            api_messages,
+            provider=getattr(self, "provider", None),
+            model=getattr(self, "model", None),
+            cfg=cfg,
+        )
+        if not info["would_reject"]:
+            return
+
+        logger.warning(
+            "vision: %d image parts exceed max_images=%d for model %s/%s",
+            info["image_count"], info["max_images"],
+            getattr(self, "provider", ""), getattr(self, "model", ""),
+        )
+        raise TooManyImagesError(
+            image_count=info["image_count"],
+            max_images=info["max_images"],
+            provider=getattr(self, "provider", "") or "",
+            model=getattr(self, "model", "") or "",
+        )
+
     def _tool_result_content_for_active_model(self, tool_name: str, result: Any) -> Any:
         """Return the tool message content that is safe for the active model.
 
@@ -9515,6 +9588,10 @@ class AIAgent:
                 )
             )
             is_xai_responses = self.provider == "xai" or self._base_url_hostname == "api.x.ai"
+            # Pre-flight: reject if the request carries more native images than
+            # the active model accepts. Run before the non-vision strip so the
+            # check sees the user-attached image count.
+            self._validate_image_count_or_raise(api_messages)
             _msgs_for_codex = self._prepare_messages_for_non_vision_model(api_messages)
             return _ct.build_kwargs(
                 model=self.model,
@@ -9634,6 +9711,11 @@ class AIAgent:
         _ephemeral_out = getattr(self, "_ephemeral_max_output_tokens", None)
         if _ephemeral_out is not None:
             self._ephemeral_max_output_tokens = None
+
+        # Pre-flight: reject if the request carries more native images than
+        # the active model accepts. Run after the non-vision strip so the
+        # count reflects what we're actually about to send to the provider.
+        self._validate_image_count_or_raise(api_messages)
 
         # Strip image parts for non-vision models (no-op when vision-capable).
         _msgs_for_chat = self._prepare_messages_for_non_vision_model(api_messages)
