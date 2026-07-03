@@ -249,3 +249,145 @@ class TestHandleVisionAnalyzeFastPath:
 
         assert not (isinstance(result, dict) and result.get("_multimodal") is True), \
             "Fast path fired for unknown provider; should have fallen through"
+
+
+# ─── routing_decision metadata ───────────────────────────────────────────────
+
+
+class TestRoutingDecisionMetadata:
+    """S14 phase 2: surface routing_decision metadata so the tray and cost
+    estimator can show which provider was actually used, whether a fallback
+    was triggered, and how long the call took. Both the native fast path and
+    the aux-LLM text path must produce a routing_decision field.
+    """
+
+    def test_native_fast_path_includes_routing_decision(self, tmp_path):
+        """Native fast path envelope carries mode='native' + primary provider/model."""
+        img = tmp_path / "x.png"
+        img.write_bytes(_TINY_PNG)
+
+        from agent.auxiliary_client import set_runtime_main, clear_runtime_main
+        set_runtime_main("openrouter", "anthropic/claude-opus-4.6")
+        try:
+            with patch(
+                "agent.image_routing.decide_image_input_mode",
+                return_value="native",
+            ):
+                coro = _handle_vision_analyze({"image_url": str(img), "question": "?"})
+                result = asyncio.get_event_loop().run_until_complete(coro)
+        finally:
+            clear_runtime_main()
+
+        assert isinstance(result, dict)
+        rd = result.get("routing_decision")
+        assert isinstance(rd, dict), "Native fast path must surface routing_decision"
+        assert rd["mode"] == "native"
+        assert rd["primary_provider"] == "openrouter"
+        assert rd["primary_model"] == "anthropic/claude-opus-4.6"
+        # No aux LLM was called, so no fallback should be recorded.
+        assert rd["fallback_used"] is False
+        assert rd["fallback_reason"] is None
+        assert rd["fallback_provider"] is None
+        assert rd["fallback_model"] is None
+
+    def test_aux_path_includes_routing_decision_when_no_fallback(self, tmp_path, monkeypatch):
+        """Aux-LLM text path surfaces routing_decision even when no fallback fires.
+
+        We patch async_call_llm to populate the routing_decision_out dict
+        directly so the test doesn't depend on the provider-resolution chain.
+        """
+        img = tmp_path / "x.png"
+        img.write_bytes(_TINY_PNG)
+
+        async def _fake_async_call_llm(*args, **kwargs):
+            routing_out = kwargs.get("routing_decision_out")
+            if isinstance(routing_out, dict):
+                routing_out.update({
+                    "mode": "text",
+                    "primary_provider": "openai",
+                    "primary_model": "gpt-5.4",
+                    "resolved_provider": "openai",
+                    "resolved_model": "gpt-5.4",
+                    "fallback_used": False,
+                    "fallback_reason": None,
+                    "fallback_provider": None,
+                    "fallback_model": None,
+                })
+            from types import SimpleNamespace
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="A square."))],
+            )
+
+        # Route through the non-vision path so the dispatcher uses the aux LLM.
+        from agent.auxiliary_client import set_runtime_main, clear_runtime_main
+        set_runtime_main("openrouter", "qwen/qwen3-coder")
+        try:
+            monkeypatch.setattr("tools.vision_tools.async_call_llm", _fake_async_call_llm)
+            with patch(
+                "agent.image_routing.decide_image_input_mode",
+                return_value="text",
+            ):
+                coro = _handle_vision_analyze({"image_url": str(img), "question": "?"})
+                result = asyncio.get_event_loop().run_until_complete(coro)
+        finally:
+            clear_runtime_main()
+
+        # Text path returns a JSON string; parse to inspect.
+        parsed = json.loads(result) if isinstance(result, str) else result
+        assert parsed["success"] is True
+        assert parsed["analysis"] == "A square."
+        rd = parsed["routing_decision"]
+        assert rd["mode"] == "text"
+        assert rd["primary_provider"] == "openai"
+        assert rd["resolved_provider"] == "openai"
+        assert rd["fallback_used"] is False
+        # elapsed_ms is present and a non-negative integer.
+        assert isinstance(parsed["elapsed_ms"], int)
+        assert parsed["elapsed_ms"] >= 0
+
+    def test_aux_path_routing_decision_records_fallback(self, tmp_path, monkeypatch):
+        """Aux-LLM text path surfaces fallback_used + fallback_reason when triggered."""
+        img = tmp_path / "x.png"
+        img.write_bytes(_TINY_PNG)
+
+        async def _fake_async_call_llm(*args, **kwargs):
+            routing_out = kwargs.get("routing_decision_out")
+            if isinstance(routing_out, dict):
+                routing_out.update({
+                    "mode": "text",
+                    "primary_provider": "openai",
+                    "primary_model": "gpt-5.4",
+                    "resolved_provider": "anthropic",
+                    "resolved_model": "claude-opus-4.6",
+                    "fallback_used": True,
+                    "fallback_reason": "primary_unavailable",
+                    "fallback_provider": "anthropic",
+                    "fallback_model": "claude-opus-4.6",
+                })
+            from types import SimpleNamespace
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Fallback answer."))],
+            )
+
+        from agent.auxiliary_client import set_runtime_main, clear_runtime_main
+        set_runtime_main("openrouter", "qwen/qwen3-coder")
+        try:
+            monkeypatch.setattr("tools.vision_tools.async_call_llm", _fake_async_call_llm)
+            with patch(
+                "agent.image_routing.decide_image_input_mode",
+                return_value="text",
+            ):
+                coro = _handle_vision_analyze({"image_url": str(img), "question": "?"})
+                result = asyncio.get_event_loop().run_until_complete(coro)
+        finally:
+            clear_runtime_main()
+
+        parsed = json.loads(result) if isinstance(result, str) else result
+        rd = parsed["routing_decision"]
+        assert rd["fallback_used"] is True
+        assert rd["fallback_reason"] == "primary_unavailable"
+        assert rd["fallback_provider"] == "anthropic"
+        assert rd["fallback_model"] == "claude-opus-4.6"
+        assert rd["resolved_provider"] == "anthropic"
+        # Primary stays the user's requested one even after fallback.
+        assert rd["primary_provider"] == "openai"

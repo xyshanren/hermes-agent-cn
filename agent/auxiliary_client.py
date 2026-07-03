@@ -3917,15 +3917,76 @@ def get_available_vision_backends() -> List[str]:
     return available
 
 
+def _vision_routing_init(
+    routing_out: Optional[Dict[str, Any]],
+    primary_provider: Optional[str],
+    primary_model: Optional[str],
+) -> None:
+    """Initialize the routing_decision dict with the primary (caller-requested)
+    vision provider/model. Called at the start of the vision branch in
+    call_llm()/async_call_llm() so downstream tools can read the final decision
+    after the call returns.
+    """
+    if not isinstance(routing_out, dict):
+        return
+    routing_out.clear()
+    routing_out.update({
+        "mode": "text",
+        "primary_provider": primary_provider or None,
+        "primary_model": primary_model or None,
+        "resolved_provider": None,
+        "resolved_model": None,
+        "fallback_used": False,
+        "fallback_reason": None,
+        "fallback_provider": None,
+        "fallback_model": None,
+    })
+
+
+def _vision_routing_record_fallback(
+    routing_out: Optional[Dict[str, Any]],
+    *,
+    fallback_provider: Optional[str],
+    fallback_model: Optional[str],
+    fallback_reason: str,
+) -> None:
+    """Mark that the vision call fell back from the primary to a secondary
+    provider/model. Surfaces the reason for telemetry / debugging.
+    """
+    if not isinstance(routing_out, dict):
+        return
+    routing_out["fallback_used"] = True
+    routing_out["fallback_reason"] = fallback_reason
+    routing_out["fallback_provider"] = fallback_provider or None
+    routing_out["fallback_model"] = fallback_model or None
+
+
+def _vision_routing_resolve(
+    routing_out: Optional[Dict[str, Any]],
+    resolved_provider: Optional[str],
+    resolved_model: Optional[str],
+) -> None:
+    """Record which provider/model was actually used for the call (after any
+    fallback resolution).
+    """
+    if not isinstance(routing_out, dict):
+        return
+    routing_out["resolved_provider"] = resolved_provider or None
+    routing_out["resolved_model"] = resolved_model or None
+
+
 def _try_vision_fallback_config(
     provider: Optional[str],
     model: Optional[str],
     base_url: Optional[str],
     api_key: Optional[str],
-) -> Optional[Tuple[str, Any, str]]:
+) -> Optional[Tuple[str, Any, str, str]]:
     """Try auxiliary.vision.fallback_* config when primary vision fails.
 
-    Returns (fallback_provider, client, fallback_model) or None.
+    Returns (fallback_provider, client, fallback_model, fallback_reason) or None.
+    The ``fallback_reason`` is a short string (e.g. "primary_unavailable") that
+    downstream tools can surface in their routing_decision metadata so users
+    can see why the fallback was triggered.
     """
     try:
         from hermes_cli.config import load_config
@@ -3947,7 +4008,7 @@ def _try_vision_fallback_config(
         if fallback_provider == provider and fallback_model == model:
             return None
 
-        provider, client, resolved_model = resolve_vision_provider_client(
+        resolved_provider, client, resolved_model = resolve_vision_provider_client(
             provider=fallback_provider,
             model=fallback_model,
             base_url=fallback_base_url or None,
@@ -3955,9 +4016,10 @@ def _try_vision_fallback_config(
         )
         if client:
             logger.info(
-                "Vision fallback: %s → %s/%s", provider or "?", fallback_provider, fallback_model,
+                "Vision fallback: %s → %s/%s",
+                provider or "?", resolved_provider or "?", resolved_model or "?",
             )
-            return (provider, client, resolved_model)
+            return (resolved_provider, client, resolved_model, "primary_unavailable")
     except Exception as e:
         logger.debug("Vision fallback config failed: %s", e)
     return None
@@ -4816,6 +4878,7 @@ def call_llm(
     tools: list = None,
     timeout: float = None,
     extra_body: dict = None,
+    routing_decision_out: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """Centralized synchronous LLM call.
 
@@ -4847,6 +4910,7 @@ def call_llm(
     effective_extra_body.update(extra_body or {})
 
     if task == "vision":
+        _vision_routing_init(routing_decision_out, resolved_provider, resolved_model)
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
             model=resolved_model or model,
@@ -4860,7 +4924,13 @@ def call_llm(
                 resolved_provider, resolved_model, resolved_base_url, resolved_api_key,
             )
             if _fallback_ok:
-                effective_provider, client, final_model = _fallback_ok
+                effective_provider, client, final_model, _fallback_reason = _fallback_ok
+                _vision_routing_record_fallback(
+                    routing_decision_out,
+                    fallback_provider=effective_provider,
+                    fallback_model=final_model,
+                    fallback_reason=_fallback_reason,
+                )
             else:
                 logger.warning(
                     "Vision provider %s unavailable, falling back to auto vision backends",
@@ -4871,12 +4941,19 @@ def call_llm(
                     model=resolved_model,
                     async_mode=False,
                 )
+                _vision_routing_record_fallback(
+                    routing_decision_out,
+                    fallback_provider=effective_provider,
+                    fallback_model=final_model,
+                    fallback_reason="primary_unavailable_no_config_fallback",
+                )
         if client is None:
             raise RuntimeError(
                 f"No LLM provider configured for task={task} provider={resolved_provider}. "
                 f"Run: hermes setup"
             )
         resolved_provider = effective_provider or resolved_provider
+        _vision_routing_resolve(routing_decision_out, resolved_provider, final_model)
     else:
         client, final_model = _get_cached_client(
             resolved_provider,
@@ -5265,6 +5342,7 @@ async def async_call_llm(
     tools: list = None,
     timeout: float = None,
     extra_body: dict = None,
+    routing_decision_out: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """Centralized asynchronous LLM call.
 
@@ -5276,6 +5354,7 @@ async def async_call_llm(
     effective_extra_body.update(extra_body or {})
 
     if task == "vision":
+        _vision_routing_init(routing_decision_out, resolved_provider, resolved_model)
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
             model=resolved_model or model,
@@ -5293,12 +5372,19 @@ async def async_call_llm(
                 model=resolved_model,
                 async_mode=True,
             )
+            _vision_routing_record_fallback(
+                routing_decision_out,
+                fallback_provider=effective_provider,
+                fallback_model=final_model,
+                fallback_reason="primary_unavailable_no_config_fallback",
+            )
         if client is None:
             raise RuntimeError(
                 f"No LLM provider configured for task={task} provider={resolved_provider}. "
                 f"Run: hermes setup"
             )
         resolved_provider = effective_provider or resolved_provider
+        _vision_routing_resolve(routing_decision_out, resolved_provider, final_model)
     else:
         client, final_model = _get_cached_client(
             resolved_provider,

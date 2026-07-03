@@ -32,6 +32,7 @@ import base64
 import json
 import logging
 import os
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Dict, Optional
@@ -727,12 +728,33 @@ async def _vision_analyze_native(
                     success=False,
                 )
 
-        return _build_native_vision_tool_result(
+        envelope = _build_native_vision_tool_result(
             image_url=image_url,
             question=question,
             image_data_url=image_data_url,
             image_size_bytes=image_size_bytes,
         )
+        # Surface routing metadata for the tray / cost estimator / debugging.
+        # mode=native means the main model sees the pixels directly — no aux
+        # LLM was called, so there's no fallback story to tell. We still record
+        # the primary (active main) provider/model for parity with the text path.
+        try:
+            from agent.auxiliary_client import _read_main_provider, _read_main_model
+            envelope["routing_decision"] = {
+                "mode": "native",
+                "primary_provider": _read_main_provider() or None,
+                "primary_model": _read_main_model() or None,
+                "resolved_provider": _read_main_provider() or None,
+                "resolved_model": _read_main_model() or None,
+                "fallback_used": False,
+                "fallback_reason": None,
+                "fallback_provider": None,
+                "fallback_model": None,
+            }
+        except Exception:
+            # Don't fail the fast path if the metadata helpers are missing.
+            envelope["routing_decision"] = {"mode": "native"}
+        return envelope
 
     except Exception as exc:
         logger.warning("Native vision fast path failed: %s", exc)
@@ -804,7 +826,13 @@ async def vision_analyze_tool(
     # Local files (e.g. from the image cache) should NOT be deleted.
     should_cleanup = True
     detected_mime_type = None
-    
+
+    # Initialized before the try block so the except branch can always include
+    # whatever routing decision async_call_llm has recorded so far. async_call_llm
+    # replaces this dict in-place via the routing_decision_out kwarg, so the
+    # same object stays accessible after the call returns.
+    routing_decision: Dict[str, Any] = {}
+
     try:
         from tools.interrupt import is_interrupted
         if is_interrupted():
@@ -922,6 +950,11 @@ async def vision_analyze_tool(
         }
         if model:
             call_kwargs["model"] = model
+        # Surface routing metadata (provider, fallback chain, model) to the
+        # tray and downstream cost estimator. async_call_llm populates this
+        # dict so we can read it after the call returns.
+        call_kwargs["routing_decision_out"] = routing_decision
+        _call_started_at = time.monotonic()
         # Try full-size image first; on size-related rejection, downscale and retry.
         try:
             response = await async_call_llm(**call_kwargs)
@@ -940,7 +973,7 @@ async def vision_analyze_tool(
                 response = await async_call_llm(**call_kwargs)
             else:
                 raise
-        
+
         # Extract the analysis — fall back to reasoning if content is empty
         analysis = extract_content_or_reasoning(response)
 
@@ -950,14 +983,17 @@ async def vision_analyze_tool(
             response = await async_call_llm(**call_kwargs)
             analysis = extract_content_or_reasoning(response)
 
+        _elapsed_ms = int((time.monotonic() - _call_started_at) * 1000)
         analysis_length = len(analysis)
-        
+
         logger.info("Image analysis completed (%s characters)", analysis_length)
-        
+
         # Prepare successful response
         result = {
             "success": True,
-            "analysis": analysis or "There was a problem with the request and the image could not be analyzed."
+            "analysis": analysis or "There was a problem with the request and the image could not be analyzed.",
+            "routing_decision": routing_decision,
+            "elapsed_ms": _elapsed_ms,
         }
         
         debug_call_data["success"] = True
@@ -1010,6 +1046,7 @@ async def vision_analyze_tool(
             "success": False,
             "error": error_msg,
             "analysis": analysis,
+            "routing_decision": routing_decision,
         }
         
         debug_call_data["error"] = error_msg
