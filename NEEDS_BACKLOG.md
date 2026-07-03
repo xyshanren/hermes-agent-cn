@@ -1,6 +1,6 @@
 # hermes-agent-cn 需求 Backlog (2026-06-26)
 
-> **状态**: 🔄 部分完成 (1/5 done): **S13-agent ✅ 2026-07-02** (commit `016383af8`); §3 S14 / §4 S12 / §5 S15 / 6.x 杂项 pending, 等用户拍板续作
+> **状态**: 🔄 部分完成 (2/5 done): **S13-agent ✅ 2026-07-02** (commit `016383af8`); **S14-agent ✅ 2026-07-03** (commits `a716f33e6` + `125cc93c0` + `8882270e7`); §4 S12 / §5 S15 / 6.x 杂项 pending, 等用户拍板续作
 > **触发来源**: hermes-tray v2.0 (S12-S15) 路线图重新对边界时, 识别出 hermes-agent 需要补齐的能力
 > **执行条件**: ✅ 已触发 (S13 完成 2026-07-02; 累积 backlog 继续等用户拍板续作 + hermes-tray v0.1.3 集成决策)
 
@@ -92,6 +92,28 @@ hermes-tray T-Q-S13 的 `hermes_proxy_transcribe` Rust command 已实现 multipa
 - 单元测试: provider 路由, error 路径, 多 provider fallback
 - 集成测试: 真实 wav 文件从 local + cloud 两种 provider
 - freeze test: hermes-cn TEST_PLAN 加 5-8 个新 case
+
+---
+
+## 需求 3: S14-agent — Vision fallback + 图片 token 估算 ✅ DONE (2026-07-03)
+
+> **状态**: ✅ Done — 3 commits on `cn` branch (2026-07-03), pending push to `origin/cn`:
+> - `a716f33e6` Phase 1: image_tokens in CanonicalUsage + SSE usage (`usage.prompt_tokens_details.image_tokens`) + sessions.image_tokens 列 (declarative column reconciliation 自动加).
+> - `125cc93c0` Phase 2: vision routing_decision metadata (mode / primary / resolved / fallback_used / fallback_reason) + elapsed_ms.
+> - `8882270e7` Phase 3: 多图 limit 校验 (per-model `_MODEL_MAX_IMAGES` 表 + config override + `TooManyImagesError` 在 chat-completions / codex-responses pre-flight 触发).
+>
+> **关键变更**:
+> - `agent/usage_pricing.py` 加 `image_tokens` 字段到 `CanonicalUsage`; `normalize_usage` 从 `prompt_tokens_details.image_tokens` (OpenAI Chat Completions) 和 `input_tokens_details.image_tokens` (Codex Responses) 提取; Anthropic 留 0.
+> - `agent/conversation_loop.py` `usage_dict` 加 `prompt_tokens_details = {image_tokens, cached_tokens}` (OpenAI 协议), turn-end result 加 `image_tokens` 字段.
+> - `hermes_state.py` `sessions` 表加 `image_tokens INTEGER DEFAULT 0` 列, `update_token_counts` 同步加 image_tokens 参数; declarative `_reconcile_columns` 自动给老 DB 加列.
+> - `agent/auxiliary_client.py` `_try_vision_fallback_config` 返 4-tuple `(provider, client, model, fallback_reason)`; `call_llm` / `async_call_llm` 加 `routing_decision_out` kwarg; 新 helper `_vision_routing_init/_record_fallback/_resolve` 共享决策合并逻辑.
+> - `tools/vision_tools.py` `_vision_analyze_native` envelope 加 `routing_decision` (mode=native); `vision_analyze_tool` 透传 routing_decision + elapsed_ms 到 success/error JSON.
+> - `agent/image_routing.py` 加 `count_image_parts` + `get_max_images_per_request` + `validate_image_count`; model-aware lookup 表覆盖 GPT-4o/5/o1/o3/Claude 3 (20) / Claude 4 (100) / Gemini 1.5/2 (16).
+> - `run_agent.py` 加 `TooManyImagesError` (actionable message) + `AIAgent._validate_image_count_or_raise` 在 chat-completions / codex-responses 调用前触发.
+>
+> **测试覆盖**: 26 new cases across `test_usage_pricing.py` (5) + `test_hermes_state.py` (3) + `test_vision_native_fast_path.py` (3) + `test_image_routing.py` (16, skip pre-existing `TestExtractImageRefs`); 全过 (pre-existing failures 排除).
+>
+> **Backlog 仍 open**: §1 S12-agent 路由决策透传 (cost/latency/retries metadata) — 跟 tray T-Q-S12-light / T-Q-S9 cost 真值替换对齐; 3-5 天; §4 S15-agent Plugin Marketplace; §5 杂项.
 
 ---
 

@@ -1072,31 +1072,6 @@ class AIAgent:
     for AI models that support function calling.
     """
 
-
-class TooManyImagesError(Exception):
-    """Raised when a chat-completions request carries more image parts than
-    the active model accepts in a single request.
-
-    The agent's pre-flight check (``_validate_image_count_or_raise``) raises
-    this with a clear, actionable message instead of letting the request
-    reach the upstream provider and fail with a cryptic 400. Users see a
-    specific hint pointing at ``config.agent.vision_max_images`` and the
-    ``vision_analyze`` tool.
-    """
-
-    def __init__(self, *, image_count: int, max_images: int, provider: str, model: str):
-        self.image_count = image_count
-        self.max_images = max_images
-        self.provider = provider
-        self.model = model
-        super().__init__(
-            f"Request has {image_count} image parts, but the active model "
-            f"({provider}/{model}) accepts at most {max_images} per request. "
-            f"Either reduce the number of images, raise the limit via "
-            f"config.yaml agent.vision_max_images, or pre-analyze the images "
-            f"with the vision_analyze tool and submit the descriptions as text."
-        )
-
     _TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER = (
         "[hermes-agent: tool call arguments were corrupted in this session and "
         "have been dropped to keep the conversation alive. See issue #15236.]"
@@ -15723,3 +15698,28 @@ def main(
 if __name__ == "__main__":
     import fire
     fire.Fire(main)
+
+
+class TooManyImagesError(Exception):
+    """Raised when a chat-completions request carries more image parts than
+    the active model accepts in a single request.
+
+    The agent's pre-flight check (``AIAgent._validate_image_count_or_raise``)
+    raises this with a clear, actionable message instead of letting the
+    request reach the upstream provider and fail with a cryptic 400. Users
+    see a specific hint pointing at ``config.agent.vision_max_images`` and
+    the ``vision_analyze`` tool.
+    """
+
+    def __init__(self, *, image_count: int, max_images: int, provider: str, model: str):
+        self.image_count = image_count
+        self.max_images = max_images
+        self.provider = provider
+        self.model = model
+        super().__init__(
+            f"Request has {image_count} image parts, but the active model "
+            f"({provider}/{model}) accepts at most {max_images} per request. "
+            f"Either reduce the number of images, raise the limit via "
+            f"config.yaml agent.vision_max_images, or pre-analyze the images "
+            f"with the vision_analyze tool and submit the descriptions as text."
+        )
