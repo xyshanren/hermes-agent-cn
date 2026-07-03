@@ -2120,10 +2120,14 @@ class GatewayRunner(GatewayKanbanWatchersMixin, GatewaySlashCommandsMixin):
     def _wire_teams_pipeline_runtime(self) -> None:
         """Bind the Teams meeting pipeline runtime to Graph webhook ingress.
 
-        No-op when the msgraph_webhook adapter isn't running or the
-        teams_pipeline plugin isn't enabled — lets the gateway start cleanly
-        whether or not the user has opted into the pipeline.
+        No-op in cn: cn T1c jian-fa (d5d671778, 2026-06-16) removed
+        Platform.MSGRAPH_WEBHOOK from the Platform enum and dropped the
+        msgraph_webhook adapter. The teams_pipeline plugin can still be
+        enabled; the Teams meeting pipeline just won't have Graph webhook
+        ingress in cn until/unless MSGraph support is re-added.
         """
+        return  # cn T1c jian-fa: no MSGraph webhook adapter
+        # Dead code below — Platform.MSGRAPH_WEBHOOK not in cn's enum
         if Platform.MSGRAPH_WEBHOOK not in self.adapters:
             return
         if not _teams_pipeline_plugin_enabled():
@@ -5987,16 +5991,6 @@ class GatewayRunner(GatewayKanbanWatchersMixin, GatewaySlashCommandsMixin):
             adapter = WebhookAdapter(config)
             adapter.gateway_runner = self  # For cross-platform delivery
             return adapter
-
-        elif platform == Platform.MSGRAPH_WEBHOOK:
-            from gateway.platforms.msgraph_webhook import (
-                MSGraphWebhookAdapter,
-                check_msgraph_webhook_requirements,
-            )
-            if not check_msgraph_webhook_requirements():
-                logger.warning("MSGraph webhook: aiohttp not installed")
-                return None
-            return MSGraphWebhookAdapter(config)
 
         elif platform == Platform.BLUEBUBBLES:
             from gateway.platforms.bluebubbles import BlueBubblesAdapter, check_bluebubbles_requirements
