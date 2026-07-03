@@ -1,8 +1,8 @@
 # hermes-agent-cn 需求 Backlog (2026-06-26)
 
-> **状态**: 🔄 部分完成 (4/5 done + 1 sub-phase): **S13-agent ✅ 2026-07-02** (commit `016383af8`); **S14-agent ✅ 2026-07-03** (commits `a716f33e6` + `125cc93c0` + `8882270e7`); **S12-agent Phase 1 ✅ 2026-07-03** (commits `4cd26c480` partial + `a192442d8` mutation hooks; CHANGELOG v0.17.0+cn.20); **S12-agent Phase 2 ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.21 — cost-aware fallback rule); **S15-agent Plugin MVP ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.22 — 现状盘点, 零代码改动); S12 Phase 3 (tray T-Q-S9 真值替换) / 5.x 杂项 pending
+> **状态**: ✅ **cn backlog 全部 done 或 N/A** (2026-07-03 收盘盘点). **S13-agent ✅ 2026-07-02** (commit `016383af8`); **S14-agent ✅ 2026-07-03** (commits `a716f33e6` + `125cc93c0` + `8882270e7`); **S12-agent Phase 1 ✅ 2026-07-03** (commits `4cd26c480` partial + `a192442d8` mutation hooks; CHANGELOG v0.17.0+cn.20); **S12-agent Phase 2 ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.21 — cost-aware fallback rule); **S15-agent Plugin MVP ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.22 — 现状盘点, 零代码改动); **5.x 杂项 ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.23 — 全部 done 或 N/A). 只剩 **S12 Phase 3 (tray T-Q-S9 真值替换, hermes-tray 侧)** + **S15 完整 marketplace (5-7d, 独立产品决策)** 不在 cn 范围.
 > **触发来源**: hermes-tray v2.0 (S12-S15) 路线图重新对边界时, 识别出 hermes-agent 需要补齐的能力
-> **执行条件**: ✅ 已触发 (S13 + S14 + S12 P1+P2 + S15 MVP 完成; 累积 backlog 继续等用户拍板续作 + hermes-tray v0.1.5 集成决策)
+> **执行条件**: ✅ 已全部触发并完成 cn 范围内的事项
 
 ---
 
@@ -263,27 +263,37 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 
 ## 需求 5: 其它 (hermes-tray 现开发期可能新触发)
 
+> **状态**: ✅ **全部 done 或 N/A** (2026-07-03, 调研盘点零代码改动, CHANGELOG v0.17.0+cn.23):
+> - **5.1 路由元数据可视化** ✅ done in S12 P1 (CHANGELOG v0.17.0+cn.20) — `usage.routing_decision.resolved_provider` / `cost_estimate_usd` / `fallback_*` 字段已推 SSE, tray 端 opt-in 读即可按 provider 分组
+> - **5.2 SSE stream 压缩 / 中断恢复** ⚠️ **N/A** — hermes-agent-cn 不直接 serve SSE (`web_server.py` 没 StreamingResponse/EventSource; proxy/server.py 走 aiohttp auto-gzip);tray 长 session 卡顿若真实存在应在 tray 侧或 proxy 层排查
+> - **5.3 Model override / model_to_provider 索引** ✅ done — `hermes_cli/models.py:1833 detect_static_provider_for_model` + `:1884 detect_provider_for_model` 完整实现, 静态 catalog + OpenRouter fallback, 4+ 处复用 (model_switch/oneshot/acp_adapter/tui_gateway), 6+ 测试 (`tests/hermes_cli/test_models.py:246-303`)
+> - **5.4 Chat completion streaming 里的 image 预算** ✅ done in S14 phase 1 (CHANGELOG v0.17.0+cn.19) — `usage.prompt_tokens_details.image_tokens` 推 SSE + `agent.session_image_tokens` 累加 + `sessions.image_tokens INTEGER DEFAULT 0` 列
+
 ### 5.1 路由元数据可视化 (T-Q-S12-light 配套)
 - 来源: hermes-tray 想在 stats modal 显示 "本月 cost 主要来自 deepseek (60%) + gpt-4o (40%)"
 - 当前: 只能从 T-Q-S9 的 `by_model` 推, 但 by_model 是前端 name, 不是 provider
 - 需要: agent 把 cost breakdown 推到前端 (per provider, per route)
 - 估算: 跟需求 1 合并
+- **现状**: ✅ done in S12 P1 — `usage.routing_decision.{resolved_provider, cost_estimate_usd, fallback_provider, fallback_reason}` 都已推 SSE;tray 端 opt-in 读即可按 provider 分组
 
 ### 5.2 SSE stream 压缩 / 中断恢复
 - 来源: tray 用户报告长 session 流式响应卡顿
 - 当前: 没有压缩, 中断后只能重新发
 - 候选: gzip 压缩, resumable streams, etc.
 - 估算: 评估中
+- **现状**: ⚠️ N/A — hermes-agent-cn 不直接 serve SSE (`hermes_cli/web_server.py` 只 import FileResponse/HTMLResponse/JSONResponse/Response; grep `EventSource|text/event-stream|StreamingResponse` 在 `hermes_cli/` 下零命中);SSE 是 proxy/server.py 把请求转发给 OpenAI 直接处理 (`aiohttp recomputes Content-Encoding on stream`);如果未来加 SSE endpoint 再考虑 5.2
 
 ### 5.3 Model override 在 quickstart 流程里
 - 来源: T-Q-S12-light 选了 model name 后, agent 不知道哪个 provider 配了那个 model
 - 候选: `config.py` 加 model_to_provider 索引 (已有 `provider` 字段), 加速路由
 - 估算: 半天
+- **现状**: ✅ done — `hermes_cli/models.py:1833 detect_static_provider_for_model` + `:1884 detect_provider_for_model` (静态 catalog 优先 + OpenRouter fallback), 被 `model_switch.py` / `oneshot.py` / `acp_adapter/server.py` / `tui_gateway/server.py` 等 4+ 处复用;6+ 测试 (`tests/hermes_cli/test_models.py:246-303`)
 
 ### 5.4 Chat completion streaming 里的 image 预算
 - 来源: T-Q-S14 多图消息
 - 当前: agent 算 image tokens, 但不告诉前端 "本轮 image 占 510 tokens"
 - 已在 需求 3 覆盖
+- **现状**: ✅ done in S14 phase 1 (`a716f33e6`, CHANGELOG v0.17.0+cn.19) — `usage_dict.prompt_tokens_details.image_tokens` 推 SSE + `agent.session_image_tokens` 累加 + `sessions.image_tokens INTEGER DEFAULT 0` 列 (declarative reconciliation 自动迁移老 DB)
 
 ---
 
@@ -297,18 +307,18 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 | Phase 2 | S14-agent (Vision token + 路由 metadata) | 2-3 天 | ✅ done 2026-07-03 (commits `a716f33e6`+`125cc93c0`+`8882270e7`) |
 | Phase 3 | S12-agent Phase 1 (Routing metadata 收集 + SSE 推送) | 3-5 天 (Phase 1 拆出) | ✅ done 2026-07-03 (commits `4cd26c480` partial + `a192442d8` mutation hooks; CHANGELOG v0.17.0+cn.20) |
 | Phase 3b | S12-agent Phase 2 (cost-aware fallback rule + threshold annotations) | 1-2 天 | ✅ done 2026-07-03 (CHANGELOG v0.17.0+cn.21) |
-| Phase 3c | S12-agent Phase 3 (tray T-Q-S9 真值替换) | 0.5-1 天 | ⏸ pending (hermes-tray 侧) |
+| Phase 3c | S12-agent Phase 3 (tray T-Q-S9 真值替换) | 0.5-1 天 | ⏸ pending (hermes-tray 侧, 不在 cn 范围) |
 | Phase 4 | S15-agent Plugin marketplace MVP | 1-2 天 (实际零代码, 文档盘点 done) | ✅ done 2026-07-03 (CHANGELOG v0.17.0+cn.22; 现状盘点确认 manifest + 加载 + CLI 已实现) |
-| 5.x | 路由元数据可视化 / SSE 压缩 / model_to_provider 索引 | 0.5-1 天 | ⏸ pending (见 §5 各项) |
+| 5.x | 5.1 路由元数据可视化 / 5.2 SSE 压缩 / 5.3 model_to_provider / 5.4 image 预算 | 0.5-1 天 (现状盘点) | ✅ done 2026-07-03 (CHANGELOG v0.17.0+cn.23; 5.1/5.3/5.4 done, 5.2 N/A) |
 
-**Phase 1 (S13) + Phase 2 (S14) + Phase 3 P1+P2 (S12 metadata + cost-aware rule) + Phase 4 (S15 plugin MVP 现状盘点) ✅ 完成** (4/5 done + 1 sub-phase). Phase 3c (S12 tray 真值替换) + 5.x 杂项是独立产品决策, 续作须用户拍板 + 集成验证策略定 (v0.1.5 plan).**
+**cn 范围内全部完成** ✅ (S13 + S14 + S12 P1+P2 + S15 MVP + 5.x; 共 4/5 done + 1 sub-phase + 5.x done). Phase 3c (tray T-Q-S9) + S15 完整 marketplace (5-7d) 不在 cn 范围, 等用户拍板 + 集成窗口.
 
 ---
 
 ## 触发: 重新评估
 
-**当前: 4/5 项完成 + S12 P2 sub-phase done (S13 done 2026-07-02; S14 done 2026-07-03; S12 P1+P2 done 2026-07-03, 2 commits pushed to origin/cn via `git push origin cn`; S15 MVP done 2026-07-03 via现状盘点 commit).**
+**当前: cn backlog 全部 done 或 N/A (4/5 项 + 1 sub-phase + 5.x 全部收盘). S13 done 2026-07-02; S14 done 2026-07-03; S12 P1+P2 done 2026-07-03 (commits `a192442d8` + `b49ef1a31` pushed to origin/cn); S15 MVP done 2026-07-03 (commit `6a88eb4ab` pushed); 5.x done-or-N/A done 2026-07-03 (commit pending push).**
 
-文件**不整体 archive**（按原 L207 预设 "执行完后 才搬"，但 S12 P3 不在 cn 范围 (tray 侧) + 5.x 杂项 2 项还 pending, 不算 "全部执行完"）。续作 (S12 P3 / 5.x) 继续在本文件累计；后续如用户拍板 "全部停" 或 "全部完成"，再 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`.
+文件**待用户决定是否整体 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`** (cn 范围收盘, S12 P3 在 hermes-tray 侧, S15 完整 marketplace 是独立产品决策). archive 是 destructive 操作, 等用户明确批准后再搬. 当前 NEEDS_BACKLOG.md 保留作为 cn backlog 历史快照.
 
-新需求开新文件（按 L208 指引不变）。
+后续新需求 (跨项目的新功能, 例如 hermes-tray v0.1.6 / hermes-tray S16+) 开新文件（按 L208 指引不变）.
