@@ -775,6 +775,22 @@ DEFAULT_CONFIG = {
         # (force on/off for all models), or a list of model-name substrings
         # to match (e.g. ["gpt", "codex", "gemini", "qwen"]).
         "tool_use_enforcement": "auto",
+        # S12 cost-aware fallback — when a single call's cost exceeds
+        # `per_request_max_usd` OR the cumulative session spend exceeds
+        # `per_session_max_usd`, the routing_decision carries a
+        # `cost_threshold_exceeded=True` annotation so the front-end can
+        # surface a budget warning.  When `on_session_exceeded='fallback'`,
+        # the main agent also proactively swaps to the next
+        # `fallback_chain` entry on the next turn (without waiting for an
+        # outright provider failure).  Disabled by default to preserve
+        # pre-S12 behavior — opt in by setting `enabled: true` plus the
+        # thresholds in config.yaml.  See agent/cost_aware_fallback.py.
+        "cost_aware_fallback": {
+            "enabled": False,
+            "per_request_max_usd": 0.05,
+            "per_session_max_usd": 1.00,
+            "on_session_exceeded": "warn",  # 'warn' | 'fallback'
+        },
         # Universal "finish the job" guidance — short prompt block applied to
         # all models that targets two cross-family failure modes: (1) stopping
         # after a stub instead of finishing the artifact, (2) fabricating

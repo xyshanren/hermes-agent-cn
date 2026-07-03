@@ -62,6 +62,7 @@ try:
         set_cost,
         increment_retries,
         set_rule_id,
+        set_cost_threshold,
     )
 except ImportError:  # pragma: no cover — defensive for tools that import this
     # module outside the package layout.  Tests run in-repo so this branch
@@ -69,6 +70,106 @@ except ImportError:  # pragma: no cover — defensive for tools that import this
     # optional in edge environments (e.g. ad-hoc REPL scripts).
     init_routing_decision = record_fallback = resolve_routing = None  # type: ignore[assignment]
     set_latency = set_cost = increment_retries = set_rule_id = None  # type: ignore[assignment]
+    set_cost_threshold = None  # type: ignore[assignment]
+
+
+def _evaluate_per_request_cost_threshold(
+    response: Any,
+    *,
+    resolved_provider: Optional[str],
+    resolved_model: Optional[str],
+    routing_out: Optional[Dict[str, Any]],
+) -> None:
+    """S12 P2: stamp ``cost_threshold_exceeded`` onto ``routing_out`` when the
+    single-call cost exceeds the configured per-request budget.
+
+    Best-effort — when the response carries no usage object, the pricing
+    table doesn't cover the model, or the config is disabled, this is a
+    silent no-op so existing call paths keep working unchanged.
+    """
+    if set_cost_threshold is None:
+        return
+    if not isinstance(routing_out, dict):
+        return
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+
+    try:
+        from agent.usage_pricing import (
+            CostResult,
+            estimate_usage_cost,
+        )
+        cost_result = estimate_usage_cost(
+            resolved_model or "",
+            usage,
+            provider=resolved_provider,
+            base_url="",
+        )
+    except Exception:
+        return
+
+    if not isinstance(cost_result, CostResult):
+        return
+    if cost_result.amount_usd is None:
+        return
+
+    try:
+        from agent.cost_aware_fallback import (
+            CostAwareFallbackConfig,
+            check_request_cost_threshold,
+        )
+    except ImportError:
+        return
+
+    # Lazy load the config — keep the hot path cheap when the feature is off.
+    raw_cfg = None
+    try:
+        from hermes_cli.config import load_config
+        full = load_config() or {}
+        raw_cfg = (full.get("agent") or {}).get("cost_aware_fallback")
+    except Exception:
+        raw_cfg = None
+    if not raw_cfg:
+        return
+    cfg = CostAwareFallbackConfig.from_dict(raw_cfg)
+
+    reason = check_request_cost_threshold(cost_result.amount_usd, cfg)
+    if reason:
+        set_cost_threshold(routing_out, reason=reason)
+
+
+def _finalize_call_llm_success(
+    response: Any,
+    *,
+    routing_decision_out: Optional[Dict[str, Any]],
+    resolved_provider: Optional[str],
+    resolved_model: Optional[str],
+    call_start_monotonic: float,
+) -> None:
+    """Stamp the standard P1+S12 success-path fields on the routing dict.
+
+    Bundles the resolve_routing + set_latency + per-request cost-threshold
+    check so call_llm / async_call_llm can finish each happy path with one
+    call instead of three (and so the order is consistent across all the
+    success exits — primary, retry, fallback).
+    """
+    if resolve_routing is not None and isinstance(routing_decision_out, dict):
+        resolve_routing(
+            routing_decision_out,
+            resolved_provider=resolved_provider,
+            resolved_model=resolved_model,
+        )
+        set_latency(
+            routing_decision_out,
+            latency_ms=int((time.monotonic() - call_start_monotonic) * 1000),
+        )
+        _evaluate_per_request_cost_threshold(
+            response,
+            resolved_provider=resolved_provider,
+            resolved_model=resolved_model,
+            routing_out=routing_decision_out,
+        )
 from urllib.parse import urlparse, parse_qs, urlunparse
 
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
@@ -5067,6 +5168,18 @@ def call_llm(
                                 resolved_model=final_model)
                 set_latency(routing_decision_out,
                             latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
             return response
         except Exception as transient_err:
             if not _is_transient_transport_error(transient_err):
@@ -5086,6 +5199,18 @@ def call_llm(
                                 resolved_model=final_model)
                 set_latency(routing_decision_out,
                             latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
             return response
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
@@ -5106,6 +5231,12 @@ def call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
@@ -5153,6 +5284,12 @@ def call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
@@ -5192,6 +5329,12 @@ def call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
 
         # ── Auth refresh retry ───────────────────────────────────────
@@ -5227,6 +5370,12 @@ def call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
 
         # ── Same-provider credential-pool recovery ─────────────────────
@@ -5243,6 +5392,12 @@ def call_llm(
                                         resolved_model=final_model)
                         set_latency(routing_decision_out,
                                     latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                        _evaluate_per_request_cost_threshold(
+                            response,
+                            resolved_provider=resolved_provider,
+                            resolved_model=final_model,
+                            routing_out=routing_decision_out,
+                        )
                     return response
                 except Exception as retry_err:
                     if not (_is_auth_error(retry_err) or _is_payment_error(retry_err) or _is_rate_limit_error(retry_err)):
@@ -5277,6 +5432,12 @@ def call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
 
         # ── Payment / credit exhaustion fallback ──────────────────────
@@ -5372,6 +5533,18 @@ def call_llm(
                                     resolved_model=fb_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=fb_label,
+                        resolved_model=fb_model,
+                        routing_out=routing_decision_out,
+                    )
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=fb_label,
+                        resolved_model=fb_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
             # All fallback layers exhausted — emit a single user-visible
             # warning so the operator knows aux task is about to fail.
@@ -5575,6 +5748,18 @@ async def async_call_llm(
                                 resolved_model=final_model)
                 set_latency(routing_decision_out,
                             latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
             return response
         except Exception as transient_err:
             if not _is_transient_transport_error(transient_err):
@@ -5594,6 +5779,18 @@ async def async_call_llm(
                                 resolved_model=final_model)
                 set_latency(routing_decision_out,
                             latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
+                _evaluate_per_request_cost_threshold(
+                    response,
+                    resolved_provider=resolved_provider,
+                    resolved_model=final_model,
+                    routing_out=routing_decision_out,
+                )
             return response
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
@@ -5614,6 +5811,12 @@ async def async_call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
@@ -5657,6 +5860,12 @@ async def async_call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
@@ -5695,6 +5904,12 @@ async def async_call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
 
         # ── Auth refresh retry (mirrors sync call_llm) ───────────────
@@ -5729,6 +5944,12 @@ async def async_call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
 
         # ── Same-provider credential-pool recovery (mirrors sync) ─────
@@ -5745,6 +5966,12 @@ async def async_call_llm(
                                         resolved_model=final_model)
                         set_latency(routing_decision_out,
                                     latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                        _evaluate_per_request_cost_threshold(
+                            response,
+                            resolved_provider=resolved_provider,
+                            resolved_model=final_model,
+                            routing_out=routing_decision_out,
+                        )
                     return response
                 except Exception as retry_err:
                     if not (_is_auth_error(retry_err) or _is_payment_error(retry_err) or _is_rate_limit_error(retry_err)):
@@ -5778,6 +6005,12 @@ async def async_call_llm(
                                     resolved_model=final_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=resolved_provider,
+                        resolved_model=final_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
 
         # ── Payment / connection / rate-limit fallback (mirrors sync call_llm) ──
@@ -5852,6 +6085,18 @@ async def async_call_llm(
                                     resolved_model=fb_model or async_fb_model)
                     set_latency(routing_decision_out,
                                 latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=fb_label,
+                        resolved_model=fb_model or async_fb_model,
+                        routing_out=routing_decision_out,
+                    )
+                    _evaluate_per_request_cost_threshold(
+                        response,
+                        resolved_provider=fb_label,
+                        resolved_model=fb_model or async_fb_model,
+                        routing_out=routing_decision_out,
+                    )
                 return response
             # All fallback layers exhausted — warn before re-raising. (#26882)
             logger.warning(

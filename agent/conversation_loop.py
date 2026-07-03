@@ -449,6 +449,103 @@ def _build_main_agent_routing_decision(
     return out
 
 
+def _check_session_cost_threshold_and_act(
+    agent,
+    *,
+    session_cost_usd: Optional[float],
+    routing_decision: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """S12 P2: enforce the agent-level session cost budget.
+
+    Called once per successful turn *after* the per-turn USD has been
+    added to ``agent.session_estimated_cost_usd``.  Behavior:
+
+    1. Load ``agent.cost_aware_fallback`` from config (lazy — cheap when off).
+    2. If disabled, or below the configured ``per_session_max_usd``,
+       return ``None`` (no-op).
+    3. Otherwise stamp
+       ``routing_decision.cost_threshold_exceeded=True`` +
+       ``cost_threshold_reason='session_budget_exceeded'`` so the SSE
+       consumer can render a budget warning.
+    4. When ``on_session_exceeded == 'fallback'`` AND ``agent._fallback_chain``
+       has at least one entry, call ``agent._try_activate_fallback(...)``
+       so the next turn swaps to the next provider in the chain even if
+       the current one didn't outright fail.
+
+    Returns the reason string (``'session_budget_exceeded'``) when the
+    threshold fired, else ``None``.  Never raises — exceptions from the
+    fallback swap are logged and swallowed so a broken chain entry
+    can't crash the turn that already succeeded.
+    """
+    try:
+        from agent.cost_aware_fallback import (
+            CostAwareFallbackConfig,
+            check_session_cost_threshold,
+        )
+        from agent.routing_decision import set_cost_threshold
+    except ImportError:  # pragma: no cover
+        return None
+
+    raw_cfg = None
+    try:
+        from hermes_cli.config import load_config
+        full = load_config() or {}
+        raw_cfg = (full.get("agent") or {}).get("cost_aware_fallback")
+    except Exception:
+        raw_cfg = None
+    if not raw_cfg:
+        return None
+    cfg = CostAwareFallbackConfig.from_dict(raw_cfg)
+
+    reason = check_session_cost_threshold(session_cost_usd, cfg)
+    if not reason:
+        return None
+
+    if isinstance(routing_decision, dict):
+        set_cost_threshold(routing_decision, reason=reason)
+
+    if cfg.on_session_exceeded == "fallback":
+        chain = list(getattr(agent, "_fallback_chain", []) or [])
+        fallback_index = int(getattr(agent, "_fallback_index", 0) or 0)
+        if chain and fallback_index < len(chain):
+            try:
+                activated = agent._try_activate_fallback(
+                    reason=getattr(agent, "FailoverReason", None) and None,
+                )
+                if activated:
+                    if isinstance(routing_decision, dict):
+                        # Surface the new fallback chain entry to the SSE
+                        # consumer so the UI can show "session budget
+                        # exceeded — switching to fallback[1] mid-session".
+                        fb_idx = int(getattr(agent, "_fallback_index", 1) or 1) - 1
+                        if 0 <= fb_idx < len(chain):
+                            fb_entry = chain[fb_idx]
+                            from agent.routing_decision import (
+                                record_fallback,
+                                set_rule_id,
+                            )
+                            record_fallback(
+                                routing_decision,
+                                fallback_provider=(fb_entry.get("provider") or None),
+                                fallback_model=(fb_entry.get("model") or None),
+                                fallback_reason="cost_aware_session_budget_exceeded",
+                            )
+                            set_rule_id(
+                                routing_decision,
+                                rule_id=f"cost_aware_fallback[{fb_idx}]("
+                                f"{(fb_entry.get('provider') or 'unknown')})",
+                            )
+            except Exception as _fb_err:
+                # Defensive — a broken fallback entry shouldn't kill the
+                # turn that already produced a valid response.  Log and
+                # continue.
+                logger.debug(
+                    "S12 P2: cost-aware fallback swap failed: %s", _fb_err
+                )
+
+    return reason
+
+
 def run_conversation(
     agent,
     user_message: str,
@@ -1677,6 +1774,29 @@ def run_conversation(
                             _routing["cost_estimate_usd"] = float(cost_result.amount_usd)
                     agent.session_cost_status = cost_result.status
                     agent.session_cost_source = cost_result.source
+
+                    # S12 P2: session cost threshold check — when cumulative
+                    # spend blows past ``agent.cost_aware_fallback.per_session_max_usd``
+                    # we annotate the routing_decision with
+                    # ``cost_threshold_exceeded=True`` /
+                    # ``cost_threshold_reason='session_budget_exceeded'`` so the
+                    # front-end (hermes-tray T-Q-S12-light) can render a budget
+                    # warning.  When ``on_session_exceeded='fallback'`` AND a
+                    # fallback_chain is configured, also proactively swap to
+                    # the next chain entry so subsequent turns don't keep
+                    # running on the budget-blown provider.
+                    _session_threshold_reason = _check_session_cost_threshold_and_act(
+                        agent,
+                        session_cost_usd=agent.session_estimated_cost_usd,
+                        routing_decision=usage_dict.get("routing_decision"),
+                    )
+                    if _session_threshold_reason:
+                        logger.info(
+                            "%sS12 P2: session cost threshold exceeded (cost=$%.4f) — %s",
+                            agent.log_prefix,
+                            float(agent.session_estimated_cost_usd or 0),
+                            _session_threshold_reason,
+                        )
 
                     # Persist token counts to session DB for /insights.
                     # Do this for every platform with a session_id so non-CLI

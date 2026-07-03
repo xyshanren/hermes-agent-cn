@@ -95,19 +95,23 @@ class RoutingDecision:
     latency_ms: Optional[int] = None
     retries: int = 0
     rule_id: Optional[str] = None
+    cost_threshold_exceeded: bool = False  # S12 P2: True when this call (or session) blew past agent.cost_aware_fallback
+    cost_threshold_reason: Optional[str] = None  # 'request_budget_exceeded' | 'session_budget_exceeded'
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a JSON-friendly dict.
 
-        Always includes ``mode``, ``fallback_used``, ``retries`` even when
-        their values are falsy (they're scalar/cheap and downstream UI
-        frequently checks them).  Other ``None``-valued fields are
-        stripped so the SSE payload stays compact.
+        Always includes ``mode``, ``fallback_used``, ``retries``,
+        ``cost_threshold_exceeded`` even when their values are falsy
+        (they're scalar/cheap and downstream UI frequently checks them).
+        Other ``None``-valued fields are stripped so the SSE payload
+        stays compact.
         """
         out: Dict[str, Any] = {
             "mode": self.mode,
             "fallback_used": bool(self.fallback_used),
             "retries": int(self.retries),
+            "cost_threshold_exceeded": bool(self.cost_threshold_exceeded),
         }
         full = asdict(self)
         for key, value in full.items():
@@ -264,6 +268,29 @@ def set_rule_id(
     routing_out["rule_id"] = rule_id or None
 
 
+def set_cost_threshold(
+    routing_out: Optional[Dict[str, Any]],
+    *,
+    reason: str,
+) -> None:
+    """Mark that the call (or session) blew past the cost-aware-fallback
+    threshold.
+
+    ``reason`` is one of:
+
+    - ``"request_budget_exceeded"`` — single call cost > per_request_max_usd
+    - ``"session_budget_exceeded"`` — session total cost > per_session_max_usd
+
+    Sets ``cost_threshold_exceeded=True`` so SSE consumers always see the
+    flag (boolean defaults to False otherwise), and stamps the reason for
+    front-end conditional rendering.
+    """
+    if not isinstance(routing_out, dict):
+        return
+    routing_out["cost_threshold_exceeded"] = True
+    routing_out["cost_threshold_reason"] = reason or None
+
+
 __all__ = [
     "RoutingDecision",
     "init_routing_decision",
@@ -273,4 +300,5 @@ __all__ = [
     "set_cost",
     "increment_retries",
     "set_rule_id",
+    "set_cost_threshold",
 ]
