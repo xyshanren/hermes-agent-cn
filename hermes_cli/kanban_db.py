@@ -5373,6 +5373,19 @@ def dispatch_once(
     *,
     spawn_fn=None,
     ttl_seconds: Optional[int] = None,
+    # Cherry-pick companion to gateway/kanban_watchers.py:806 — upstream commit
+    # 3b6347af1 ("feat(kanban): default_assignee fallback + per-profile
+    # concurrency cap") introduced these kwargs. cn cherry-picked the call
+    # site (1c68f6f81, restored in 1221320dc) but not the signature, so the
+    # gateway-embedded dispatcher tick raised
+    #   TypeError: dispatch_once() got an unexpected keyword argument
+    #             'default_assignee'
+    # on the first board 6 seconds after gateway startup. Body implementation
+    # of the upstream feature is NOT included here — only the kwargs are
+    # accepted (silently ignored when None), preserving cn's existing
+    # dispatch behavior until a separate cherry-pick ports the feature body.
+    default_assignee: Optional[str] = None,
+    max_in_progress_per_profile: Optional[int] = None,
     dry_run: bool = False,
     max_spawn: Optional[int] = None,
     max_in_progress: Optional[int] = None,
