@@ -911,6 +911,22 @@ def _reload_runtime_env_preserving_config_authority() -> None:
         os.environ["HERMES_MAX_ITERATIONS"] = str(agent_cfg["max_turns"])
 
 
+def _current_max_iterations() -> int:
+    """Return the current per-turn iteration budget after runtime env refresh.
+
+    Cherry-pick companion to api_server.py:932 — upstream commit 460b1e50e
+    ("fix(gateway): refresh max_turns before resolving runtime budget")
+    introduced this helper so per-turn runtime budget reflects freshly loaded
+    config.yaml without letting stale .env override authoritative config.
+    api_server.py imports it; this is the cn-side definition.
+    """
+    _reload_runtime_env_preserving_config_authority()
+    try:
+        return int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
+    except (TypeError, ValueError):
+        return 90
+
+
 _DOCKER_VOLUME_SPEC_RE = re.compile(r"^(?P<host>.+):(?P<container>/[^:]+?)(?::(?P<options>[^:]+))?$")
 _DOCKER_MEDIA_OUTPUT_CONTAINER_PATHS = {"/output", "/outputs"}
 
