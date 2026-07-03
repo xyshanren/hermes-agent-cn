@@ -4394,19 +4394,30 @@ def _classify_worker_exit(pid: int) -> "tuple[str, Optional[int]]":
 
     ``code`` is the exit status (for ``clean_exit`` / ``nonzero_exit``) or
     the signal number (for ``signaled``), or ``None`` for ``unknown``.
+
+    Windows fallback: ``os.WIFEXITED`` / ``os.WEXITSTATUS`` /
+    ``os.WIFSIGNALED`` / ``os.WTERMSIG`` only exist on POSIX. On Windows
+    we treat any non-negative raw_status < 256 as a ``WEXITSTATUS``-style
+    exit code (0 = clean_exit, non-zero = nonzero_exit) so the
+    protocol_violation auto-block path runs there too.
     """
     entry = _recent_worker_exits.get(int(pid))
     if entry is None:
         return ("unknown", None)
     raw, _ = entry
     try:
-        if os.WIFEXITED(raw):
+        if hasattr(os, "WIFEXITED") and os.WIFEXITED(raw):
             code = os.WEXITSTATUS(raw)
             if code == 0:
                 return ("clean_exit", 0)
             return ("nonzero_exit", code)
-        if os.WIFSIGNALED(raw):
+        if hasattr(os, "WIFSIGNALED") and os.WIFSIGNALED(raw):
             return ("signaled", os.WTERMSIG(raw))
+        # Windows fallback: raw_status is the integer passed by
+        # ``_record_worker_exit`` (already a WEXITSTATUS-style value, not
+        # the packed WIFEXITED/WEXITSTATUS bitfield that POSIX uses).
+        if sys.platform == "win32" and 0 <= raw < 256:
+            return ("clean_exit", 0) if raw == 0 else ("nonzero_exit", raw)
     except Exception:
         pass
     return ("unknown", None)

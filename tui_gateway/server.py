@@ -1078,6 +1078,20 @@ def _shutdown_sessions() -> None:
 
 
 atexit.register(_shutdown_sessions)
+
+
+def _start_idle_reaper() -> None:
+    """Idle-session reaper daemon thread.
+
+    cn T1b jian-fa removed _reap_idle_sessions + _REAPER_SCAN_S +
+    _session_is_evictable (~50 LOC) from tui_gateway/server.py, but the
+    call to this function remained. Stub it out so module import doesn't
+    NameError; the actual reaper can be re-added from upstream/main when
+    idle session reaping is needed in cn.
+    """
+    pass
+
+
 _start_idle_reaper()
 
 
