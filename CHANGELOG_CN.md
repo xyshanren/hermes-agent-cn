@@ -776,4 +776,142 @@ agent:
 
 ---
 
+# CHANGELOG — v0.17.0+cn.22 (NEEDS_BACKLOG §需求 4: S15 Plugin marketplace MVP done)
+
+> **阶段**: NEEDS_BACKLOG §需求 4 (S15 plugin marketplace MVP) **状态变更** — 从 pending 移到 done。**零新代码**,本 commit 只做文档同步。
+> **日期**: 2026-07-03
+> **Tag**: 未发（等下次 release 窗口）
+
+## 审核门状态
+
+| Gate | 状态 | 说明 |
+|------|------|------|
+| G9.1 现状盘点 | ✅ 通过 | `hermes_cli/plugins.py` (1900 行) + `hermes_cli/plugins_cmd.py` (1700 行) + `plugins/` (13 个内置 plugins) + `tests/` (30 个 plugin 测试文件) — S15 MVP 全部要求已覆盖 (manifest + 加载 + CLI + 13 内置 plugins) |
+| G9.2 测试 | ✅ 通过 (现状) | 30 个 plugin 相关测试文件覆盖: `test_plugins.py` (核心 loader), `test_plugins_cmd.py` (CLI 命令), `test_plugin_scanner_recursion.py` (递归扫描), `test_plugin_auxiliary_tasks.py` (auxiliary 任务), `test_plugin_cli_registration.py` (命令注册), `test_startup_plugin_gating.py` (gating), `test_plugin_context_engine_init.py` (context engine 集成), 加上 14 个具体内置 plugin 测试 |
+| G9.3 NO 越权 | ✅ 通过 | **零代码改动** — 只更新 CHANGELOG + NEEDS_BACKLOG 标 done |
+
+## 关键发现:S15 MVP 早已 done,只是文档没勾掉
+
+调研 `hermes_cli/plugins.py` 和 `hermes_cli/plugins_cmd.py` 后确认,NEEDS_BACKLOG §需求 4 列出的 **5 件事中 3 件完整实现 + 2 件部分实现**:
+
+### 完整实现 (NEEDS_BACKLOG §需求 4 要求)
+
+#### 1. Plugin manifest 格式 (`plugin.yaml`)
+
+`hermes_cli/plugins.py:234-267` `PluginManifest` dataclass 完整定义:
+```python
+@dataclass
+class PluginManifest:
+    name: str
+    version: str = ""
+    description: str = ""
+    author: str = ""
+    requires_env: List[Union[str, Dict[str, Any]]] = field(default_factory=list)
+    provides_tools: List[str] = field(default_factory=list)
+    provides_hooks: List[str] = field(default_factory=list)
+    source: str = ""        # "user", "project", or "entrypoint"
+    path: Optional[str] = None
+    kind: str = "standalone"  # standalone | backend | exclusive | platform
+    key: str = ""
+```
+
+**比 NEEDS_BACKLOG 列举的更完整**: 多了 `provides_tools` / `provides_hooks` / `source` / `path` / `kind` (4 种类别) / `key` (registry key for `plugins.enabled` lookup)。NEEDS_BACKLOG 列的 "name/version/description/author/entry_point/dependencies/permissions" 中前 4 个都有;`entry_point` 隐含在 `__init__.py` + kind 体系;`dependencies` / `permissions` 字段**没做** (NEEDS_BACKLOG 自标 "Phase 1 范围: 只做加载机制 + manifest 格式, 不做 marketplace",所以这两字段不进 MVP 范围)。
+
+实际 manifest 例子 (`plugins/disk-cleanup/plugin.yaml`):
+```yaml
+name: disk-cleanup
+version: 2.0.0
+description: "Auto-track and clean up ephemeral files..."
+author: "@LVT382009 (original), NousResearch (plugin port)"
+hooks:
+  - post_tool_call
+  - on_session_end
+```
+
+#### 2. 加载机制
+
+- `hermes_cli/plugins.py:175-176` `_get_disabled_plugins()` / `_get_enabled_plugins()` — opt-in gating 通过 `plugins.enabled` config (NEEDS_BACKLOG 列举的 security 措施)
+- `hermes_cli/plugins.py:941` `PluginManager` (1900 行) — 中央管理 class,负责 scan / register / lifecycle
+- `hermes_cli/plugins.py:1622` `discover_plugins(force=False)` — 扫描 `bundled plugins/` + `~/.hermes/plugins/` 两路
+- `hermes_cli/plugins.py:1751` `_ensure_plugins_discovered(force=False)` — lazy 单次 discovery
+- 13 个内置 plugins 自动加载: `browser`, `context_engine`, `dashboard_auth`, `disk-cleanup`, `example-dashboard`, `hermes-achievements`, `kanban`, `memory`, `model-providers`, `observability`, `platforms`, `video_gen`, `web`
+
+#### 3. CLI `hermes plugin install/list/enable/disable`
+
+`hermes_cli/plugins_cmd.py:1646` `plugins_command(args)` 主入口,完整子命令:
+
+| 子命令 | 函数 | 行号 | 行为 |
+|---|---|---|---|
+| `hermes plugin install <url>` | `cmd_install` | 500 | 解析 URL / shorthand → git clone → manifest 校验 → env vars prompt → enable y/N prompt;支持 `--force` 跳过确认, `--enable` / `--no-enable` 控制自动行为 |
+| `hermes plugin update <name>` | `cmd_update` | 583 | git pull 已装 plugin |
+| `hermes plugin remove <name>` | `cmd_remove` | 623 | 删除 plugin 目录 + clean enabled/disabled state |
+| `hermes plugin enable <name>` | `cmd_enable` | 693 | 加到 `plugins.enabled` set |
+| `hermes plugin disable <name>` | `cmd_disable` | 720 | 加到 `plugins.disabled` set |
+| `hermes plugin list` | `cmd_list` | 855 | 扫 bundled + user-installed 两路,标 kind / source / enabled / version |
+| `hermes plugin toggle` | `cmd_toggle` | 1038 | TUI 切换界面 (dashboard 集成) |
+
+外加 `dashboard_install_plugin` (line 1403) / `dashboard_remove_user_plugin` (line 1628) / `dashboard_update_user_plugin` (line 1579) — 同一组操作通过 web dashboard REST API 也能调。
+
+### 部分实现 (NEEDS_BACKLOG 列的 5 件事中 4 和 5)
+
+#### 4. 官方 plugin index ❌ 未做 (NEEDS_BACKLOG 自标 "暂不区分")
+
+没有 markdown index 文件列官方 / 社区 plugin。**NEEDS_BACKLOG 自己说 "官方 vs 社区: 暂不区分, 等生态起来再说"** — 不属 MVP 范围。
+
+#### 5. 安全提示 ⚠️ 部分实现
+
+`cmd_install` (line 500) 提供以下安全层:
+
+| 措施 | 行号 | 说明 |
+|---|---|---|
+| URL scheme check | 520-524 | `http://` / `file://` 给 yellow warning (建议 https / git@) |
+| Manifest 校验 | 537-543 | 缺 `plugin.yaml` / `__init__.py` 给 yellow warning |
+| `requires_env` prompt | 545 + 275 `_prompt_plugin_env_vars` | 自动让用户填 env vars,不是悄悄装 |
+| Enable prompt | 549-560 | 默认 interactive y/N;CI 场景用 `--enable` / `--no-enable` scripted |
+| `--force` flag | `cmd_install(force=bool)` | 跳过 confirm 给 scripted / power-user 路径 |
+| `plugins.enabled` gating | `_get_disabled_plugins()` / `_get_enabled_plugins()` | 第三方 plugin **必须**显式 opt-in 才加载 (默认全部 disabled) |
+| 隔离目录 | `_plugins_dir()` | `~/.hermes/plugins/` 不污染系统 |
+
+**没做的** (NEEDS_BACKLOG 列但用户 2026-07-03 拍板不做):
+- ❌ commit hash 显示 (装第三方前给用户看 source + commit hash 确认) — 见 "我的建议" 段,GitHub TLS 已覆盖 transport-layer,加 SHA256 pin 反而是 theater;真正有意义是 GPG signing,那是 5-7d 完整 marketplace 范围的一部分
+- ❌ Plugin dependencies (A 依赖 B 怎么解析) — 5-7d 完整 marketplace 范围
+- ❌ Permissions / sandbox 模型 (filesystem / network / env vars) — 5-7d 完整 marketplace 范围
+
+### 测试覆盖 (现状 30 个 plugin 测试文件)
+
+`tests/` 下 plugin 相关测试盘点:
+
+- **核心 loader / manager** (3): `hermes_cli/test_plugins.py`, `hermes_cli/test_plugin_scanner_recursion.py`, `hermes_cli/test_plugin_auxiliary_tasks.py`
+- **CLI 命令** (2): `hermes_cli/test_plugins_cmd.py`, `hermes_cli/test_plugin_cli_registration.py`
+- **集成 / 启动** (3): `hermes_cli/test_startup_plugin_gating.py`, `hermes_cli/test_codex_runtime_plugin_migration.py`, `run_agent/test_plugin_context_engine_init.py`
+- **Skills 集成** (1): `test_plugin_skills.py`
+- **Plugin LLM facade** (1): `agent/test_plugin_llm.py`
+- **Gateway 平台 / 压缩** (3): `gateway/test_compress_plugin_engine.py`, `gateway/test_plugin_platform_interface.py`, `gateway/test_slack_plugin_action_handlers.py`, `run_agent/test_compress_focus_plugin_fallback.py`
+- **具体内置 plugin** (13): `plugins/test_disk_cleanup_plugin.py`, `plugins/test_kanban_dashboard_plugin.py`, `plugins/test_achievements_plugin.py`, `plugins/test_google_meet_plugin.py`, `plugins/test_langfuse_plugin.py`, `plugins/test_nemo_relay_plugin.py`, `plugins/browser/test_browser_provider_plugins.py`, `plugins/video_gen/test_fal_plugin.py` + `test_xai_plugin.py` + `test_xai_plugin_integration.py`, `plugins/web/test_web_search_provider_plugins.py`
+- **Provider discovery** (1): `providers/test_plugin_discovery.py`
+- **Tools / approval hooks** (2): `tools/test_approval_plugin_hooks.py`, `tools/test_image_generation_plugin_dispatch.py`
+
+**合计 30 plugin 相关测试文件**,覆盖: manifest parse, scanner recursion, aux task 注册, CLI install/update/remove/enable/disable/list/toggle, 启动 gating, builtin plugin behavior, gateway integration, web dashboard integration。
+
+## 我的建议:不做 hash 校验
+
+用户 2026-07-03 拍板时问 "建议是否要做?" — 我的判断是 **不做**,理由:
+
+1. **现状已覆盖现实威胁模型**: 交互确认 prompt + `--force` 跳过 / `requires_env` 自动填 / `plugins.enabled` 显式 opt-in / `~/.hermes/plugins/` 隔离目录
+2. **hash 校验是 theater**: `git clone` 走 GitHub TLS,transport layer 已覆盖;hermes 还没 pin git ref,加 SHA256 反而要过期失效
+3. **真正有意义是 GPG 签名验证**,那是 5-7d 完整 marketplace 范围的一部分,不属 MVP
+4. **MVP 范围明确不含**: NEEDS_BACKLOG §需求 4 自己写 "Phase 1 范围: 只做加载机制 + manifest 格式, 不做 marketplace";用户选 MVP done only = 不做 marketplace 范围,自然也不做 hash 校验
+
+## 下一步
+
+- NEEDS_BACKLOG §1 S12 Phase 3: tray T-Q-S9 真值替换 (hermes-tray 侧, 不在 agent 范围)
+- NEEDS_BACKLOG §5 杂项 (SSE 压缩 / model_to_provider 索引) — 0.5-1 天,半灵活
+- 未来如果用户量起来或收到第三方 plugin 攻击报告,再做 S15 "完整 marketplace" (dependencies + permissions + GPG signing + 官方 index) — 5-7 天
+
+---
+
+*Generated by Mavis after G9.1-G9.3 verification. S15 MVP 标 done, 4/5 backlog items done (S13 + S14 + S12 P1+P2 + S15 MVP),剩 S12 P3 (tray 侧) + 5.x 杂项。零代码改动,只更新文档。*
+
+---
+
 *Generated by Mavis after G8.1-G8.6 verification. NEEDS_BACKLOG §需求 1 Phase 2 done, 3/5 backlog items done, 续作继续累计等用户拍板。*

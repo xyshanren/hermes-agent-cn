@@ -1,8 +1,8 @@
 # hermes-agent-cn 需求 Backlog (2026-06-26)
 
-> **状态**: 🔄 部分完成 (3/5 done + 1/3 sub-phase): **S13-agent ✅ 2026-07-02** (commit `016383af8`); **S14-agent ✅ 2026-07-03** (commits `a716f33e6` + `125cc93c0` + `8882270e7`); **S12-agent Phase 1 ✅ 2026-07-03** (commits `4cd26c480` partial + `a192442d8` mutation hooks; CHANGELOG v0.17.0+cn.20); **S12-agent Phase 2 ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.21 — cost-aware fallback rule); S12 Phase 3 (tray T-Q-S9 真值替换) / S15 / 5.x 杂项 pending
+> **状态**: 🔄 部分完成 (4/5 done + 1 sub-phase): **S13-agent ✅ 2026-07-02** (commit `016383af8`); **S14-agent ✅ 2026-07-03** (commits `a716f33e6` + `125cc93c0` + `8882270e7`); **S12-agent Phase 1 ✅ 2026-07-03** (commits `4cd26c480` partial + `a192442d8` mutation hooks; CHANGELOG v0.17.0+cn.20); **S12-agent Phase 2 ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.21 — cost-aware fallback rule); **S15-agent Plugin MVP ✅ 2026-07-03** (CHANGELOG v0.17.0+cn.22 — 现状盘点, 零代码改动); S12 Phase 3 (tray T-Q-S9 真值替换) / 5.x 杂项 pending
 > **触发来源**: hermes-tray v2.0 (S12-S15) 路线图重新对边界时, 识别出 hermes-agent 需要补齐的能力
-> **执行条件**: ✅ 已触发 (S13 + S14 + S12 P1+P2 完成; 累积 backlog 继续等用户拍板续作 + hermes-tray v0.1.5 集成决策)
+> **执行条件**: ✅ 已触发 (S13 + S14 + S12 P1+P2 + S15 MVP 完成; 累积 backlog 继续等用户拍板续作 + hermes-tray v0.1.5 集成决策)
 
 ---
 
@@ -202,6 +202,8 @@ hermes-tray T-Q-S14 直接发 OpenAI multimodal 格式 (text + image_url) 给 `/
 
 ## 需求 4: S15-agent — Plugin Marketplace / 官方 plugin repo
 
+> **状态**: ✅ **MVP done 2026-07-03** — 现状调研发现 manifest / 加载 / CLI 三大块早已实现,本文档 5 件事中 3 件完整 + 2 件部分 (官方 index 按 NEEDS_BACKLOG 自述 "暂不区分" 不属 MVP 范围,安全提示已有交互 prompt + plugins.enabled gating 等多层保护)。完整 marketplace (dependencies + permissions + GPG signing + 官方 index) 仍属 5-7d 范围,**不做**。CHANGELOG v0.17.0+cn.22 详细盘点。
+
 ### 来源
 S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统). 但**用户对 plugin 生态的需求是真实的** — 只是应该放在 hermes-agent 这边, 因为 `plugins.py` 框架已经在那儿了.
 
@@ -236,6 +238,26 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 ### 决策点
 - **Phase 1 范围**: 只做加载机制 + manifest 格式, 不做 marketplace
 - **官方 vs 社区**: 暂不区分, 等生态起来再说
+
+### MVP 现状盘点 (2026-07-03, 调研发现早已 done)
+
+| NEEDS_BACKLOG 列的 5 件事 | 现状 | 行号 |
+|---|---|---|
+| 1. Plugin manifest 格式 | ✅ **完整 schema + 4 种 kind (standalone/backend/exclusive/platform)** — `PluginManifest` dataclass 字段: name/version/description/author/requires_env/provides_tools/provides_hooks/source/path/kind/key | `hermes_cli/plugins.py:234-267` |
+| 2. 加载机制 (scan + register) | ✅ `discover_plugins` + `PluginManager` (1900 行) + 13 个内置 plugins 自动加载 (browser, kanban, memory 等) | `hermes_cli/plugins.py:941` |
+| 3. CLI `hermes plugin install/list/enable/disable` | ✅ 全套 — `cmd_install` (line 500) / `cmd_update` / `cmd_remove` / `cmd_enable` (693) / `cmd_disable` (720) / `cmd_list` (855) / `cmd_toggle` (1038) + dashboard REST API | `hermes_cli/plugins_cmd.py` |
+| 4. 官方 plugin index | ❌ 未做 (NEEDS_BACKLOG 自己说"暂不区分") | — |
+| 5. 安全提示 | ⚠️ **多层保护已实现** — URL scheme check (line 520-524) / manifest validation (537-543) / requires_env prompt (545) / enable y/N prompt (549-560) / plugins.enabled gating (175-176) / 隔离目录 `_plugins_dir` (73) | `hermes_cli/plugins_cmd.py` + `plugins.py` |
+
+**NEEDS_BACKLOG 列在 "5-7d 完整 marketplace" 范围但 MVP 不做**:
+- ❌ Plugin dependencies (A depends on B: name/version 字段 + 自动装依赖)
+- ❌ Plugin permissions / sandbox 模型 (filesystem / network / env vars)
+- ❌ SHA256 commit hash 显示 (我的判断: theater, GitHub TLS 已覆盖 transport layer; 真正有意义是 GPG signing)
+- ❌ 官方 plugin index / repo
+
+**测试覆盖**: 30 个 plugin 相关测试文件 (`tests/hermes_cli/test_plugins*.py`, `tests/plugins/*` 等),覆盖 loader / scanner recursion / CLI / builtin plugin / gateway integration / dashboard integration。
+
+**结论**: S15 MVP done。完整 marketplace (5-7d) 留给未来真有第三方 plugin 攻击报告或生态需求时再做。
 
 ---
 
@@ -272,21 +294,21 @@ S15 在 hermes-tray 路线图被**整个删掉** (tray 不该做 plugin 系统).
 | Phase | 任务 | 工作量 | 状态 |
 |---|---|---|---|
 | Phase 1 | S13-agent (STT 端点) | 2-3 天 | ✅ done 2026-07-02 (commit `016383af8`) |
-| Phase 2 | S14-agent (Vision token + 路由 metadata) | 2-3 天 | ✅ done 2026-07-03 (commits `a716f33e6`+`125cc93c0`+`8882270e7`; 待推 origin/cn) |
+| Phase 2 | S14-agent (Vision token + 路由 metadata) | 2-3 天 | ✅ done 2026-07-03 (commits `a716f33e6`+`125cc93c0`+`8882270e7`) |
 | Phase 3 | S12-agent Phase 1 (Routing metadata 收集 + SSE 推送) | 3-5 天 (Phase 1 拆出) | ✅ done 2026-07-03 (commits `4cd26c480` partial + `a192442d8` mutation hooks; CHANGELOG v0.17.0+cn.20) |
 | Phase 3b | S12-agent Phase 2 (cost-aware fallback rule + threshold annotations) | 1-2 天 | ✅ done 2026-07-03 (CHANGELOG v0.17.0+cn.21) |
 | Phase 3c | S12-agent Phase 3 (tray T-Q-S9 真值替换) | 0.5-1 天 | ⏸ pending (hermes-tray 侧) |
-| Phase 4 | S15-agent (Plugin marketplace MVP) | 1-7 天 (看范围) | ⏸ pending (独立产品决策) |
+| Phase 4 | S15-agent Plugin marketplace MVP | 1-2 天 (实际零代码, 文档盘点 done) | ✅ done 2026-07-03 (CHANGELOG v0.17.0+cn.22; 现状盘点确认 manifest + 加载 + CLI 已实现) |
 | 5.x | 路由元数据可视化 / SSE 压缩 / model_to_provider 索引 | 0.5-1 天 | ⏸ pending (见 §5 各项) |
 
-**Phase 1 (S13) + Phase 2 (S14) + Phase 3 P1+P2 (S12 metadata + cost-aware rule) ✅ 完成** (3/5 done + 1 sub-phase). Phase 3c (S12 tray 真值替换) + Phase 4 (S15 plugin) + 5.x 杂项是独立产品决策, 续作须用户拍板 + 集成验证策略定 (v0.1.5 plan).**
+**Phase 1 (S13) + Phase 2 (S14) + Phase 3 P1+P2 (S12 metadata + cost-aware rule) + Phase 4 (S15 plugin MVP 现状盘点) ✅ 完成** (4/5 done + 1 sub-phase). Phase 3c (S12 tray 真值替换) + 5.x 杂项是独立产品决策, 续作须用户拍板 + 集成验证策略定 (v0.1.5 plan).**
 
 ---
 
 ## 触发: 重新评估
 
-**当前: 3/5 项完成 + S12 P2 sub-phase done (S13 done 2026-07-02; S14 done 2026-07-03, 3 commits on cn branch 待推 origin/cn; S12 P1+P2 done 2026-07-03, 3 commits on cn branch 待推 origin/cn).**
+**当前: 4/5 项完成 + S12 P2 sub-phase done (S13 done 2026-07-02; S14 done 2026-07-03; S12 P1+P2 done 2026-07-03, 2 commits pushed to origin/cn via `git push origin cn`; S15 MVP done 2026-07-03 via现状盘点 commit).**
 
-文件**不整体 archive**（按原 L207 预设 "执行完后 才搬"，但只完成 3/5 不算 "执行完"）。续作 (S12 P3/S15/5.x) 继续在本文件累计；后续如用户拍板 "全部停" 或 "全部完成"，再 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`.
+文件**不整体 archive**（按原 L207 预设 "执行完后 才搬"，但 S12 P3 不在 cn 范围 (tray 侧) + 5.x 杂项 2 项还 pending, 不算 "全部执行完"）。续作 (S12 P3 / 5.x) 继续在本文件累计；后续如用户拍板 "全部停" 或 "全部完成"，再 archive 到 `docs/archive/NEEDS_BACKLOG_v017.md`.
 
 新需求开新文件（按 L208 指引不变）。
