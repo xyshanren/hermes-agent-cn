@@ -48,6 +48,27 @@ import time
 from pathlib import Path  # noqa: F401 — used by test mocks
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+
+# S12: routing_decision metadata helpers — primary/resolved/fallback/latency/
+# retries/rule_id are populated in-place on the dict the caller passes via
+# routing_decision_out.  See agent/routing_decision.py for the dataclass +
+# OpenAI-extension rationale.
+try:
+    from agent.routing_decision import (  # noqa: F401
+        init_routing_decision,
+        record_fallback,
+        resolve_routing,
+        set_latency,
+        set_cost,
+        increment_retries,
+        set_rule_id,
+    )
+except ImportError:  # pragma: no cover — defensive for tools that import this
+    # module outside the package layout.  Tests run in-repo so this branch
+    # never executes in normal operation; keeping it makes the helpers
+    # optional in edge environments (e.g. ad-hoc REPL scripts).
+    init_routing_decision = record_fallback = resolve_routing = None  # type: ignore[assignment]
+    set_latency = set_cost = increment_retries = set_rule_id = None  # type: ignore[assignment]
 from urllib.parse import urlparse, parse_qs, urlunparse
 
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
@@ -4909,6 +4930,20 @@ def call_llm(
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
+    # S12: initialize the routing_decision_out dict with primary values + a
+    # single monotonic clock we use to populate latency_ms when the call
+    # finishes.  The vision branch below overrides mode="vision" via
+    # _vision_routing_init; every other task path is "text" (matches the
+    # S14 phase-2 convention).
+    if init_routing_decision is not None:
+        init_routing_decision(
+            routing_decision_out,
+            mode="vision" if task == "vision" else "text",
+            primary_provider=resolved_provider or provider,
+            primary_model=resolved_model or model,
+        )
+    _call_start_monotonic = time.monotonic()
+
     if task == "vision":
         _vision_routing_init(routing_decision_out, resolved_provider, resolved_model)
         effective_provider, client, final_model = resolve_vision_provider_client(
@@ -5024,8 +5059,15 @@ def call_llm(
         # every auxiliary task (compression, memory flush, title-gen,
         # session-search, vision) shares. (PR #16587)
         try:
-            return _validate_llm_response(
+            response = _validate_llm_response(
                 client.chat.completions.create(**kwargs), task)
+            if resolve_routing is not None:
+                resolve_routing(routing_decision_out,
+                                resolved_provider=resolved_provider,
+                                resolved_model=final_model)
+                set_latency(routing_decision_out,
+                            latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+            return response
         except Exception as transient_err:
             if not _is_transient_transport_error(transient_err):
                 raise
@@ -5034,8 +5076,17 @@ def call_llm(
                 "the same provider before fallback: %s",
                 task or "call", transient_err,
             )
-            return _validate_llm_response(
+            if increment_retries is not None:
+                increment_retries(routing_decision_out)
+            response = _validate_llm_response(
                 client.chat.completions.create(**kwargs), task)
+            if resolve_routing is not None:
+                resolve_routing(routing_decision_out,
+                                resolved_provider=resolved_provider,
+                                resolved_model=final_model)
+                set_latency(routing_decision_out,
+                            latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+            return response
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
@@ -5044,9 +5095,18 @@ def call_llm(
                 "Auxiliary %s: provider rejected temperature; retrying once without it",
                 task or "call",
             )
+            if increment_retries is not None:
+                increment_retries(routing_decision_out)
             try:
-                return _validate_llm_response(
+                response = _validate_llm_response(
                     client.chat.completions.create(**retry_kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
                 # If retry still fails, fall through to the max_tokens /
@@ -5082,9 +5142,18 @@ def call_llm(
         ):
             kwargs.pop("max_tokens", None)
             kwargs.pop("max_completion_tokens", None)
+            if increment_retries is not None:
+                increment_retries(routing_decision_out)
             try:
-                return _validate_llm_response(
+                response = _validate_llm_response(
                     client.chat.completions.create(**kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
@@ -5113,8 +5182,17 @@ def call_llm(
                             task or "call")
                 if refreshed_model and refreshed_model != kwargs.get("model"):
                     kwargs["model"] = refreshed_model
-                return _validate_llm_response(
+                if increment_retries is not None:
+                    increment_retries(routing_decision_out)
+                response = _validate_llm_response(
                     refreshed_client.chat.completions.create(**kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
 
         # ── Auth refresh retry ───────────────────────────────────────
         if (_is_auth_error(first_err)
@@ -5125,7 +5203,9 @@ def call_llm(
                     "Auxiliary %s: refreshed %s credentials after auth error, retrying",
                     task or "call", resolved_provider,
                 )
-                return _retry_same_provider_sync(
+                if increment_retries is not None:
+                    increment_retries(routing_decision_out)
+                response = _retry_same_provider_sync(
                     task=task,
                     resolved_provider=resolved_provider,
                     resolved_model=resolved_model,
@@ -5141,6 +5221,13 @@ def call_llm(
                     effective_timeout=effective_timeout,
                     effective_extra_body=effective_extra_body,
                 )
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
 
         # ── Same-provider credential-pool recovery ─────────────────────
         pool_provider = _recoverable_pool_provider(resolved_provider, client)
@@ -5148,8 +5235,15 @@ def call_llm(
             recovery_err = first_err
             if _is_rate_limit_error(first_err):
                 try:
-                    return _validate_llm_response(
+                    response = _validate_llm_response(
                         client.chat.completions.create(**kwargs), task)
+                    if resolve_routing is not None:
+                        resolve_routing(routing_decision_out,
+                                        resolved_provider=resolved_provider,
+                                        resolved_model=final_model)
+                        set_latency(routing_decision_out,
+                                    latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    return response
                 except Exception as retry_err:
                     if not (_is_auth_error(retry_err) or _is_payment_error(retry_err) or _is_rate_limit_error(retry_err)):
                         raise
@@ -5159,7 +5253,9 @@ def call_llm(
                     "Auxiliary %s: recovered %s via credential-pool rotation after %s",
                     task or "call", pool_provider, type(recovery_err).__name__,
                 )
-                return _retry_same_provider_sync(
+                if increment_retries is not None:
+                    increment_retries(routing_decision_out)
+                response = _retry_same_provider_sync(
                     task=task,
                     resolved_provider=resolved_provider,
                     resolved_model=resolved_model,
@@ -5175,6 +5271,13 @@ def call_llm(
                     effective_timeout=effective_timeout,
                     effective_extra_body=effective_extra_body,
                 )
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
 
         # ── Payment / credit exhaustion fallback ──────────────────────
         # When the resolved provider returns 402 or a credit-related error,
@@ -5243,14 +5346,33 @@ def call_llm(
                         resolved_provider, task, reason=reason)
 
             if fb_client is not None:
+                # S12: stamp fallback + rule onto routing_decision_out so the
+                # SSE usage chunk can show "fell back to {fb_label} because of
+                # {reason}" to the front-end.
+                if record_fallback is not None:
+                    record_fallback(
+                        routing_decision_out,
+                        fallback_provider=fb_label,
+                        fallback_model=fb_model,
+                        fallback_reason=reason,
+                    )
+                if set_rule_id is not None:
+                    set_rule_id(routing_decision_out, rule_id=fb_label)
                 fb_kwargs = _build_call_kwargs(
                     fb_label, fb_model, messages,
                     temperature=temperature, max_tokens=max_tokens,
                     tools=tools, timeout=effective_timeout,
                     extra_body=effective_extra_body,
                     base_url=str(getattr(fb_client, "base_url", "") or ""))
-                return _validate_llm_response(
+                response = _validate_llm_response(
                     fb_client.chat.completions.create(**fb_kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=fb_label,
+                                    resolved_model=fb_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
             # All fallback layers exhausted — emit a single user-visible
             # warning so the operator knows aux task is about to fail.
             # (#26882) The error itself is re-raised below.
@@ -5353,6 +5475,19 @@ async def async_call_llm(
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
+    # S12: initialize the routing_decision_out dict with primary values + a
+    # single monotonic clock we use to populate latency_ms when the call
+    # finishes.  Mirrors call_llm() above — see that function for the
+    # full rationale.
+    if init_routing_decision is not None:
+        init_routing_decision(
+            routing_decision_out,
+            mode="vision" if task == "vision" else "text",
+            primary_provider=resolved_provider or provider,
+            primary_model=resolved_model or model,
+        )
+    _call_start_monotonic = time.monotonic()
+
     if task == "vision":
         _vision_routing_init(routing_decision_out, resolved_provider, resolved_model)
         effective_provider, client, final_model = resolve_vision_provider_client(
@@ -5432,8 +5567,15 @@ async def async_call_llm(
         # before the except-chain escalates to fallback — see call_llm()
         # for the rationale. (PR #16587)
         try:
-            return _validate_llm_response(
+            response = _validate_llm_response(
                 await client.chat.completions.create(**kwargs), task)
+            if resolve_routing is not None:
+                resolve_routing(routing_decision_out,
+                                resolved_provider=resolved_provider,
+                                resolved_model=final_model)
+                set_latency(routing_decision_out,
+                            latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+            return response
         except Exception as transient_err:
             if not _is_transient_transport_error(transient_err):
                 raise
@@ -5442,8 +5584,17 @@ async def async_call_llm(
                 "once on the same provider before fallback: %s",
                 task or "call", transient_err,
             )
-            return _validate_llm_response(
+            if increment_retries is not None:
+                increment_retries(routing_decision_out)
+            response = _validate_llm_response(
                 await client.chat.completions.create(**kwargs), task)
+            if resolve_routing is not None:
+                resolve_routing(routing_decision_out,
+                                resolved_provider=resolved_provider,
+                                resolved_model=final_model)
+                set_latency(routing_decision_out,
+                            latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+            return response
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
@@ -5452,9 +5603,18 @@ async def async_call_llm(
                 "Auxiliary %s (async): provider rejected temperature; retrying once without it",
                 task or "call",
             )
+            if increment_retries is not None:
+                increment_retries(routing_decision_out)
             try:
-                return _validate_llm_response(
+                response = _validate_llm_response(
                     await client.chat.completions.create(**retry_kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
                 if not (
@@ -5486,9 +5646,18 @@ async def async_call_llm(
         ):
             kwargs.pop("max_tokens", None)
             kwargs.pop("max_completion_tokens", None)
+            if increment_retries is not None:
+                increment_retries(routing_decision_out)
             try:
-                return _validate_llm_response(
+                response = _validate_llm_response(
                     await client.chat.completions.create(**kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
@@ -5516,8 +5685,17 @@ async def async_call_llm(
                             task or "call")
                 if refreshed_model and refreshed_model != kwargs.get("model"):
                     kwargs["model"] = refreshed_model
-                return _validate_llm_response(
+                if increment_retries is not None:
+                    increment_retries(routing_decision_out)
+                response = _validate_llm_response(
                     await refreshed_client.chat.completions.create(**kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
 
         # ── Auth refresh retry (mirrors sync call_llm) ───────────────
         if (_is_auth_error(first_err)
@@ -5528,7 +5706,9 @@ async def async_call_llm(
                     "Auxiliary %s (async): refreshed %s credentials after auth error, retrying",
                     task or "call", resolved_provider,
                 )
-                return await _retry_same_provider_async(
+                if increment_retries is not None:
+                    increment_retries(routing_decision_out)
+                response = await _retry_same_provider_async(
                     task=task,
                     resolved_provider=resolved_provider,
                     resolved_model=resolved_model,
@@ -5543,6 +5723,13 @@ async def async_call_llm(
                     effective_timeout=effective_timeout,
                     effective_extra_body=effective_extra_body,
                 )
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
 
         # ── Same-provider credential-pool recovery (mirrors sync) ─────
         pool_provider = _recoverable_pool_provider(resolved_provider, client)
@@ -5550,8 +5737,15 @@ async def async_call_llm(
             recovery_err = first_err
             if _is_rate_limit_error(first_err):
                 try:
-                    return _validate_llm_response(
+                    response = _validate_llm_response(
                         await client.chat.completions.create(**kwargs), task)
+                    if resolve_routing is not None:
+                        resolve_routing(routing_decision_out,
+                                        resolved_provider=resolved_provider,
+                                        resolved_model=final_model)
+                        set_latency(routing_decision_out,
+                                    latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                    return response
                 except Exception as retry_err:
                     if not (_is_auth_error(retry_err) or _is_payment_error(retry_err) or _is_rate_limit_error(retry_err)):
                         raise
@@ -5561,7 +5755,9 @@ async def async_call_llm(
                     "Auxiliary %s (async): recovered %s via credential-pool rotation after %s",
                     task or "call", pool_provider, type(recovery_err).__name__,
                 )
-                return await _retry_same_provider_async(
+                if increment_retries is not None:
+                    increment_retries(routing_decision_out)
+                response = await _retry_same_provider_async(
                     task=task,
                     resolved_provider=resolved_provider,
                     resolved_model=resolved_model,
@@ -5576,6 +5772,13 @@ async def async_call_llm(
                     effective_timeout=effective_timeout,
                     effective_extra_body=effective_extra_body,
                 )
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=resolved_provider,
+                                    resolved_model=final_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
 
         # ── Payment / connection / rate-limit fallback (mirrors sync call_llm) ──
         should_fallback = (
@@ -5618,6 +5821,17 @@ async def async_call_llm(
                         resolved_provider, task, reason=reason)
 
             if fb_client is not None:
+                # S12: stamp fallback + rule onto routing_decision_out (mirrors
+                # the sync path in call_llm).
+                if record_fallback is not None:
+                    record_fallback(
+                        routing_decision_out,
+                        fallback_provider=fb_label,
+                        fallback_model=fb_model,
+                        fallback_reason=reason,
+                    )
+                if set_rule_id is not None:
+                    set_rule_id(routing_decision_out, rule_id=fb_label)
                 fb_kwargs = _build_call_kwargs(
                     fb_label, fb_model, messages,
                     temperature=temperature, max_tokens=max_tokens,
@@ -5630,8 +5844,15 @@ async def async_call_llm(
                 )
                 if async_fb_model and async_fb_model != fb_kwargs.get("model"):
                     fb_kwargs["model"] = async_fb_model
-                return _validate_llm_response(
+                response = _validate_llm_response(
                     await async_fb.chat.completions.create(**fb_kwargs), task)
+                if resolve_routing is not None:
+                    resolve_routing(routing_decision_out,
+                                    resolved_provider=fb_label,
+                                    resolved_model=fb_model or async_fb_model)
+                    set_latency(routing_decision_out,
+                                latency_ms=int((time.monotonic() - _call_start_monotonic) * 1000))
+                return response
             # All fallback layers exhausted — warn before re-raising. (#26882)
             logger.warning(
                 "Auxiliary %s (async): %s on %s and all fallbacks exhausted "

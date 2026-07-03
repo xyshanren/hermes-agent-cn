@@ -362,6 +362,84 @@ def _restore_or_build_system_prompt(agent, system_message, conversation_history)
             )
 
 
+def _build_main_agent_routing_decision(
+    agent,
+    *,
+    api_duration: float,
+    retry_count: int,
+) -> Optional[Dict[str, Any]]:
+    """Build the per-turn ``routing_decision`` dict for the main agent path.
+
+    The main agent's chat-completion call lives in ``run_agent.py`` and does
+    not route through ``auxiliary_client.call_llm`` / ``async_call_llm``,
+    so its routing metadata has to be synthesized here from the agent's
+    own per-turn state.  Auxiliary tasks still use the helpers in
+    ``agent.routing_decision`` (see ``auxiliary_client.call_llm``) and
+    surface their decisions via ``agent._last_routing_decision``.
+
+    Returns ``None`` when the agent has no resolvable model/provider (test
+    stubs, dry-run mode) — callers should treat that as "skip" rather than
+    emit an empty dict.
+    """
+    from agent.routing_decision import (
+        init_routing_decision,
+        resolve_routing,
+        set_latency,
+        set_rule_id,
+        record_fallback,
+    )
+
+    resolved_provider = (getattr(agent, "provider", "") or "").strip() or None
+    resolved_model = (getattr(agent, "model", "") or "").strip() or None
+    if not (resolved_provider or resolved_model):
+        return None
+
+    primary = getattr(agent, "_primary_runtime", {}) or {}
+    primary_provider = (primary.get("provider") or resolved_provider) or None
+    primary_model = (primary.get("model") or resolved_model) or None
+
+    out: Dict[str, Any] = {}
+    init_routing_decision(
+        out,
+        mode="native",
+        primary_provider=primary_provider,
+        primary_model=primary_model,
+    )
+    resolve_routing(
+        out,
+        resolved_provider=resolved_provider,
+        resolved_model=resolved_model,
+    )
+
+    if getattr(agent, "_fallback_activated", False):
+        # The agent swapped to a fallback chain entry — surface the chain
+        # position so the front-end can render "fell back to provider[1]".
+        chain = list(getattr(agent, "_fallback_chain", []) or [])
+        idx = max(0, int(getattr(agent, "_fallback_index", 1) or 1) - 1)
+        fb_entry = chain[idx] if 0 <= idx < len(chain) else None
+        fb_provider = None
+        fb_model = None
+        if isinstance(fb_entry, dict):
+            fb_provider = (fb_entry.get("provider") or "").strip() or None
+            fb_model = (fb_entry.get("model") or "").strip() or None
+        record_fallback(
+            out,
+            fallback_provider=fb_provider or resolved_provider,
+            fallback_model=fb_model or resolved_model,
+            fallback_reason="fallback_chain",
+        )
+        if fb_provider:
+            set_rule_id(out, rule_id=f"fallback_chain[{idx}]({fb_provider})")
+
+    if retry_count and retry_count > 0:
+        out["retries"] = int(retry_count)
+
+    if api_duration and api_duration > 0:
+        set_latency(out, latency_ms=int(api_duration * 1000))
+
+    return out
+
+
 def run_conversation(
     agent,
     user_message: str,
@@ -1506,6 +1584,23 @@ def run_conversation(
                     prompt_tokens = canonical_usage.prompt_tokens
                     completion_tokens = canonical_usage.output_tokens
                     total_tokens = canonical_usage.total_tokens
+
+                    # S12: build the routing_decision for this turn so the
+                    # front-end (hermes-tray T-Q-S12-light / T-Q-S9) can show
+                    # why this provider was chosen, whether fallback fired,
+                    # how long the call took, and what it cost.  The main
+                    # agent loop does not route through
+                    # auxiliary_client.call_llm so we synthesize the
+                    # decision here from per-turn state the agent already
+                    # tracks (``_primary_runtime``, ``provider``, ``model``,
+                    # ``_fallback_activated``, ``api_duration``,
+                    # ``retry_count``).  Auxiliary calls go through
+                    # ``call_llm`` and populate ``agent._last_routing_decision``
+                    # directly — when that's set we copy it through verbatim.
+                    _routing_decision = _build_main_agent_routing_decision(
+                        agent, api_duration=api_duration, retry_count=retry_count,
+                    )
+
                     usage_dict = {
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
@@ -1515,6 +1610,12 @@ def run_conversation(
                             "cached_tokens": canonical_usage.cache_read_tokens,
                         },
                     }
+                    if _routing_decision:
+                        usage_dict["routing_decision"] = _routing_decision
+                        # Also stash on the agent so post-turn tooling
+                        # (gateway, debug helpers, /insights) can read it
+                        # without re-deriving.
+                        agent._last_routing_decision = _routing_decision
                     agent.context_compressor.update_from_response(usage_dict)
 
                     # Cache discovered context length after successful call.
@@ -1559,6 +1660,12 @@ def run_conversation(
                     )
                     if cost_result.amount_usd is not None:
                         agent.session_estimated_cost_usd += float(cost_result.amount_usd)
+                        # Stamp the cost onto routing_decision too — the SSE
+                        # consumer reads usage_dict.routing_decision.cost_estimate_usd
+                        # so it sees the per-turn USD alongside retries/fallback.
+                        _routing = usage_dict.get("routing_decision")
+                        if isinstance(_routing, dict):
+                            _routing["cost_estimate_usd"] = float(cost_result.amount_usd)
                     agent.session_cost_status = cost_result.status
                     agent.session_cost_source = cost_result.source
 
