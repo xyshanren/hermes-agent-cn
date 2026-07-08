@@ -252,36 +252,144 @@ def _network_diagnostics() -> list[dict]:
     return results
 
 
-def _detect_ollama() -> Optional[dict]:
-    """检测本地 Ollama 服务是否运行，返回可用模型列表（含分类）。"""
-    try:
-        import urllib.request
+# ── Ollama host resolution (NAT-aware) ──────────────────────────────────────
+# Before this section, every Ollama URL was hardcoded `http://localhost:11434`,
+# which silently breaks for WSL2 users running Ollama on the Windows host with
+# NAT networking (the most common 2026+ setup). In WSL2 NAT mode, `localhost`
+# inside the distro points at the distro's own loopback, NOT the Windows host,
+# so detection silently returns "Ollama not found" even though `ollama serve`
+# is happily listening on Windows.
+#
+# Resolution order (first hit wins for detection; cached for base_url writes):
+#   1. HERMES_OLLAMA_HOST env var (full URL, e.g. http://192.168.1.5:11434)
+#   2. http://localhost:11434       — Linux native / WSL mirrored / Mac
+#   3. http://host.docker.internal:11434 — WSL2 NAT (Windows host reachable
+#      via WSL2's special DNS injection; only works if Ollama binds to
+#      0.0.0.0 or 127.0.0.1 with WSL2 NAT routing intact)
+#   4. /etc/resolv.conf `nameserver` IP:11434 — generic Linux fallback when
+#      WSL2 host.docker.internal isn't injected (older distros, custom images)
+#
+# IMPORTANT: even with this code fix, Windows-side Ollama must bind to a
+# routable interface (set OLLAMA_HOST=0.0.0.0 in Windows env and restart the
+# Ollama service) for options 3 and 4 to actually work. Without that, only
+# options 1 and 2 will succeed — i.e. mirrored mode or a custom env override.
 
-        req = urllib.request.Request(
-            "http://localhost:11434/api/tags",
-            method="GET",
-            headers={"Accept": "application/json"},
-        )
-        resp = urllib.request.urlopen(req, timeout=3)
-        if resp.status == 200:
-            data = json.loads(resp.read().decode())
-            models = data.get("models", [])
-            if models:
-                model_names = [m.get("name", "") for m in models if m.get("name")]
-                classified = [
-                    {"name": n, "type": _classify_ollama_model(n)}
-                    for n in model_names
-                ]
-                return {
-                    "available": True,
-                    "models": model_names,
-                    "classified_models": classified,
-                    "default_model": _pick_ollama_primary(model_names),
-                    "vision_model": _find_ollama_vision_model(model_names),
-                }
-            return {"available": True, "models": [], "default_model": "llama3.2"}
+_OLLAMA_HOST_CACHE: Optional[str] = None
+"""First URL where `_detect_ollama()` actually got a 200 from `/api/tags`.
+Populated by `_detect_ollama()` on success; consulted by
+`_get_ollama_base_url()` so base_url writes (model_cfg, fallback_model,
+auxiliary.vision, etc.) match the URL detection proved reachable."""
+
+
+def _probe_ollama_urls() -> list[str]:
+    """Return ordered candidate URLs to probe for an Ollama server.
+
+    Pure function — no network I/O. Used both by detection (probe each
+    until one answers) and by base_url writers (fall back to localhost
+    when detection never ran).
+    """
+    candidates: list[str] = []
+    env = os.getenv("HERMES_OLLAMA_HOST", "").strip()
+    if env:
+        candidates.append(env.rstrip("/"))
+    candidates.append("http://localhost:11434")
+    # WSL2 NAT fallback: host.docker.internal is a Docker convention
+    # that WSL2's daemon injects via /etc/hosts (or similar) so it
+    # resolves to the Windows host's loopback. Detect WSL2 cheaply
+    # via the WSL_DISTRO_NAME env var (set by the WSL launcher).
+    if os.getenv("WSL_DISTRO_NAME") or os.path.exists("/proc/sys/fs/binfmt_misc"):
+        candidates.append("http://host.docker.internal:11434")
+    # Generic Linux /etc/resolv.conf nameserver fallback (NAT cases
+    # where WSL2 magic doesn't apply — older distros, custom images,
+    # containers, plain Linux VM behind a NAT).
+    try:
+        resolv = Path("/etc/resolv.conf")
+        if resolv.exists():
+            for line in resolv.read_text(encoding="utf-8", errors="ignore").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("nameserver"):
+                    parts = stripped.split()
+                    if len(parts) >= 2:
+                        ip = parts[1].strip()
+                        if ip and ip not in ("127.0.0.1", "::1", "127.0.0.53"):
+                            candidates.append(f"http://{ip}:11434")
+                    break
     except Exception:
         pass
+    return candidates
+
+
+def _get_ollama_base_url() -> str:
+    """Return the Ollama OpenAI-compatible base URL (with /v1 suffix).
+
+    Prefers the host detection already proved reachable
+    (`_OLLAMA_HOST_CACHE`); falls back to probing each candidate; falls
+    back to localhost as a last resort. Always returns a `/v1` URL.
+    """
+    global _OLLAMA_HOST_CACHE
+    if _OLLAMA_HOST_CACHE:
+        return f"{_OLLAMA_HOST_CACHE}/v1"
+    # Probe lazily so writers (model_cfg, fallback, vision) get a
+    # reasonable URL even if `_detect_ollama()` was never called.
+    import urllib.request
+    for base in _probe_ollama_urls():
+        try:
+            req = urllib.request.Request(
+                f"{base}/api/tags", method="GET",
+                headers={"Accept": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=2).read()
+            _OLLAMA_HOST_CACHE = base
+            return f"{base}/v1"
+        except Exception:
+            continue
+    return "http://localhost:11434/v1"
+
+
+def _detect_ollama() -> Optional[dict]:
+    """检测本地 Ollama 服务是否运行，返回可用模型列表（含分类）。
+
+    Tries each URL in `_probe_ollama_urls()` (env override → localhost →
+    host.docker.internal → /etc/resolv.conf nameserver) so WSL2 NAT users
+    running Ollama on the Windows host are detected instead of silently
+    returning None. Logs which URL worked so users debugging
+    'quickstart doesn't see my ollama' know what to investigate.
+    """
+    global _OLLAMA_HOST_CACHE
+    import urllib.request
+    last_err: Optional[str] = None
+    for base in _probe_ollama_urls():
+        try:
+            req = urllib.request.Request(
+                f"{base}/api/tags",
+                method="GET",
+                headers={"Accept": "application/json"},
+            )
+            resp = urllib.request.urlopen(req, timeout=3)
+            if resp.status == 200:
+                data = json.loads(resp.read().decode())
+                models = data.get("models", [])
+                _OLLAMA_HOST_CACHE = base
+                logger.info("Ollama detected at %s (%d models)", base, len(models))
+                if models:
+                    model_names = [m.get("name", "") for m in models if m.get("name")]
+                    classified = [
+                        {"name": n, "type": _classify_ollama_model(n)}
+                        for n in model_names
+                    ]
+                    return {
+                        "available": True,
+                        "models": model_names,
+                        "classified_models": classified,
+                        "default_model": _pick_ollama_primary(model_names),
+                        "vision_model": _find_ollama_vision_model(model_names),
+                    }
+                return {"available": True, "models": [], "default_model": "llama3.2"}
+        except Exception as exc:
+            last_err = f"{base}: {type(exc).__name__}"
+            continue
+    if last_err:
+        logger.debug("Ollama not reachable on any candidate: %s", last_err)
     return None
 
 
@@ -748,7 +856,7 @@ def _configure_ollama(ollama_info: dict) -> bool:
 
         _update_config_for_provider(
             "ollama",
-            "http://localhost:11434/v1",
+            _get_ollama_base_url(),
             default_model=default_model,
         )
         from hermes_cli.config import load_config, save_config
@@ -899,7 +1007,7 @@ def _build_fallback_chain(
                 chain.append({
                     "provider": "ollama",
                     "model": best,
-                    "base_url": "http://localhost:11434/v1",
+                    "base_url": _get_ollama_base_url(),
                 })
     elif ollama_info and primary_provider_id == "ollama":
         # Ollama 是主力但有多个模型 — 将非 vision 非主力模型加入 fallback
@@ -912,7 +1020,7 @@ def _build_fallback_chain(
                 chain.append({
                     "provider": "ollama",
                     "model": m,
-                    "base_url": "http://localhost:11434/v1",
+                    "base_url": _get_ollama_base_url(),
                 })
                 break  # 只加一个 Ollama fallback
 
@@ -960,7 +1068,7 @@ def _write_smart_routing(
         # 恢复 Ollama 的 base_url — 云 Provider 配置（如 deepseek）
         # 会覆写 model.base_url，导致后续 provider=custom 时读取到错误 URL
         if primary_provider_id == "ollama":
-            model_cfg["base_url"] = "http://localhost:11434/v1"
+            model_cfg["base_url"] = _get_ollama_base_url()
         elif primary_local_info:
             # LM Studio / llama.cpp 使用 custom provider + base_url
             model_cfg["provider"] = "custom"
@@ -1005,7 +1113,7 @@ def _write_smart_routing(
                 vision_model = ollama_info.get("vision_model")
                 if vision_model:
                     vision_provider = "ollama"
-                    vision_base_url = "http://localhost:11434/v1"
+                    vision_base_url = _get_ollama_base_url()
 
         if not vision_model and local_server_infos:
             for li in local_server_infos:
@@ -1178,7 +1286,7 @@ def _write_local_backends(
         if ollama_info and ollama_info.get("available"):
             backends.append({
                 "name": "ollama",
-                "base_url": "http://localhost:11434/v1",
+                "base_url": _get_ollama_base_url(),
                 "priority": priority,
             })
             priority += 1
