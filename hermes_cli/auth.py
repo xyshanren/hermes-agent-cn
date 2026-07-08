@@ -6062,6 +6062,23 @@ def _prompt_model_selection(
     _DIM = "\033[2m"
     _RESET = "\033[0m"
 
+    # Cherry-pick companion for upstream commit fe545287f ('fix(cli):
+    # migrate setup model/provider pickers off simple_term_menu to
+    # curses').  The upstream commit uses `unavailable_message` to feed
+    # a custom footer string into the unavailable-models block, but
+    # never defines the variable in `_prompt_model_selection` — neither
+    # as a local nor as a function parameter.  This was apparently
+    # unnoticed upstream (no followup commit fixes it; cn inherited the
+    # gap via cherry-pick).  When `hermes model` reaches this path
+    # (provider picker with pricing), Python raises
+    #   NameError: name 'unavailable_message' is not defined
+    # and the picker aborts before the user can pick anything.
+    # Defining it locally as empty string preserves upstream intent:
+    # "if caller passes a custom message, use it; otherwise fall back
+    # to the upgrade URL footer" — without forcing a signature change
+    # on existing call sites.
+    unavailable_message = ""
+
     # Try arrow-key menu first, fall back to number input.
     # Uses the shared curses radiolist (ESC/arrow-key handling that works
     # across terminals, incl. those that emit raw escape sequences) instead

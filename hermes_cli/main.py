@@ -2424,6 +2424,21 @@ def cmd_setup(args):
     run_setup_wizard(args)
 
 
+def cmd_quickstart(args):
+    """CN quickstart: detect local + cloud resources, configure layered routing.
+
+    Companion to hermes_cli/quickstart.py:cmd_quickstart (CN-specific
+    implementation, ~290 lines of detection + auto-configure logic).
+    Without this thin wrapper the subparser registration at the bottom
+    of this file would fail to resolve `cmd_quickstart`. Mirrors the
+    `cmd_setup` wrapper pattern above — top-level wrapper defers the
+    heavyweight import to invocation time.
+    """
+    from hermes_cli.quickstart import cmd_quickstart as _qs_impl
+
+    return _qs_impl(args)
+
+
 def cmd_postinstall(args):
     """One-shot bootstrap for pip users: install non-Python deps + run setup."""
     from hermes_cli.config import stamp_install_method
@@ -13638,6 +13653,28 @@ def main():
         "Gateway. Skips the rest of the wizard.",
     )
     setup_parser.set_defaults(func=cmd_setup)
+
+    # =========================================================================
+    # quickstart command (CN-specific; detects available resources and
+    # auto-configures a layered routing chain:
+    # Ollama / LM Studio / llama.cpp (primary) → cloud API (fallback) →
+    # embedded (offline fallback). Implementation lives in
+    # hermes_cli/quickstart.py:cmd_quickstart; this registers it as a
+    # top-level subcommand. Without this registration the file's
+    # `cmd_quickstart` is unreachable from the CLI — `hermes quickstart`
+    # raises "invalid choice: 'quickstart'".
+    # =========================================================================
+    quickstart_parser = subparsers.add_parser(
+        "quickstart",
+        help="CN one-shot quickstart: auto-detect local + cloud resources and configure layered routing",
+        description=(
+            "Hermes-Agent-CN quickstart wizard. Detects Ollama / LM Studio / "
+            "llama.cpp / cloud API keys / embedded fallback and configures a "
+            "layered routing chain. Equivalent to the cn v0.12.0 era "
+            "`hermes quickstart` command, re-registered for v0.17.x."
+        ),
+    )
+    quickstart_parser.set_defaults(func=cmd_quickstart)
 
     # =========================================================================
     # postinstall command
