@@ -3607,7 +3607,14 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             app.invalidate()
         except Exception:
             pass
-        original_on_resize()
+        # Note: do NOT call original_on_resize() here — it lives in
+        # `_recover_after_resize`'s scope, not this one. The function's
+        # job is to schedule a debounced unsuppress of the status bar;
+        # `app.invalidate()` is sufficient to trigger a redraw once the
+        # reflow has settled. (Earlier code had a copy-paste leftover
+        # that raised NameError on the first resize recovery that took
+        # the debounced path — see commit "fix(cn): 10th split bug
+        # cleanup".)
 
     def _schedule_resize_recovery(self, app, original_on_resize, delay: float = 0.12) -> None:
         """Debounce resize redraws so footer chrome is not stamped into scrollback."""
