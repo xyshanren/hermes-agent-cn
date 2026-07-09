@@ -303,7 +303,7 @@ class TestDefaultContextLengths:
 
     def test_openrouter_live_metadata_beats_hardcoded_catchall(self):
         """OpenRouter-routed slugs resolve via the live OR catalog before the
-        hardcoded family catch-all.
+        hardcoded family catch-all."""
 
     def test_dict_is_not_empty(self):
         assert len(DEFAULT_CONTEXT_LENGTHS) >= 10
