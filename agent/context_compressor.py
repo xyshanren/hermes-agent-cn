@@ -172,6 +172,22 @@ _AUTO_FOCUS_MAX_TURNS = 3
 _AUTO_FOCUS_TURN_MAX_CHARS = 260
 _AUTO_FOCUS_MAX_CHARS = 700
 
+# Cherry-pick companion to upstream commit b7e688bba ('fix(agent): focus
+# automatic compression on recent user turns').  The commit references
+# this constant in the auto-focus tail-cut path but the definition line
+# is missing in cn (likely a partial cherry-pick — the call site was
+# applied but the constant line was not).  Result: any chat that
+# triggers the 'Auxiliary background review' path (i.e. auto-compression
+# on long transcripts) raises
+#   NameError: name '_MAX_TAIL_MESSAGE_FLOOR' is not defined
+# at the start of _apply_tail_cut / similar auto-focus entry points.
+# Upstream defines it as 8.  Same family as 34607f7c3 (8th split bug
+# 'unavailable_message') — both are upstream-introduced constants that
+# cn inherited the use of without the definition.  Defined here as 8 to
+# preserve upstream's documented behavior; a separate commit could re-tune
+# this value if cn's auto-focus tuning diverges.
+_MAX_TAIL_MESSAGE_FLOOR = 8
+
 
 _PATH_MENTION_RE = re.compile(r"(?:/|~/?|[A-Za-z]:\\)[^\s`'\")\]}<>]+")
 
