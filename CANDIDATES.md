@@ -1,0 +1,807 @@
+# hermes-agent-cn 候选池 (CANDIDATES)
+
+> **创建日期**: 2026-07-10
+> **更新**: 2026-07-11 (Section H/I/J 加外部项目借鉴候选, 整体去敏感化审计)
+> **状态**: 🟡 **调研阶段 — 等待评估后定真计划**
+> **来源**: 上游公开开源项目 (NousResearch/hermes-agent main 分支) + 外部借鉴项目 (MiniCPM-Desk-Pet, OpenFugu 等)
+> **公开安全审计**: 内部项目元数据 (fork 关系 / 距离 / 调研方法) 不在本文件, 见 agent 工作目录 `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\`
+
+---
+
+## 文档目的
+
+跟 `NEEDS_BACKLOG.md` (已立项, 准备实现的需求) 和 `PLAN_CN.md` (长期战略规划) 区分:
+
+| 文档 | 角色 | 状态 |
+|---|---|---|
+| `NEEDS_BACKLOG.md` | **已立项** 的需求 (commit-ready) | 5/5 closed, 等待下一批 |
+| `PLAN_CN.md` | **长期战略** (跨季度 roadmap) | SmartRouter 增强等 |
+| **`CANDIDATES.md`** | **候选池** (idea inbox, 评估前) | **本文件** |
+
+**流程**:
+1. 调研 / 用户提需求 / 复盘 → 候选加入本文件
+2. 评估 ROI (价值 vs 估时 vs 风险) → 决定 `accepted` / `deferred` / `rejected`
+3. `accepted` 项移到 `NEEDS_BACKLOG.md` 立项, 准备实现
+4. `rejected` 项保留在本文档 (加拒绝原因), 备查
+5. `deferred` 项继续放本文档, 等触发条件
+
+---
+
+## 元数据约定
+
+每条候选用统一格式:
+
+```markdown
+### [ID] 标题 (commit/source 简短标识)
+
+- **状态**: 🟡 proposed / ✅ accepted / ⏸ deferred / ❌ rejected
+- **来源**: upstream commit hash + 短描述
+- **估时**: h (小时) / d (天)
+- **风险**: 🟢 低 / 🟡 中 / 🔴 高
+- **价值**: 🟢 低 / 🟡 中 / 🔴 高
+- **触发条件** (optional): 什么时候做
+- **关联**: NEEDS_BACKLOG §X / PLAN_CN §X / 其他候选 ID
+- **备注**: 评估理由 / 跨项目复用 / 已知限制
+```
+
+---
+
+## 类别 A: 上游 Cherry-pick 候选 (cn-relevant fix)
+
+调研日期 2026-07-10. 内部元数据 (fork 关系 / commit 距离) 不在本文件, 见 agent 工作目录.
+
+### [CAND-001] YOLO mode 早绑定 (security fix)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `501616e8e` `fix(cli): set HERMES_YOLO_MODE before plugin discovery at startup` + `d2e64fcb8` `fix(cli): widen --yolo env guarantee to the _prepare_agent_startup chokepoint`
+- **估时**: 30 min (2 commits)
+- **风险**: 🟢 低 (env var 早 set, 无新接口)
+- **价值**: 🔴 高 (security)
+- **关联**: NEEDS_BACKLOG §1 P2 (cost-aware fallback, 已 done); S12 P3 (tray)
+- **备注**: 之前 yolo flag 在 plugin discovery 之后才生效, plugin 不认 yolo, 绕过风险. cn 也受同样影响.
+
+### [CAND-002] Kanban worker crash 5 件套 (cn 重度用 kanban)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `b06e2f846` / `e87c495dc` / `aea570db4` / `5829fe137` / `77db9d6bf` (5 commits)
+- **估时**: 2-3 h (5 commits, 涉及 _wants_tui_early / spawn worker headless / re-queue bypass / crash diagnostics)
+- **风险**: 🟡 中 (5 commits 跨多个文件, 容易撞 split bug, 跟之前 1221320dc cherry-pick 1c68f6f81 同 family)
+- **价值**: 🔴 高 (cn kanban dispatcher 是核心路径, 这次 7th split bug (4c89dafff) 才刚补完 dispatch_once kwargs)
+- **触发条件**: 任一:
+  - WSL gateway 跑 kanban 出现新的 worker crash
+  - user 抱怨 TUI 抢 worker run
+- **备注**: 静态 audit 5 commits 的 scope leak 风险, 1 commit 1 hygiene fix. 可分 5 个 commit cherry-pick.
+
+### [CAND-003] Cron malformed job 容错
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `10c0d9b2a` `fix(cron): contain any per-job exception in the due scan; harden as a class`
+- **估时**: 30 min
+- **风险**: 🟢 低 (1 commit, 结构化重构)
+- **价值**: 🟡 中 (稳定)
+- **关联**: NEEDS_BACKLOG §2 (S13 STT, done)
+- **备注**: 1 个坏 job 不卡整个 scheduler. 跟前 3 个 fix (#61382 id-less, #61525 non-dict schedule, #61581 bad next_run_at) 的结构化收尾.
+
+### [CAND-004] TTFT round 2 (Time-To-First-Token 大幅优化)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `0800af0b8` `perf(cli): TTFT round 2 — live reasoning by default, partial-line streaming, prompt-build cache, stale budget-warning docs (#59389)` + 前置 `a124d167` (cut first-turn TTFT by ~80%)
+- **估时**: 1-2 h (2 commits, 涉及 DEFAULT_CONFIG / load_cli_config / tui_gateway / hermes setup status line 四处 read site)
+- **风险**: 🟡 中 (4 处 read site 同步改, 容易漏一处)
+- **价值**: 🔴 高 (UX, 用户每个消息都受益)
+- **触发条件**: user 反映"响应慢" / "等很久没动静"
+- **备注**: 显示 thinking 默认 ON 跟 cn 主推"thorough"风格一致; long partial line flush 通用价值; prompt-build cache 用 read_raw_config 跟 91637ce1e (WSL NAT ollama) 用过的 pattern 一致.
+
+### [CAND-005] Webhook payload filters (企业场景)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `0cf2e39c4` `feat(gateway): add webhook payload filters`
+- **估时**: 1 h (新文件 `webhook_filters.py` 302 行 + 49+7+5 行散在 gateway/webhook.py 和 cli-config.yaml.example)
+- **风险**: 🟡 中 (新文件为主, 但 cli-config.yaml.example 改动可能撞 cn config.yaml 默认值)
+- **价值**: 🔴 高 (企业用户常问, cn 主推企业市场)
+- **触发条件**: 任一:
+  - cn wecom/dingtalk 用户提 webhook 过滤需求
+  - hermes-tray v0.2.x 接 webhook UI 时
+- **关联**: PLAN_CN §X (gateway 增强)
+
+### [CAND-006] Media caption 一体化
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `709da844b` `feat(gateway): attach MEDIA: caption to the media bubble on standalone sends`
+- **估时**: 1 h (1 commit, 涉及 hermes send / cron / send_message tool 三个 sender)
+- **风险**: 🟢 低 (UX 改善, 无 API 变化)
+- **价值**: 🟡 中 (UX)
+- **触发条件**: user 用 hermes send 发带 caption 媒体
+- **关联**: hermes-tray v0.1.5 (media caption 显示)
+
+### [CAND-007] Gateway startup hygiene 4 件套
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `cbf685356` `sync HERMES_HOME before refreshing systemd units` + `be1346cf2` `reload fallback_providers on live agent create/reuse` + `ae5e39005` `run webhook route scripts off the event loop` + `862aee495` `drain in-flight cron jobs before shutdown`
+- **估时**: 1-2 h (4 commits)
+- **风险**: 🟡 中 (gateway startup 路径, 跟 565b5228a (helper missing) 同 family)
+- **价值**: 🟡 中 (稳定 + 优雅退出)
+- **关联**: 565b5228a (helper missing, 同 family)
+- **备注**: `cbf685356` 跟 91637ce1e (WSL NAT ollama detection) 同一个 HERMES_HOME sync 问题, 应一起 cherry-pick.
+
+### [CAND-008] User-defined deny rules (安全 UX)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `e2fe529ef` `feat(approvals): user-defined deny rules that block commands even under yolo (#59164)`
+- **估时**: 1 h (1 commit, 新加 `approvals.deny` config 字段 + fnmatch 引擎)
+- **风险**: 🟢 低 (纯 additive, 默认 deny list 为空)
+- **价值**: 🔴 高 (安全 UX, 跟 cn 主推"thorough"风格一致)
+- **触发条件**: user 提安全加固 / hermes-tray 接 deny rule UI
+- **关联**: CAND-001 (同是 yolo/approvals 路径, 可一起做)
+
+### [CAND-009] OIDC client-credentials relay (企业 SSO 入口)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `f64e4f4f5` `feat(gateway): generic OIDC client-credentials relay provisioning (NAS-free) (#60730)`
+- **估时**: 2-3 h (新加 gateway/relay `_resolve_relay_identity_token()`, 改 self_provision_relay(), 新加 GATEWAY_RELAY_IDP_* env vars)
+- **风险**: 🟡 中 (gateway identity 核心路径, 改错会让 cn 用户登不进来)
+- **价值**: 🔴 高 (打开企业 SSO 入口, 之前 gateway 强制 Nous Portal 是最大阻碍)
+- **触发条件**: 任一:
+  - 企业用户提 SSO 需求
+  - hermes-tray v0.2.x 接 dashboard auth 时
+- **关联**: hermes-tray v0.2.0 F5.x auth
+
+### [CAND-010] Vision 安全 3 件套
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `security(vision)` 系列 (3 commits): local-file 通过 shared credential-read guard, stdin=DEVNULL on rasterizer subprocess, bound sandbox exec-read at ingest cap
+- **估时**: 1-2 h
+- **风险**: 🟡 中 (vision 路径, S14 范围, 跟 cn S14 vision 集成有关)
+- **价值**: 🔴 高 (security, S14 路径上)
+- **关联**: NEEDS_BACKLOG §3 (S14 vision, done); hermes-tray v0.1.5 vision 集成
+
+---
+
+## 类别 B: 上游新功能候选 (创意 / UX 创新)
+
+### [CAND-011] PTY sessions keep-alive (4 commits)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `41166bbe0` `feat(pty): PtySessionRegistry with reap + capacity` + `e5ac169c2` `feat(pty): PtySession drain/attach/detach with EOF close` + `e10e4bca8` `feat(chat): reattach /api/pty sessions via ?attach= token` + `0ecfbc989` `feat(pty): RingBuffer for keep-alive output capture`
+- **估时**: 4-6 h (4 commits, 新增 PtySessionRegistry / RingBuffer 等基础类, 改 chat reattach 路径)
+- **风险**: 🟡 中 (新基础类, 跨多个 adapter)
+- **价值**: 🟡 中 (长会话 / 移动端价值, cn 短期用不上)
+- **触发条件**: hermes-tray v0.2.0 接 dashboard 持续会话
+- **备注**: 不是 cherry-pick, 是"借鉴架构" — cn 要做可能需要重新设计跟 S15 plugin marketplace 一致.
+
+### [CAND-012] MEM0 self-hosted mode
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `5e51b123f` `feat(mem0): add self-hosted mode to the setup wizard`
+- **估时**: 1 h (1 commit, 改 setup wizard 加 self-hosted 选项)
+- **风险**: 🟢 低 (纯 setup UI)
+- **价值**: 🟡 中 (S15 雏形接点)
+- **关联**: NEEDS_BACKLOG §4 (S15 plugin marketplace MVP, 现状盘点 only)
+- **备注**: cn 保留 mem0 雏形 (NEEDS_BACKLOG §4), 这个是接点.
+
+### [CAND-013] Sessions export trace/HF (数据科学)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `0e04d1420` `feat(sessions): trace export + HF upload via 'sessions export --format trace' (#60507)`
+- **估时**: 1-2 h
+- **风险**: 🟢 低 (export 工具)
+- **价值**: 🟢 低 (cn 用户没数据 export 需求)
+- **触发条件**: 任一:
+  - user 提 session 数据 export
+  - 做训练数据收集
+- **关联**: 暂不关联
+
+### [CAND-014] MCP `mcp__server__tool` 命名约定
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `e01f58ff1fdebbb6f7af971f04825d071f3f09da` `feat(mcp): adopt mcp__server__tool naming convention`
+- **估时**: 30 min (命名迁移, 找-替换)
+- **风险**: 🟡 中 (破坏性, 任何依赖 mcp tool 名的代码会受影响)
+- **价值**: 🟡 中 (跟 Claude Code / Codex / OpenCode 兼容)
+- **触发条件**: hermes-tray v0.2.x 接 MCP
+
+### [CAND-015] gpt-5.6 系列完整注册 (OpenAI 用户)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `4af484d3d` / `a3828a94d` / `bd767b574` `feat(openai): complete gpt-5.6 (sol/terra/luna)` 系列
+- **估时**: 30 min (3 commits, model registration)
+- **风险**: 🟢 低 (data-only)
+- **价值**: 🟡 中 (只对 OpenAI 用户)
+- **触发条件**: user 用 OpenAI gpt-5.6 系列
+- **备注**: cn 之前没怎么用 OpenAI, 但保留可能性
+
+### [CAND-016] YOLO mode 显示 reasoning 默认 ON (TX FTFT 同源)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `0800af0b8` 同 commit (TTFT round 2 的一部分)
+- **关联**: CAND-004 (同 commit, 一起 cherry-pick)
+
+### [CAND-017] Yuanbao parallel download (cn 保留 platform)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `b848fcbf1` `feat(Yuanbao) optimizes media resource processing speed: parallel download` + `63c4100f` `perf(yuanbao): bounded-concurrency inbound media resolve`
+- **估时**: 1 h
+- **风险**: 🟢 低 (yuanbao adapter, cn 保留)
+- **价值**: 🟡 中 (Yuanbao 用户响应更快)
+- **关联**: NEEDS_BACKLOG §X (Yuanbao 性能)
+
+---
+
+## 类别 C: 跨项目复用 (hermes-tray / hermes-agent-cn)
+
+### [CAND-058] TTFT round 2 UX 改进同步到 hermes-tray
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `0800af0b8` 衍生
+- **关联**: hermes-tray v0.2.0
+- **备注**: hermes-tray 接 SSE streaming 时可借鉴 partial-line flush + reasoning display
+
+### [CAND-059] User-defined deny rules UI (hermes-tray)
+
+- **状态**: 🟡 proposed
+- **来源**: CAND-008 衍生
+- **关联**: hermes-tray v0.2.0 (S15 / F5.1)
+- **备注**: tray 接 deny rule 配置 UI
+
+---
+
+## 已评估项 (历史)
+
+### [CAND-HIST-001] WSL NAT ollama detection (CN-fork refactor)
+
+- **状态**: ✅ accepted → **DONE** (commit `91637ce1e`, 2026-07-08)
+- **来源**: 不直接 cherry-pick, 是 cn 自己的环境适配
+- **触发条件**: 已触发 (user WSL NAT 模式发现 ollama 检测不到)
+
+### [CAND-HIST-002] 12 split bug 全部 fixed
+
+- **状态**: ✅ done (12 commits on cn HEAD `aaa3ee615`)
+- **备注**: 见 memory 'split bug lineage'
+
+---
+
+## 类别 D: Tier 1 亮点功能 (8-21 天前新发现)
+
+### [CAND-040] 🐣 Virtual Pets 系统 (11 commits, 极创新)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `e7dbfdaad` (2026-06-20 起点) 到 `5196575d4` (2026-06-25) — 11 feat commits
+- **估时**: 6-8 h (跨 9 文件 + 1 TUI 组件 + docs)
+- **风险**: 🟡 中 (新模块 `agent/pet/` 9 个子文件 + TUI sprite 集成 + gateway RPC + 后端 image-gen pipeline)
+- **价值**: 🔴 极高 (gamification 创新 — agent 配虚拟宠物, hatched by inference, TUI 动画)
+- **触发条件**: 任一:
+  - user 提 "agent 怎么让用户粘性更高"
+  - hermes-tray v0.2.x 接 gamification
+- **关联**: 无 (新模块, 不冲突 S12/S14/S15)
+- **备注**: 11 commits 跨 5 天 (2026-06-20 到 06-25), 完整 feature 含 backend (atlas sprite 生成 + image gen) + frontend (TUI 动画 + CLI /pet 命令) + 持久化 + gateway RPC. 跟 cn 主推企业用户场景**不匹配**, 但是高 creative 度候选, 适合 demo / 内部产品.
+
+**2026-07-10 vs MiniCPM-Desk-Pet 对比分析**:
+- **根本不同**: MiniCPM 是 **"pet = assistant"** (LLM 本身), Hermes 是 **"pet = decoration"** (mascot)
+- **MiniCPM 借鉴**: coding-agent monitor (看 Cursor/Claude Code/Codex), idle alerts, task narration — **跨工具集成**
+- **Hermes 借鉴 MiniCPM**: 可加 CAND-060 (跨工具 pet monitor), 让 pet 监听外部 coding agent (价值高)
+- **MiniCPM 借鉴 Hermes**: per-profile pets, petdex gallery (公共 sprite 库)
+- **本候选估时更新**: 6-8h (基础 cherry-pick) + 2-3h (跨工具 monitor) = **8-10h 总**
+- **不适用 cn 的原因**: cn 主轴是企业 (wechat/wecom/feishu), 虚拟宠物跟企业场景距离远. 适合 demo / 内部产品 / 玩具场景.
+
+### [CAND-060] (跨项目灵感) Pet 跨工具 monitor (Coding Agent Watcher)
+
+- **状态**: 🟡 proposed
+- **来源**: 上游 pets (CAND-040) + MiniCPM-Desk-Pet cross-pollination 分析 (2026-07-10)
+- **估时**: 2-3 h (新增 cross-tool monitor)
+- **风险**: 🟡 中 (跟外部 tool integration)
+- **价值**: 🔴 高 (pet 从 "装饰" 升级为 "工作状态指示器")
+- **触发条件**: 任一:
+  - cn 接 CAND-040 后追加
+  - user 提 "agent 跟 coding tool 协同"
+  - hermes-tray 接 multi-tool integration
+- **关联**: CAND-040
+- **备注**: MiniCPM-Desk-Pet 的核心创新 — 扫描本机 Cursor / Claude Code / Codex / GitHub Copilot 等 coding agent, pet 对外部 tool 活动反应. Hermes pet 现状只看 Hermes 内部活动, 不看外部 — 这是功能盲点. **实施方式**: 在 `agent/pet/state.py` 加 cross-tool signal source, CLI/TUI/Desktop 共享.
+- **来源项目对比**:
+  - MiniCPM-Desk-Pet (OpenBMB): https://github.com/OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0, macOS Apple Silicon 主, MiniCPM5-1B)
+  - Hermes Pets (upstream): `feat(pets): pet engine + display.pet config` (e7dbfdaad) + 10 follow-ups
+
+### [CAND-041] 🎯 MoA (Mix-of-Agents) virtual provider (8 commits, 极创新)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `c6575df92` (2026-06-25 起点) 到 `9e044cf79` (2026-07-03) — 8 feat commits
+- **估时**: 4-6 h (4 文件: `agent/moa_loop.py` + `agent/moa_trace.py` + `hermes_cli/moa_cmd.py` + `hermes_cli/moa_config.py` + tests)
+- **风险**: 🟡 中 (新 virtual provider 概念 + bounded ThreadPoolExecutor 并行 fan-out + 跟现有 routing_decision 关系)
+- **价值**: 🔴 极高 (multi-model aggregator, reference models 并行 → 主模型综合. 跟 cn "thorough" 风格天然契合)
+- **触发条件**: 任一:
+  - user 反映 "想用多个模型综合"
+  - cn S12 routing_decision 准备扩 Phase 3
+- **关联**: NEEDS_BACKLOG §1 P1 (RoutingDecision, done) — **可考虑扩展 MoA 作为 routing_decision 的高级 mode**
+- **备注**: `c6575df92` 把 moa 作为 virtual provider 注册到 PROVIDER_REGISTRY (HERMES_OVERLAYS auth_type='virtual'). 跟 cn 现有的 auxiliary_client.call_llm 架构**可能能结合** — MoA 本质就是 reference models + aggregator 的 fan-out, 跟 routing_decision.multi_mode 重叠度**高**. 建议: **不要直接 cherry-pick**, 而是把 MoA 的核心 fan-out 逻辑 port 到 cn 现有的 `routing_decision` 框架下. 估时 1-2 d.
+
+### [CAND-042] 🏢 Managed-scope (MDM-style config override, 5 commits, 企业关键)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `9cbcc0c9` (起点) 到 `ddd519ea` — 5 feat commits (2026-07-02 ~ 07-03)
+- **估时**: 2-3 h
+- **风险**: 🟡 中 (新加 managed_scope module + 改 config load 顺序, 跟 cn config.yaml 默认值可能撞)
+- **价值**: 🔴 极高 (企业 IT 部署 — MDM 风格覆盖用户 config, 用户改不动 IT 设的)
+- **触发条件**: 任一:
+  - cn 企业客户提 "IT 要预设 agent 配置"
+  - cn 准备做 SSO 入口 (CAND-009) 顺带做 managed config
+- **关联**: CAND-009 (OIDC, 都是企业基础设施)
+- **备注**: 5 commits 跨 2 天, 加 managed_scope module (resolver + loaders + key helpers), 应用顺序 = managed .env last + override, 表面在 config show + doctor. 跟 cn 现有的 config.yaml load 逻辑**有交叠但兼容** (新加 layer, 不替换).
+
+### [CAND-043] 🎛️ Per-channel model + system prompt override (3 commits, 强企业)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `c43aa6301` / `0010c14e6` / `ebef73f6b` (3 cherry-pick 拆分, 都是同一个 Fixes #1955)
+- **估时**: 3-4 h
+- **风险**: 🟡 中 (涉及 gateway/platforms/* 多 adapter, cn 砍了部分 adapter 需要选择性 cherry-pick)
+- **价值**: 🔴 极高 (per-channel model override = "某频道固定用 deepseek, 某频道固定用 qwen"; 调度灵活度++)
+- **触发条件**: 任一:
+  - cn 企业客户提 "不同群用不同模型"
+  - cn routing_decision Phase 3 准备做 channel-aware
+- **关联**: NEEDS_BACKLOG §1 (S12 routing, done); CAND-041 (MoA virtual models)
+- **备注**: commit message 提到 "session /model > channel > global" — 3 层优先级, 跟 cn 现有的 routing 路径完美兼容. cherry-pick 时**只取** `gateway/channel_overrides.py` (新文件) + YAML bridge, **跳过** discord-specific 部分 (cn 砍了 discord).
+
+### [CAND-044] 🗺️ Journey 学习时间线 (6 commits, 创新可视化)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `e971dc1e9` (起点) 到 `931e2356` — 6 feat commits (2026-07-01 ~ 07-02)
+- **估时**: 2-3 h
+- **风险**: 🟡 中 (memory graph 后端 + TUI overlay + desktop star map, 跨多 surface)
+- **价值**: 🟡 中 (长期任务用户有价值, 普通 chat 用户用不上)
+- **触发条件**: user 反映 "想看 agent 学习历史"
+- **关联**: mem0 self-hosted (CAND-012) — 同 memory 范畴
+- **备注**: 类似 "chat history timeline", 但是基于 agent 的 learned nodes (memory graph). cn 用 mem0 的话可借鉴架构.
+
+---
+
+## 类别 E: Tier 2 fix + 增量改进
+
+### [CAND-045] Google Vertex AI provider (Gemini via OAuth2)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `c73e74386` (2026-07-01)
+- **估时**: 30 min
+- **风险**: 🟢 低 (新 provider, 跟现有 provider 注册 pattern 一致)
+- **价值**: 🟡 中 (Google Cloud 用户用 Gemini)
+- **触发条件**: user 用 Google Cloud / Vertex
+- **关联**: providers.py (cn 现有 provider 注册)
+
+### [CAND-046] 新模型注册 (claude-fable-5/sonnet-5/fugu-ultra)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `76a468e51` `feat(models): add claude-fable-5, claude-sonnet-5, fugu-ultra to curated OpenRouter + Nous lists (#56617)`
+- **估时**: 30 min
+- **风险**: 🟢 低 (data-only)
+- **价值**: 🟡 中 (用 OpenRouter/Nous 的 user)
+- **触发条件**: user 提某个模型
+- **备注**: ⚠️ claude-fable-5 后被回滚 (`bc060c7c1`), 实际可用 sonnet-5 + fugu-ultra
+
+### [CAND-047] Image-gen Codex 输入支持
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `feat(image-gen): support Codex image inputs` (2026-07-01)
+- **估时**: 30 min
+- **风险**: 🟢 低
+- **价值**: 🟡 中 (Codex 用户用 vision+image gen)
+- **关联**: NEEDS_BACKLOG §3 (S14 vision, done)
+
+### [CAND-048] Security/unbroker skill (autonomous data-broker removal)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `2026-07-02 feat(skills): add security/unbroker (autonomous data-broker removal)`
+- **估时**: 30 min
+- **风险**: 🟢 低 (新 skill)
+- **价值**: 🟡 中 (数据 broker 治理)
+- **触发条件**: user 反映 "agent 自动跑多了产生 broker"
+- **关联**: hermes-tray S15 marketplace
+
+### [CAND-049] xAI Grok OAuth device-code-only (drop loopback)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `2026-07-02 feat(auth): make xAI Grok OAuth device-code-only, drop loopback login`
+- **估时**: 30 min
+- **风险**: 🟢 低 (auth 流程调整)
+- **价值**: 🟡 中 (OAuth 标准化)
+- **关联**: cn 砍了 xAI, 跳过
+
+### [CAND-050] Raft gateway setup wizard
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `2026-06-24 feat(raft): add gateway setup wizard`
+- **估时**: 1 h
+- **风险**: 🟢 低 (新 wizard)
+- **价值**: 🟡 中 (setup UX 改善)
+- **关联**: hermes gateway 安装路径
+
+### [CAND-051] Persist per-session /model override across gateway restart
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `2026-07-02 feat(gateway): persist per-session /model overrides across gateway restarts`
+- **估时**: 30 min
+- **风险**: 🟢 低 (DB schema 加 field)
+- **价值**: 🟡 中 (UX — restart 后保留模型选择)
+- **关联**: NEEDS_BACKLOG §1 (S12 routing)
+
+### [CAND-052] API server per-client model routing
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `2026-07-02 feat(api-server): per-client model routing via model_routes (#3176 salvage)` + `2026-07-02 feat(config): extra HTTP headers for LLM API calls (#3526 salvage)`
+- **估时**: 1-2 h
+- **风险**: 🟡 中 (api-server 改, cn 有用)
+- **价值**: 🟡 中 (per-client routing + extra headers for enterprise)
+
+---
+
+## 类别 F: Fix bug 候选 (cn-relevant, v0.17.0 以来 21 天累计)
+
+### [CAND-053] 47 security fixes in 21 天
+
+- **状态**: 🟡 proposed
+- **来源**: upstream 8-21d security scope 分类: gateway 8 / cron 2 / deps 2 / browser 2 / vertex 1 / agent 1 / terminal 1
+- **估时**: 选 5-10 个最 relevant (gateway identity, cron freeze, browser private-network)
+- **风险**: 🟡 中 (security fix 通常小, 但 multi-file 容易撞 split)
+- **价值**: 🔴 高 (累积, 47 个不容忽视)
+- **触发条件**: 任一:
+  - cn gateway 出现 security 报告
+  - user 提安全加固
+- **备注**: 不要 cherry-pick 全部, 按需选. 重点: `fail closed on no-provenance persisted /resume` 系列 + `terminal: strip VERTEX_CREDENTIALS_PATH`.
+
+### [CAND-054] Gateway startup hygiene 4 件套 (扩到 8-21d)
+
+- **状态**: 🟡 proposed (覆盖 CAND-007, 加新 commits)
+- **来源**: 8-21d 新增 gateway fix:
+  - `14882bab` `close webhook sessions on delivery completion so prune can reap them`
+  - `90b618f4` `keep idle cached agents alive until session actually expires`
+  - `201b646d` `complete on_session_end coverage across all eviction paths`
+  - `08d5bf9b` `route session model sync through update_session_meta`
+  - `9138176d` `don't resolve node symlink into profile dir`
+  - `40dbfa0e` `revive gateway on /restart under Restart=on-failure units`
+- **关联**: CAND-007
+- **备注**: 这批是 8-21d 的 gateway hygiene 增量, 跟 CAND-007 (7d 那批) 合起来 8 commits.
+
+### [CAND-055] Kanban notifier wake via profile chokepoint
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `b225b30d0` `fix(kanban): route notifier wake via profile chokepoint; harden review findings`
+- **估时**: 30 min
+- **风险**: 🟡 中 (kanban 路径)
+- **价值**: 🟡 中 (跟 CAND-002 一起做)
+- **关联**: CAND-002 (kanban 5 件套)
+
+### [CAND-056] Classifier Anthropic-specific guidance (subscription exhaustion)
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `2026-07-01 feat(classifier): Anthropic-specific guidance for subscription exhaustion`
+- **估时**: 30 min
+- **风险**: 🟢 低
+- **价值**: 🟡 中 (classifier UX)
+- **关联**: classifier 路径
+
+---
+
+## 类别 G: 元数据 / 文档改进
+
+### [CAND-057] Hermes-agent skill 文档覆盖 v0.13-v0.17
+
+- **状态**: 🟡 proposed
+- **来源**: upstream `f67c0b3e6` `docs(hermes-agent skill): cover v0.13–v0.17 features, fix stale claims, tighten (#53566)`
+- **估时**: 30 min (cherry-pick)
+- **风险**: 🟢 低 (docs only)
+- **价值**: 🟡 中 (skill 文档质量)
+- **备注**: upstream 已经覆盖到了 v0.17 — cn 拉到 v0.18 也能直接受益
+
+---
+
+## 分类 H: MiniCPM-Desk-Pet 跨项目借鉴 (OpenBMB)
+
+> 2026-07-10 — 外部项目借鉴候选, 不是 upstream cherry-pick. 来源: https://github.com/OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0, OpenBMB)
+> 详细分析: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`
+
+> ⚠️ **2026-07-10 迁移**: 本节候选已迁到 hermes-tray 候选池 — 见 `D:\work\workspace\Qoder\hermes-tray\CANDIDATES.md` TRAY-CAND-001 (Settings tabs 重构). cn CANDIDATES.md 不再登记纯客户端候选. 跨端候选 (双端协同) 保留在 cn, 加 tray cross-ref.
+
+### [CAND-062] 双端 Doctor 体系 (启动健康检查 + 客户端 UI)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 [OpenBMB/MiniCPM-Desk-Pet](https://github.com/OpenBMB/MiniCPM-Desk-Pet) (AGPL-3.0 ⚠️)
+- **一句话**: 启动时跑健康检查, 客户端展示结果并一键跳到对应 fix
+- **估时**: 1 d
+- **风险**: 🟢 低
+- **价值**: 🔴 高
+- **触发条件**: 部署/支持/用户自助反馈差
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`
+
+### [CAND-063] 双端 Agent registry + Cursor/Codex 适配器
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0 ⚠️)
+- **一句话**: 适配多个 coding agent (Cursor/Codex/Gemini CLI 等), 统一 descriptor 格式
+- **估时**: 1 d
+- **风险**: 🟡 中
+- **价值**: 🟢 高
+- **触发条件**: 需要接多个 coding agent 时
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`> ⚠️ **2026-07-10 迁移**: 已迁到 hermes-tray 候选池 — TRAY-CAND-004 (i18n typesafe-i18n 实施, 跟 AGENTS.md 决策 #3 对齐).
+
+> ⚠️ **2026-07-10 迁移**: 已迁到 hermes-tray 候选池 — TRAY-CAND-003 (Settings → Agents tab + install hint banner).
+
+### [CAND-066] hermes-agent-cn Smart model download (HF + ModelScope 双源)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0 ⚠️)
+- **一句话**: 模型下载自动选最快的源 (HF / ModelScope), 失败回退
+- **估时**: 1 d
+- **风险**: 🟢 低
+- **价值**: 🟢 高
+- **触发条件**: 模型下载速度/可用性反馈差
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`
+
+### [CAND-067] Lifecycle class 抽象 (进程管理)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0 ⚠️)
+- **一句话**: model runtime 启动/停止/健康检查/重启抽成统一类
+- **估时**: 0.5 d
+- **风险**: 🟢 低
+- **价值**: 🟡 中
+- **触发条件**: 进程管理代码散落需要清理时
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`
+
+> ⚠️ **2026-07-10 迁移**: 已迁到 hermes-tray 候选池 — TRAY-CAND-005 (Theme override + import/export).
+
+### [CAND-069] ⭐ 核心 Coding agent event dispatcher (双端, 解锁 22 agent 协同)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0 ⚠️)
+- **一句话**: server emit agent activity events, client 订阅并响应
+- **估时**: 1.5-3 d
+- **风险**: 🟠 中-高
+- **价值**: 🔴 极高
+- **触发条件**: 多 IDE 集成 / 多 agent 协同场景
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`
+
+### [CAND-070] wecom/feishu approval pipeline (借鉴 MiniCPM Telegram approval)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0 ⚠️)
+- **一句话**: enterprise IM 平台审批集成, agent 操作需用户确认
+- **估时**: 6-10 d
+- **风险**: 🟠 高
+- **价值**: 🔴 极高
+- **触发条件**: enterprise 场景需要 audit trail / 用户确认
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`
+
+### [CAND-071] 22 coding agent 全覆盖 (借鉴 MiniCPM 完整 registry)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 OpenBMB/MiniCPM-Desk-Pet (AGPL-3.0 ⚠️)
+- **一句话**: 适配 20+ coding agent 工具, 统一 descriptor 格式
+- **估时**: 5-10 d
+- **风险**: 🟠 高
+- **价值**: 🟢 高
+- **触发条件**: 基础 registry 框架完成后, 长期覆盖度目标
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`
+
+---
+
+## 分类 I: OpenFugu 借鉴 (Sakana Fugu reimplementation, Apache-2.0)
+
+> **来源**: https://github.com/trotsky1997/OpenFugu (Apache-2.0, trotsky1997, 393 stars)
+> **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+> **核心 paper**: TRINITY (arXiv:2512.04695) + Conductor (arXiv:2512.04388)
+> **License**: Apache-2.0 ✅ 可以 cherry-pick 算法思路, 但 Sakana 可能有 patent, 谨慎借鉴
+
+### [CAND-072] 🧠 Lightweight router (小模型做预选路由)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 [trotsky1997/OpenFugu](https://github.com/trotsky1997/OpenFugu) (Apache-2.0 ✅, 393 stars)
+- **一句话**: 用小模型作为预选路由, rule-based fallback 兜底
+- **估时**: 1 d
+- **风险**: 🟡 中
+- **价值**: 🟢 高
+- **触发条件**: 规则路由不够灵活, 需要 learned routing
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+
+### [CAND-073] 🎯 Adaptive pool mode (训练时随机 mask worker)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 trotsky1997/OpenFugu (Apache-2.0 ✅)
+- **一句话**: 训练时随机 mask worker, 学会"在 available 里选最好"
+- **估时**: 2-3 d
+- **风险**: 🟠 中-高
+- **价值**: 🟢 高
+- **触发条件**: CAND-072 上线后, 训练数据准备好
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+
+### [CAND-074] ⚡🧠 Two-mode router (fast rule-based vs smart learned)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 trotsky1997/OpenFugu (Apache-2.0 ✅)
+- **一句话**: 提供 fast/smart 两种 routing mode, 用户自选或自动切换
+- **估时**: 3-5 d
+- **风险**: 🟡 中
+- **价值**: 🟢 高
+- **触发条件**: CAND-072 + CAND-073 都上线后
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+
+### [CAND-075] 🔒 OpenAI-compatible single endpoint, pool hidden
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 trotsky1997/OpenFugu (Apache-2.0 ✅)
+- **一句话**: OpenAI 兼容 endpoint, 内部 worker pool 对用户隐藏
+- **估时**: 3-5 d
+- **风险**: 🟡 中
+- **价值**: 🟡 中
+- **触发条件**: 需要隐藏 vendor 依赖时
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+
+### [CAND-076] 🎼 Conductor/Ultra mode (workflow DAG executor)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 trotsky1997/OpenFugu (Apache-2.0 ✅)
+- **一句话**: 大模型 emit workflow DAG, executor 按拓扑顺序执行
+- **估时**: 5-10 d
+- **风险**: 🟠 高
+- **价值**: 🔴 高
+- **触发条件**: 需要 multi-step sequential workflow
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+
+### [CAND-077] 📚 OpenFugu 不借鉴清单 (避免踩坑)
+
+- **状态**: ❌ rejected (记录决策)
+- **来源**: 外部项目 trotsky1997/OpenFugu
+- **一句话**: 明确不借鉴的部分 (避免 IP / 训练 / 替代风险)
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+
+### [CAND-078] 🎲 Synthetic Training Data Pipeline (公开 corpus → query 训练集)
+
+- **状态**: 🟡 proposed
+- **来源**: 外部项目 [asgeirtj/system_prompts_leaks](https://github.com/asgeirtj/system_prompts_leaks) (CC0 1.0 ✅)
+- **一句话**: 用公开 system prompt corpus 合成 query 训练集, 喂给 learned router 训练
+- **估时**: 2-4 d
+- **风险**: 🟢 低
+- **价值**: 🔴 极高
+- **触发条件**: CAND-072 上线后, 准备训 CAND-073
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+
+### [CAND-079] 🇨🇳 cn 模型 system prompts corpus (自建, 训练数据)
+
+- **状态**: 🟡 proposed
+- **来源**: 自建 corpus (公开渠道 + 官方 repo + 启发式)
+- **一句话**: 自建国内模型 system prompts 训练集, 补 cn-specific 覆盖
+- **估时**: 1-2 周
+- **风险**: 🟢 低
+- **价值**: 🟢 高
+- **触发条件**: CAND-078 跑完后, 想补 cn gap
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
+- **实施工具**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\cand-079-cn-prompt-corpus-tools-design.md`
+
+---
+
+## 分类 J: Agent Skills 自进化 (rule-based routing 自迭代)
+
+> **来源文章**: 陈思州, "别再一直调 prompt 了，让 Agent 的 Skills 自己进化", Datawhale, 2026-07-10
+> **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
+> **核心概念**: Skill 三层结构 (路由/指令/资源) + 自进化闭环 (用户反馈 → 轨迹证据 → 规则抽象 → Skill Patch → 验证 → 发布/回滚)
+> **跟现有候选关系**: 跟 CAND-072/073 (OpenFugu, learned-based) + CAND-078/079 (data-driven) 互补, 3 路线组合
+
+### [CAND-080] 🔄 Skills 自进化系统 (rule-based routing 自迭代)
+
+- **状态**: 🟡 proposed
+- **来源**: 文章 (Datawhale, 2026-07-10) "Agent Skills 自进化" + cn 现有 routing 框架
+- **一句话**: rule-based routing 在真实反馈中持续更新, 三层结构渐进式加载
+- **估时**: 2-3 d
+- **风险**: 🟡 中
+- **价值**: 🟢 高
+- **触发条件**: rule-based 路由需要自动化优化
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
+
+### [CAND-081] 🗜️ Compaction 工具 (定期合并/下沉/删除冗余规则)
+
+- **状态**: 🟡 proposed
+- **来源**: 文章 "Skill Compaction" 段
+- **一句话**: 定期扫描规则, 发现重复/废弃/可合并, 人工 review 后应用
+- **估时**: 1-2 d
+- **风险**: 🟢 低
+- **价值**: 🟡 中
+- **触发条件**: 规则数量增长后需要清理
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
+
+### [CAND-082] 🧪 Skills 验证 framework (A/B test + 指标)
+
+- **状态**: 🟡 proposed
+- **来源**: 文章 "用验证决定新版本能否发布" 段
+- **一句话**: A/B test harness 验证 routing 改动, 决定发布/回滚
+- **估时**: 2-3 d
+- **风险**: 🟡 中
+- **价值**: 🟢 高
+- **触发条件**: 任何 routing 改动需要量化效果
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
+- **备注**: 拿历史 LLM call 数据, A/B 测新 routing 规则:
+  - **指标**: cost / latency / fallback rate / task success (LLM judge) / user feedback (if any)
+  - **A/B test harness**: 50/50 traffic, 自动收集指标, 自动决定通过/不通过
+  - **Decision**: 通过 → 发布新 routing 规则; 不通过 → 回滚 + 记录负反馈
+  - **跟 CAND-078 共用**: 同样的历史数据, 既训 learned router (CAND-073), 又验证 rule changes (CAND-082), 闭环
+- **3 路线验证组合**:
+  - **rule-based** (CAND-080): A/B test 文本规则改动
+  - **learned-based** (CAND-072/073): A/B test 训后的 router weights
+  - **data-driven** (CAND-078): 同一份历史数据既训又验
+
+---
+
+## 触发条件总表 (扩展)
+
+| 触发 | 看哪些 ID |
+|---|---|
+| user 提安全加固 | CAND-001 / CAND-008 / CAND-010 / CAND-053 / CAND-054 |
+| user 抱怨响应慢 | CAND-004 / CAND-040 (gamification 也间接提升粘性) |
+| 企业用户提 SSO / webhook / MDM | CAND-005 / CAND-009 / CAND-042 / CAND-043 / CAND-052 |
+| kanban dispatcher 报错 | CAND-002 / CAND-055 |
+| cron freeze | CAND-003 |
+| 用户用 hermes send / tray 接 media | CAND-006 / CAND-040 |
+| gateway 启动 / 重启相关 | CAND-007 / CAND-054 |
+| hermes-tray v0.2.0 接 dashboard / S15 | CAND-008 / CAND-009 / CAND-011 / CAND-014 / CAND-019 / CAND-021 / CAND-022 / CAND-026 / CAND-058 / CAND-059 |
+| S15 plugin marketplace 启动 | CAND-012 / CAND-048 |
+| 多模型综合 / thorough 风格 | **CAND-041 (MoA) ← 重点** |
+| user 提 "agent 怎么好玩" / demo 场景 | **CAND-040 (pets) ← 重点** |
+| IT 部门 / MDM 部署 | **CAND-042 (managed-scope) ← 重点** |
+| 多频道不同模型 (某群固定 deepseek) | **CAND-043 (per-channel override) ← 重点** |
+| 学习历史可视化 | CAND-044 (journey) |
+| 新模型 / provider | CAND-045 / CAND-046 / CAND-047 |
+| OAuth / skill 新选项 | CAND-048 / CAND-049 / CAND-050 |
+| setup UX | CAND-050 / CAND-051 |
+| API 增强 | CAND-052 |
+| upstream v0.19.0 发布 | 重新审计上游, 重做本文件 |
+
+---
+
+## 触发条件总表 (何时回头看这份)
+
+| 触发 | 看哪些 ID |
+|---|---|
+| user 提安全加固 | CAND-001 / CAND-008 / CAND-010 |
+| user 抱怨响应慢 | CAND-004 |
+| 企业用户提 SSO / webhook | CAND-005 / CAND-009 |
+| kanban dispatcher 报错 | CAND-002 |
+| cron freeze | CAND-003 |
+| 用户用 hermes send / tray 接 media | CAND-006 / CAND-040 |
+| gateway 启动 / 重启相关 | CAND-007 |
+| hermes-tray v0.2.0 接 dashboard / S15 | CAND-008 / CAND-009 / CAND-011 / CAND-014 / CAND-041 |
+| S15 plugin marketplace 启动 | CAND-012 |
+| upstream v0.19.0 发布 | 重新审计上游, 重做本文件 |
+
+---
+
+## 维护
+
+- 新加候选: 直接在合适类别下 append 新 [CAND-NNN], 状态填 `🟡 proposed`
+- 评估: 改状态, 加理由到 `备注`
+- 接受: 移到 NEEDS_BACKLOG.md (或单独 commit), 从本文件删除 [CAND-NNN] 但保留 [CAND-HIST-NNN]
+- 拒绝: 状态改 `❌ rejected`, 加理由, 留档
+
+---
+
+## 引用
+
+> **2026-07-11 安全审计**: 内部项目元数据 (fork 关系 / 距离 / 调研范围) 已移至 agent 工作目录, 候选池只记录创意本身. 详细信息见 `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\`.
+
+- 本文件状态: 🟡 调研阶段, 等待评估后定真计划
+- 调研方法: 按 commit 类型 + scope 分类, 跟项目 backlog 对比评估
+- 调研日期: 2026-07-10
+- 候选 ID 编号: CAND-001~082 (含已迁移到 hermes-tray 候选池的 TRAY-CAND-001~018)
+- 重点候选分类:
+  - **Section A-G** (CAND-001~059): 项目内部候选 (fix / refactor / 新功能)
+  - **Section H** (CAND-060~071): MiniCPM-Desk-Pet 跨项目借鉴
+  - **Section I** (CAND-072~079): OpenFugu 借鉴
+  - **Section J** (CAND-080~082): Agent Skills 自进化 (rule-based routing 自迭代)
+
+---
+
+## 跨项目引用
+
+> **2026-07-11 调整**: 调研产物 (cross-pollination research docs) 已从项目移到 agent 工作目录, 不污染 git. 候选池本身 (本文件) 保留在项目.
+
+- **调研产物 INDEX**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\INDEX.md` — 4 个深度调研 (MiniCPM / Pet / OpenFugu / 4-layer 集成) 汇总
+- **MiniCPM-Desk-Pet 借鉴**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`. 纯客户端候选 (CAND-061/064/065/068) 已迁到 `hermes-tray/CANDIDATES.md` (TRAY-CAND-001~005), 双端候选 (CAND-062/063/069/070) 保留在 cn, 加 tray cross-ref. **AGPL-3.0 警告**: MiniCPM 是传染性 license, 只借鉴模式不借鉴代码.
+- **OpenFugu 借鉴 (2026-07-10)**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`. 加 8 个新候选 CAND-072~079 (learned router + adaptive pool + two-mode + OpenAI endpoint + Conductor DAG + 不借鉴清单 + **synthetic training data** + **cn model corpus**). **Apache-2.0 ✅**, 但 Sakana 可能有 patent, 谨慎借鉴. 跟 CAND-041 (MoA) 互补, 不是替代.
+- **Skills 自进化 (2026-07-11)**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md` (Datawhale 文章读后). 加 3 个新候选 CAND-080~082 (Skills 自进化系统 + Compaction 工具 + A/B test framework). 跟 CAND-072/073 (learned-based) + CAND-078/079 (data-driven) 互补, **3 路线组合 = 完整进化体系**.
+- **训练数据来源 (2026-07-11)**: [asgeirtj/system_prompts_leaks](https://github.com/asgeirtj/system_prompts_leaks) — CC0 1.0, 55k stars, **~153 system prompts, ~95% Western** (OpenAI 56 / Anthropic 26 / Google 23 / Qwen 1). CAND-078 合成 query corpus for CAND-073 训练 (覆盖通用 60-70%) + CAND-079 国内模型 corpus (补 30-40% cn gap).
+- **四层架构集成设计**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\four-layer-orchestration-architecture.md`. 11 节, 包含每层真实实现 + 4 场景 + 5 Phase 集成. 推荐先做 Phase 1 (CAND-041 MoA cherry-pick, 1-2d).
+- **Pet 形象选型**: `D:\work\workspace\MiniMax\projects\hermes-tray-notes\cross-pollination\pet-implementation.md`. 推荐短期 emoji MVP, 中期 per-state SVG + SMIL (1-2d).
+- **hermes-tray 候选池**: `D:\work\workspace\Qoder\hermes-tray\CANDIDATES.md` (2026-07-10 创建, 18 个候选 TRAY-CAND-001~018)
