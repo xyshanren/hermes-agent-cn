@@ -348,7 +348,7 @@
 - **价值**: 🟡 中 (长期任务用户有价值, 普通 chat 用户用不上)
 - **触发条件**: user 反映 "想看 agent 学习历史"
 - **关联**: mem0 self-hosted (CAND-012) — 同 memory 范畴
-- **备注**: 类似 "chat history timeline", 但是基于 agent 的 learned nodes (memory graph). cn 用 mem0 的话可借鉴架构.
+- **备注**: 类似 "chat history timeline", 但是基于 agent 的 learned nodes (memory graph). cn 用 mem0 的话可借鉴架构. Windows robustness follow-up (upstream `7e037e1a3` / `ce82b0c3c` / `428b9a0c4` / `ec319e4e3`) 暂不在 scope, 实施时再 cherry-pick. 详见 K-5 verification.
 
 ---
 
@@ -691,6 +691,7 @@
 - **价值**: 🟢 高
 - **触发条件**: rule-based 路由需要自动化优化
 - **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
+- **Upstream 对齐 (2026-07-23)**: 跟 `e32ebc6aa feat(skills): /learn` (PR #51506) concept 70% 重合, 区别在 /learn 是 skill-distillation 层级 (描述 → SKILL.md), CAND-080 是 rule-update 层级 (反馈 → 路由规则 patch). 实施时借鉴 upstream 4-surface 集成 (CLI/gateway/TUI/dashboard) + 硬性 skill-authoring standards (description <=60 char + section order). 详见 K-5
 
 ### [CAND-081] 🗜️ Compaction 工具 (定期合并/下沉/删除冗余规则)
 
@@ -713,7 +714,7 @@
 - **价值**: 🟢 高
 - **触发条件**: 任何 routing 改动需要量化效果
 - **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
-- **备注**: 拿历史 LLM call 数据, A/B 测新 routing 规则:
+- **备注**: 跟 upstream `e32ebc6aa` (skill-authoring standards) 互补 — upstream 是 static check, CAND-082 是 dynamic A/B test. 拿历史 LLM call 数据, A/B 测新 routing 规则:
   - **指标**: cost / latency / fallback rate / task success (LLM judge) / user feedback (if any)
   - **A/B test harness**: 50/50 traffic, 自动收集指标, 自动决定通过/不通过
   - **Decision**: 通过 → 发布新 routing 规则; 不通过 → 回滚 + 记录负反馈
@@ -722,6 +723,89 @@
   - **rule-based** (CAND-080): A/B test 文本规则改动
   - **learned-based** (CAND-072/073): A/B test 训后的 router weights
   - **data-driven** (CAND-078): 同一份历史数据既训又验
+
+---
+
+## 分类 K: Upstream Borrow (12 天窗口 v0.18.0 → v0.19.0)
+
+> **调研期**: 2026-07-23
+> **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\2026-07-23-upstream-borrow\`
+> **Filter 维度**: 钱学森《工程控制论》3 axioms (事前设计 / 整体最优 / 闭环反馈) + cn 项目 backlog 优先级 (S12/S14/S15/wecom/feishu/WSL2/security-PIPL)
+> **编号说明**: 用 K-N 而非 CAND-N, 避免跟项目内部候选 (CAND-001~082) 编号冲突 (Phase 2 doc 早期用 CAND-046/047/048/049/050 跟 cn 现有候选撞了, 已修正).
+> **4 必填字段** (每个 K-N): Source (upstream commit + PR) / **Axiom match** (1/2/3, 注明 strongest) / **Cn state** (gap + grep 验证) / **Port plan** (cherry-pick vs manual, 估时, 风险).
+
+### Axiom 分布 (5 候选)
+
+| Axiom | Strong match | 候选 |
+|---|---|---|
+| 1 事前设计 | **0** | (gap — 未来 borrow 窗口关注) |
+| 2 整体最优 | 3 | K-2 (call_llm), K-3 (profile routing), K-4 (MoA ambient) |
+| 3 闭环反馈 | 2 | K-1 (completion contracts), K-5 (/learn + /journey) |
+
+### [K-1] 📋 completion contracts for /goal (v0.18.0 "Judgment Release")
+
+- **状态**: 🟡 proposed (deferred per user 2026-07-23 决定, port plan ready)
+- **Source**: upstream `2ba1cfeb2` (PR #50501, main) + `0b33bc539` (PR #38388, kanban judge gate) + `14c4a849b` + `b3c1b3b3f` (follow-up fixes)
+- **Axiom match**: **3 闭环反馈 (strongest)** — judge 严格按 verification + concrete evidence (command output / file excerpt / test result), agent 看 evidence 调 next step, WAIT verdict (避免 busy-loop), persistent across `/resume`
+- **Cn state**: ❌ `GoalContract` dataclass / `parse_contract` / `draft_contract` / `/goal show` / `/goal draft` 命令 / `kanban_complete` 工具层 judge gate — **全部缺失** (clean port, 0 dead code)
+- **Port plan**: 1-2d, 1-commit manual port. 4 文件改动: `hermes_cli/goals.py` (dataclass + parsers + 3 prompt templates) + `hermes_cli/cli_commands_mixin.py` + `gateway/slash_commands.py` (CLI + gateway 镜像) + `tools/kanban_tools.py` (judge gate, fail-open per upstream review)
+- **估时**: 1-2d | **风险**: 🟡 中 (judge prompt 改; goal_mode worker 行为变化)
+- **价值**: 🔴 极高 (S12 P3 闭环关键, 跟 CAND-041/CAND-042 unblock)
+- **详细分析**: `phase3c-cand-046-deep-dive.md`
+- **备注**: ⚠️ 跟 K-2 交互 — `draft_contract` 走 `goal_judge` aux call, 当前 silent config drop (K-2 修了才能真吃 `auxiliary.goal_judge.extra_body`)
+
+### [K-2] 🔧 auxiliary_client → call_llm (v0.19.0 #35566 fix)
+
+- **状态**: 🟡 proposed (deferred per user 2026-07-23 决定, port plan ready, **P0 bug**)
+- **Source**: upstream `7c954969b` (PR #65029 / Fixes #35566)
+- **Axiom match**: **2 整体最优 (strongest)** — 5 个 direct-create aux caller 整合到 `call_llm` 统一入口, 避免局部最优 (单函数看 OK, 全局配置 `auxiliary.<task>.extra_body / reasoning_effort / retries` 丢失)
+- **Cn state**: ❌ **7 production call sites** 仍走 `get_text_auxiliary_client(task)` + `client.chat.completions.create()` 直连 (silent config drop). `call_llm` **已存在** (`agent/auxiliary_client.py:4989`, signature 是 upstream 超集, 多了 `routing_decision_out` / `tools` / `_get_task_extra_body`). 修只需 refactor call sites, 不用新加函数
+- **Port plan**: 0.5d, 1-commit manual port. 7 call sites refactor + `goal_judge` 加进 DEFAULT_CONFIG.auxiliary + 6 test 文件 mock 从 `get_text_auxiliary_client` 换到 `call_llm`
+- **估时**: 0.5d | **风险**: 🟡 中 (核心 runtime path, `run_agent.py` + `conversation_compression.py` 必须先 read 确认 `client` 没被 chat.completions.create 之外用)
+- **价值**: 🔴 **极高 P0** (S12 routing_decision accuracy, S14 vision aux path, S15 plugin kanban, hermes_cli 全 utility 任务 全栈 silent bug)
+- **详细分析**: `phase3b-cand-047-port-plan.md`
+- **备注**: borrow 调研**意外发现**的 P0 bug — 不在 cn 12 split bug 列表 (那些是 build/syntax 错, 这个是 silent config drop)
+
+### [K-3] 🌐 gateway profile routing multiplex (6 adapter 借鉴)
+
+- **状态**: 🟡 proposed (ready for cherry-pick, 1.5d)
+- **Source**: upstream `647520f83` (PR 待定)
+- **Axiom match**: **2 整体最优 (strongest)** — 6 个 adapter 统一处理, multiplex_profiles 开启时不同 community → 不同 profile → 独立 session/batch key, 避免单 adapter 优化
+- **Cn state**: ⚠️ 部分对 (cn 有 `wecom.py` / `feishu.py` 等 platform adapter, 但架构在 `gateway/platforms/` 而非 upstream `plugins/platforms/`, 需适配)
+- **Port plan**: 1d cherry-pick + 0.5d cn 适配. 7 行 weixin / feishu / matrix / telegram / whatsapp / wecom adapter 加 `profile=event.source.profile` 1 行, 加 cn `multiplex_profiles` gate 配置
+- **估时**: 1.5d | **风险**: 🟡 中 (平台架构差异)
+- **价值**: 🟢 高 (wecom/feishu 跟 cn 强相关, multiplex 是 cn enterprise 路线必经)
+- **详细分析**: `phase2-filter-borrow.md` (Phase 2 CAND-048 entry)
+
+### [K-4] 🌀 MoA ambient conversation context (CAND-041 follow-up)
+
+- **状态**: 🟡 proposed (post CAND-041, 0.5d)
+- **Source**: upstream `9ce0e67f2` `feat(portal): ambient conversation context entangles aux/MoA/delegate calls`
+- **Axiom match**: **2 整体最优 (strongest)** — 跨 module (aux + MoA + delegate) 共享 conversation lineage
+- **Cn state**: ⚠️ 跟 CAND-041 (MoA cherry-pick) 直接关联; cn 现在 MoA 没实现, 这是 post-cherry-pick 增强
+- **Port plan**: 0.5d, post CAND-041. ContextVar-based `conversation_id` 跨 aux/MoA/delegate 传播, `SessionDB.get_conversation_root()` 返回 root session id
+- **估时**: 0.5d | **风险**: 🟢 低 (ContextVar 模式成熟)
+- **价值**: 🟡 中 (enhancement, not core)
+- **详细分析**: `phase2-filter-borrow.md` (Phase 2 CAND-049 entry)
+
+### [K-5] ✅ /learn + /journey alignment verification (no new candidate)
+
+- **状态**: 🟢 verified (1-line update to CAND-080/082/044, **不**新加候选)
+- **Source**: upstream 12 commits (`e32ebc6aa` #51506 main /learn + `e971dc1e9` main /journey + 10 follow-up)
+- **Axiom match**: **3 闭环反馈 (strongest)** — /learn (描述 → SKILL.md → /journey 可见 → user review/edit) + /journey (memory/skill graph, user 可编辑) 是闭环
+- **Cn state**: ✅ CAND-044 已对齐 /journey (100% source match, 6 commits covered). ⚠️ CAND-080/081/082 concept 70% 对齐 /learn (Datawhale 文章 source vs upstream 源码 source 路径不同, rule 层面 vs skill 层面 粒度不同). ❌ cn 0 /learn 实现 — 真 gap 但不新加候选, 在 CAND-080 实施时参考 upstream 4-surface 集成 + 硬性 skill-authoring standards
+- **Port plan**: 0 implementation — 1-line edit 加 upstream 对齐注释到 CAND-080/082/044 (Phase 4 同 commit 做)
+- **估时**: 0d (verification) + 0.25d (3 个候选补 1 行) | **风险**: 🟢 低
+- **价值**: 🟢 验证 (不加候选, 确认 CAND-080 方向对)
+- **详细分析**: `phase3d-hermes-learn-journey-verification.md`
+- **Cross-pollination 强信号**: mavis 4 件套 (Constitution + critic + Reflexion 池 + compaction) 跟 upstream /learn + /journey + CAND-080/081/082 同构 — **附件 1 钱学森 3-layer 双向闭环是跨 project design pattern**
+
+### K section 整体启示
+
+- **Axiom 1 强 match = 0** — 5 候选都是"优化现有路径" (axiom 2) 或"补闭环" (axiom 3), 没有任何"enable new design phase". 未来 borrow 窗口关注 axiom 1 类 (e.g. goal spec / plan mode / intent declaration layer)
+- **Borrow = bug 发现机制** — K-2 是借 upstream #35566 fix 发现的 cn 隐藏 P0 bug, 不只是 feature add
+- **附件 1 钱学森 3-layer 双向闭环** 跟 mavis 4 件套 + borrow plan 4 phase 完美同构, 是跨 project design pattern
+- **Section K 不冲掉 CAND-080 实施** — K-5 在 CAND-080 实施时提供 upstream 参考 (4-surface 集成 pattern + 硬性 skill-authoring standards)
 
 ---
 
@@ -764,7 +848,9 @@
 | gateway 启动 / 重启相关 | CAND-007 |
 | hermes-tray v0.2.0 接 dashboard / S15 | CAND-008 / CAND-009 / CAND-011 / CAND-014 / CAND-041 |
 | S15 plugin marketplace 启动 | CAND-012 |
-| upstream v0.19.0 发布 | 重新审计上游, 重做本文件 |
+| upstream v0.19.0 发布 (12 天窗口 3057 commits) | 重新审计上游, 重做本文件; 现有 K-1~K-5 (Section K) 跟 5 候选 deep dive 文档可作 reference |
+| S12 P3 启动 (闭环反馈层) | K-1 (completion contracts) + K-5 (跟 CAND-080 互补) |
+| hermes-cli judge / auxiliary_client 行为异常 | K-2 (call_llm P0 bug fix, 详见 phase3b) |
 
 ---
 
@@ -784,12 +870,13 @@
 - 本文件状态: 🟡 调研阶段, 等待评估后定真计划
 - 调研方法: 按 commit 类型 + scope 分类, 跟项目 backlog 对比评估
 - 调研日期: 2026-07-10
-- 候选 ID 编号: CAND-001~082 (含已迁移到 hermes-tray 候选池的 TRAY-CAND-001~018)
+- 候选 ID 编号: CAND-001~082 (含已迁移到 hermes-tray 候选池的 TRAY-CAND-001~018) + K-1~K-5 (Section K: Upstream Borrow)
 - 重点候选分类:
   - **Section A-G** (CAND-001~059): 项目内部候选 (fix / refactor / 新功能)
   - **Section H** (CAND-060~071): MiniCPM-Desk-Pet 跨项目借鉴
   - **Section I** (CAND-072~079): OpenFugu 借鉴
   - **Section J** (CAND-080~082): Agent Skills 自进化 (rule-based routing 自迭代)
+  - **Section K** (K-1~K-5): Upstream Borrow (12 天窗口 v0.18.0 → v0.19.0, 3057 commits)
 
 ---
 
@@ -798,6 +885,7 @@
 > **2026-07-11 调整**: 调研产物 (cross-pollination research docs) 已从项目移到 agent 工作目录, 不污染 git. 候选池本身 (本文件) 保留在项目.
 
 - **调研产物 INDEX**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\INDEX.md` — 4 个深度调研 (MiniCPM / Pet / OpenFugu / 4-layer 集成) 汇总
+- **Upstream Borrow (2026-07-23, 12 天窗口 v0.18.0 → v0.19.0)**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\2026-07-23-upstream-borrow\`. 5 phase doc (sample summary / filter borrow / 4 deep dives): 5 候选 K-1~K-5 (Section K), filter 维度 钱学森 3 axioms. **意外发现**: 借 upstream #35566 fix 找出 cn P0 bug (auxiliary_client silent config drop, K-2)
 - **MiniCPM-Desk-Pet 借鉴**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\MiniCPM-Desk-Pet-vs-hermes-cn-tray.md`. 纯客户端候选 (CAND-061/064/065/068) 已迁到 `hermes-tray/CANDIDATES.md` (TRAY-CAND-001~005), 双端候选 (CAND-062/063/069/070) 保留在 cn, 加 tray cross-ref. **AGPL-3.0 警告**: MiniCPM 是传染性 license, 只借鉴模式不借鉴代码.
 - **OpenFugu 借鉴 (2026-07-10)**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`. 加 8 个新候选 CAND-072~079 (learned router + adaptive pool + two-mode + OpenAI endpoint + Conductor DAG + 不借鉴清单 + **synthetic training data** + **cn model corpus**). **Apache-2.0 ✅**, 但 Sakana 可能有 patent, 谨慎借鉴. 跟 CAND-041 (MoA) 互补, 不是替代.
 - **Skills 自进化 (2026-07-11)**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md` (Datawhale 文章读后). 加 3 个新候选 CAND-080~082 (Skills 自进化系统 + Compaction 工具 + A/B test framework). 跟 CAND-072/073 (learned-based) + CAND-078/079 (data-driven) 互补, **3 路线组合 = 完整进化体系**.
