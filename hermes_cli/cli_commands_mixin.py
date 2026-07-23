@@ -1705,8 +1705,9 @@ class CLICommandsMixin:
             print()
 
     def _handle_goal_command(self, cmd: str) -> None:
-        """Dispatch /goal subcommands: set / status / pause / resume / clear."""
+        """Dispatch /goal subcommands: set / draft / show / status / pause / resume / clear."""
         from cli import _DIM, _RST, _cprint
+        from hermes_cli.goals import draft_contract, parse_contract
         parts = (cmd or "").strip().split(None, 1)
         arg = parts[1].strip() if len(parts) > 1 else ""
 
@@ -1720,6 +1721,29 @@ class CLICommandsMixin:
         # Bare /goal or /goal status → show current state
         if not arg or lower == "status":
             _cprint(f"  {mgr.status_line()}")
+            return
+
+        # /goal show → print the active goal's completion contract (if any)
+        if lower == "show":
+            _cprint(f"  {mgr.status_line()}")
+            contract_block = mgr.render_contract() if hasattr(mgr, "render_contract") else ""
+            if contract_block:
+                _cprint(f"  Completion contract:\n    {contract_block.replace(chr(10), chr(10) + '    ')}")
+            else:
+                _cprint(f"  {_DIM}No completion contract set.{_RST}")
+            return
+
+        # /goal draft <objective> → expand plain text into a structured
+        # completion contract (outcome / verification / constraints /
+        # boundaries / stop_when) and set it as the active goal. Adapted
+        # from Codex's "let Codex draft the goal" guidance: the contract
+        # makes "done" evidence-based instead of a loose vibe check.
+        if lower.startswith("draft"):
+            objective = arg[len("draft"):].strip()
+            if not objective:
+                _cprint("  Usage: /goal draft <objective in plain language>")
+                return
+            self._handle_goal_draft(objective)
             return
 
         if lower == "pause":
@@ -1751,18 +1775,28 @@ class CLICommandsMixin:
                 _cprint(f"  {_DIM}No active goal.{_RST}")
             return
 
-        # Otherwise treat the arg as the goal text.
+        # Otherwise treat the arg as the goal text. Inline `field: value`
+        # lines (verify:, constraints:, boundaries:, stop when:) are parsed
+        # into a completion contract; the remaining prose is the headline.
+        # A plain free-form goal with no such lines behaves exactly as before.
+        headline, contract = parse_contract(arg)
+        goal_text = headline or arg
         try:
-            state = mgr.set(arg)
+            state = mgr.set(goal_text, contract=contract if not contract.is_empty() else None)
         except ValueError as exc:
             _cprint(f"  Invalid goal: {exc}")
             return
 
         _cprint(f"  ⊙ Goal set ({state.max_turns}-turn budget): {state.goal}")
+        if state.has_contract():
+            _cprint(f"  {_DIM}Completion contract:{_RST}")
+            for line in state.contract.render_block().splitlines():
+                _cprint(f"    {line}")
         _cprint(
-            f"  {_DIM}After each turn, a judge model will check if the goal is done. "
+            f"  {_DIM}After each turn, a judge model checks if the goal is done"
+            f"{' against the contract above' if state.has_contract() else ''}. "
             f"Hermes keeps working until it is, you pause/clear it, or the budget is "
-            f"exhausted. Use /goal status, /goal pause, /goal resume, /goal clear.{_RST}"
+            f"exhausted. Use /goal status, /goal show, /goal pause, /goal resume, /goal clear.{_RST}"
         )
         # Kick the loop off immediately so the user doesn't have to send a
         # separate message after setting the goal.
@@ -1770,6 +1804,46 @@ class CLICommandsMixin:
             self._pending_input.put(state.goal)
         except Exception:
             pass
+
+    def _handle_goal_draft(self, objective: str) -> None:
+        """Draft a structured completion contract from a plain objective and
+        set it as the active goal. Falls back to a bare goal if the aux model
+        can't produce a contract."""
+        from cli import _DIM, _RST, _cprint
+        from hermes_cli.goals import draft_contract
+
+        mgr = self._get_goal_manager()
+        if mgr is None:
+            _cprint(f"  {_DIM}Goals unavailable (no active session).{_RST}")
+            return
+
+        _cprint(f"  {_DIM}Drafting completion contract…{_RST}")
+        try:
+            contract = draft_contract(objective)
+        except Exception as exc:
+            logger.debug("goal draft raised: %s", exc)
+            contract = None
+
+        if contract is None or contract.is_empty():
+            # No aux model / no JSON reply — set the bare objective so the
+            # user is never wedged by a draft failure.
+            try:
+                mgr.set(objective)
+            except ValueError as exc:
+                _cprint(f"  Invalid goal: {exc}")
+                return
+            _cprint(f"  ⊙ Goal set (no contract — could not draft one): {objective}")
+            return
+
+        try:
+            state = mgr.set(objective, contract=contract)
+        except ValueError as exc:
+            _cprint(f"  Invalid goal: {exc}")
+            return
+        _cprint(f"  ⊙ Goal set ({state.max_turns}-turn budget): {state.goal}")
+        _cprint(f"  Completion contract:")
+        for line in state.contract.render_block().splitlines():
+            _cprint(f"    {line}")
 
     def _handle_subgoal_command(self, cmd: str) -> None:
         """Dispatch /subgoal subcommands.

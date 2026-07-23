@@ -91,6 +91,23 @@ CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE = (
     "and stop."
 )
 
+# Used when the goal carries a structured completion contract. The contract
+# block tells the agent exactly what "done" means, how to prove it, what not
+# to break, what's in scope, and when to stop and ask — so it targets the
+# verification surface instead of declaring victory loosely.
+CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE = (
+    "[Continuing toward your standing goal]\n"
+    "Goal: {goal}\n\n"
+    "Completion contract:\n"
+    "{contract_block}\n\n"
+    "Continue working toward the outcome above. Take the next concrete step. "
+    "Stay within the stated boundaries and do not violate the constraints. "
+    "Before claiming the goal is done, satisfy the Verification criterion and "
+    "show the concrete evidence (command output, file contents, test result). "
+    "If you hit the stated stop condition or are otherwise blocked and need "
+    "user input, say so clearly and stop."
+)
+
 
 JUDGE_SYSTEM_PROMPT = (
     "You are a strict judge evaluating whether an autonomous agent has "
@@ -134,6 +151,258 @@ JUDGE_USER_PROMPT_WITH_SUBGOALS_TEMPLATE = (
 )
 
 
+# Used when the goal carries a structured completion contract. The judge
+# decides DONE strictly against the Verification criterion and refuses to
+# accept completion when a constraint was violated.
+JUDGE_USER_PROMPT_WITH_CONTRACT_TEMPLATE = (
+    "Goal:\n{goal}\n\n"
+    "Completion contract (the authoritative definition of done):\n"
+    "{contract_block}\n\n"
+    "Agent's most recent response:\n{response}\n\n"
+    "{background_block}"
+    "Current time: {current_time}\n\n"
+    "Decision rules:\n"
+    "- The goal is DONE only when the Verification criterion is satisfied AND "
+    "the response shows concrete evidence of it (a command result, file "
+    "contents excerpt, test/benchmark output) — not a claim like 'done' or "
+    "'all tests pass' without evidence.\n"
+    "- If any stated Constraint was violated, the goal is NOT done — CONTINUE.\n"
+    "- If the response shows the agent is waiting on a listed background "
+    "process to satisfy the Verification criterion (e.g. CI is the "
+    "verification and it's still running), return WAIT on that process "
+    "instead of re-poking — re-poking now would be pure busy-work.\n"
+    "- If the response explains the work is blocked / unachievable / needs "
+    "user input (e.g. the stated Stop condition was hit), treat it as DONE "
+    "with the reason describing the block.\n"
+    "- Otherwise the goal is NOT done — CONTINUE.\n\n"
+    "Is the goal satisfied per its completion contract — done, continue, or wait?"
+)
+
+
+# System prompt for /goal draft — turns a plain-language objective into a
+# structured completion contract the user can review before activating.
+# Adapted from Codex's "let Codex draft the goal" guidance.
+DRAFT_CONTRACT_SYSTEM_PROMPT = (
+    "You turn a user's plain-language objective into a structured completion "
+    "contract for an autonomous coding agent. The contract has five fields:\n"
+    "- outcome: the single end state that must be true when done\n"
+    "- verification: the specific test / command / artifact that PROVES the "
+    "outcome (must be concrete and checkable)\n"
+    "- constraints: what must NOT change or regress\n"
+    "- boundaries: which files, dirs, tools, or systems are in scope\n"
+    "- stop_when: the condition under which the agent should stop and ask "
+    "for human input instead of pushing on\n\n"
+    "Infer sensible, specific values from the objective and any project "
+    "context implied by it. Prefer concrete verification (a named test "
+    "command, a build, a benchmark) over vague phrases. Keep each field to "
+    "one or two sentences. If a field genuinely cannot be inferred, use an "
+    "empty string for it.\n\n"
+    "Reply ONLY with a single JSON object on one line:\n"
+    '{"outcome": "...", "verification": "...", "constraints": "...", '
+    '"boundaries": "...", "stop_when": "..."}'
+)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Completion contract
+# ──────────────────────────────────────────────────────────────────────
+
+# The five contract fields, in display order. Adapted from OpenAI Codex's
+# "strong goal" guidance: a durable objective works best when it names what
+# "done" means, how to prove it, what must not regress, what tools/paths are
+# in bounds, and when to stop and ask. A bare free-form goal (no contract)
+# stays fully supported — every field defaults empty and is simply omitted
+# from the prompts when unset.
+_CONTRACT_FIELDS = ("outcome", "verification", "constraints", "boundaries", "stop_when")
+
+# Human labels for rendering and for the inline `field: value` parser.
+_CONTRACT_LABELS = {
+    "outcome": "Outcome",
+    "verification": "Verification",
+    "constraints": "Constraints",
+    "boundaries": "Boundaries",
+    "stop_when": "Stop when blocked",
+}
+
+# Inline-input aliases the user may type before a value, mapped to the
+# canonical field name. e.g. `verify: tests pass` or `done when: ...`.
+_CONTRACT_ALIASES = {
+    "outcome": "outcome",
+    "goal": "outcome",
+    "done": "outcome",
+    "done when": "outcome",
+    "verification": "verification",
+    "verify": "verification",
+    "verified by": "verification",
+    "evidence": "verification",
+    "proof": "verification",
+    "constraints": "constraints",
+    "constraint": "constraints",
+    "preserve": "constraints",
+    "must not": "constraints",
+    "do not change": "constraints",
+    "boundaries": "boundaries",
+    "boundary": "boundaries",
+    "scope": "boundaries",
+    "allowed": "boundaries",
+    "files": "boundaries",
+    "stop when": "stop_when",
+    "stop_when": "stop_when",
+    "blocked": "stop_when",
+    "stop if blocked": "stop_when",
+    "give up when": "stop_when",
+}
+
+
+@dataclass
+class GoalContract:
+    """Optional structured completion contract for a goal.
+
+    Each field is free-form prose the user (or :func:`draft_contract`)
+    supplies. Empty fields are omitted everywhere — a goal with no contract
+    behaves exactly like the original free-form goal. The contract is woven
+    into both the continuation prompt (so the agent targets the verification
+    surface and respects constraints) and the judge prompt (so "done" is
+    decided against evidence, not vibes).
+    """
+
+    outcome: str = ""
+    verification: str = ""
+    constraints: str = ""
+    boundaries: str = ""
+    stop_when: str = ""
+
+    def is_empty(self) -> bool:
+        return not any(getattr(self, f).strip() for f in _CONTRACT_FIELDS)
+
+    def to_dict(self) -> Dict[str, str]:
+        return {f: getattr(self, f) for f in _CONTRACT_FIELDS}
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "GoalContract":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(**{f: str(data.get(f) or "").strip() for f in _CONTRACT_FIELDS})
+
+    def render_block(self) -> str:
+        """Render non-empty contract fields as a labelled block. Empty
+        contract → empty string (callers skip the section entirely)."""
+        lines = []
+        for f in _CONTRACT_FIELDS:
+            val = getattr(self, f).strip()
+            if val:
+                lines.append(f"- {_CONTRACT_LABELS[f]}: {val}")
+        return "\n".join(lines)
+
+
+def parse_contract(text: str) -> Tuple[str, "GoalContract"]:
+    """Split user-typed goal text into a headline + structured contract.
+
+    Supports inline ``field: value`` lines so power users can type a full
+    contract in one shot, e.g.::
+
+        Migrate auth to JWT
+        verify: the auth test suite passes
+        constraints: keep the public /login response shape unchanged
+        boundaries: only touch services/auth and its tests
+        stop when: a schema change needs product sign-off
+
+    The first non-field line(s) become the goal headline; recognized
+    ``field:`` lines populate the contract. Lines for the same field are
+    joined. Unrecognized prefixes stay part of the headline, so a plain
+    free-form goal with an incidental colon (``Fix bug: the parser``)
+    is NOT mangled — only lines whose prefix matches a known alias are
+    pulled out. Returns ``(headline, contract)``.
+    """
+    if not text:
+        return "", GoalContract()
+
+    headline_parts: List[str] = []
+    fields: Dict[str, List[str]] = {f: [] for f in _CONTRACT_FIELDS}
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        matched = False
+        if ":" in line:
+            prefix, _, value = line.partition(":")
+            key = _CONTRACT_ALIASES.get(prefix.strip().lower())
+            if key is not None and value.strip():
+                fields[key].append(value.strip())
+                matched = True
+        if not matched:
+            headline_parts.append(line)
+
+    headline = " ".join(headline_parts).strip()
+    contract_kwargs = {f: " ".join(v).strip() for f, v in fields.items()}
+    # If a headline was given but no explicit `outcome:` field, the headline
+    # IS the outcome — pre-fill it so the contract block carries the
+    # outcome (otherwise the contract shows only the structured criteria
+    # with no top-level objective).
+    if headline and not contract_kwargs.get("outcome"):
+        contract_kwargs["outcome"] = headline
+    contract = GoalContract(**contract_kwargs)
+    return headline, contract
+
+
+def draft_contract(objective: str) -> GoalContract:
+    """Sync helper used by ``/goal draft <objective>`` (CLI + gateway).
+
+    Calls the ``goal_judge`` aux model via the unified :func:`call_llm`
+    entry (K-2 — feeds ``auxiliary.goal_judge.*`` config correctly) and
+    parses the single-line JSON reply into a :class:`GoalContract`. Falls
+    back to an empty contract on any failure (no provider, malformed
+    JSON, exception) so the calling surface can degrade to a free-form
+    goal without wedging the user.
+    """
+    text = (objective or "").strip()
+    if not text:
+        return GoalContract()
+    try:
+        from agent.auxiliary_client import call_llm
+    except Exception as exc:  # pragma: no cover
+        logger.debug("draft_contract: auxiliary client import failed (%s)", exc)
+        return GoalContract()
+
+    try:
+        resp = call_llm(
+            task="goal_judge",
+            messages=[
+                {"role": "system", "content": DRAFT_CONTRACT_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            temperature=0,
+            max_tokens=600,
+        )
+    except Exception as exc:  # pragma: no cover — LLM unreachable
+        logger.info("draft_contract: goal_judge call failed (%s) — falling back", exc)
+        return GoalContract()
+
+    try:
+        raw = (resp.choices[0].message.content or "").strip()  # type: ignore[attr-defined]
+    except Exception:
+        return GoalContract()
+
+    import json as _json
+    parsed: Any
+    try:
+        # Tolerate fenced JSON in addition to the requested one-line form.
+        fence = raw.startswith("```")
+        if fence:
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        parsed = _json.loads(raw)
+    except Exception:
+        return GoalContract()
+
+    if not isinstance(parsed, dict):
+        return GoalContract()
+    return GoalContract.from_dict(parsed)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Dataclass
 # ──────────────────────────────────────────────────────────────────────
@@ -159,8 +428,13 @@ class GoalState:
     # them into the verdict. Backwards-compatible: defaults to empty so
     # old state_meta rows load unchanged.
     subgoals: List[str] = field(default_factory=list)
+    # Optional structured completion contract (outcome / verification /
+    # constraints / boundaries / stop_when). Empty by default; a goal with
+    # no contract behaves exactly like the original free-form goal.
+    contract: GoalContract = field(default_factory=GoalContract)
 
     def to_json(self) -> str:
+        # asdict already recurses GoalContract into a plain dict.
         return json.dumps(asdict(self), ensure_ascii=False)
 
     @classmethod
@@ -182,7 +456,19 @@ class GoalState:
             paused_reason=data.get("paused_reason"),
             consecutive_parse_failures=int(data.get("consecutive_parse_failures", 0) or 0),
             subgoals=subgoals,
+            contract=GoalContract.from_dict(data.get("contract")),
         )
+
+    # --- contract helpers -------------------------------------------------
+
+    def has_contract(self) -> bool:
+        return self.contract is not None and not self.contract.is_empty()
+
+    def render_contract(self) -> str:
+        """Human-readable contract block. Empty string when no contract."""
+        if not self.has_contract():
+            return ""
+        return self.contract.render_block()
 
     # --- subgoals helpers -------------------------------------------------
 
@@ -374,6 +660,7 @@ def judge_goal(
     *,
     timeout: float = DEFAULT_JUDGE_TIMEOUT,
     subgoals: Optional[List[str]] = None,
+    contract: Optional[GoalContract] = None,
 ) -> Tuple[str, str, bool]:
     """Ask the auxiliary model whether the goal is satisfied.
 
@@ -391,6 +678,12 @@ def judge_goal(
     decision. When non-empty the prompt switches to the with-subgoals
     template; otherwise behavior is identical to the original judge.
 
+    ``contract`` is an optional :class:`GoalContract` (from ``/goal draft``
+    or the inline ``field: value`` parser) that takes precedence over
+    ``subgoals`` for prompt selection: when present, the with-contract
+    template is used and the judge must cite concrete evidence per the
+    contract's Verification criterion before marking the goal DONE.
+
     This is deliberately fail-open: any error returns ``("continue", "...", False)``
     so a broken judge doesn't wedge progress — the turn budget and the
     consecutive-parse-failures auto-pause are the backstops.
@@ -407,10 +700,22 @@ def judge_goal(
         logger.debug("goal judge: auxiliary client import failed: %s", exc)
         return "continue", "auxiliary client unavailable", False
 
-    # Build the prompt — pick the with-subgoals variant when applicable.
+    # Build the prompt — contract takes precedence over subgoals; both
+    # take precedence over the bare free-form template.
     clean_subgoals = [s.strip() for s in (subgoals or []) if s and s.strip()]
     current_time = datetime.now(tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    if clean_subgoals:
+    if contract is not None and not contract.is_empty():
+        # No background process info is plumbed through to the judge today
+        # (kept open for the future "WAIT on background" verdict the
+        # contract template anticipates). Pass an empty block.
+        prompt = JUDGE_USER_PROMPT_WITH_CONTRACT_TEMPLATE.format(
+            goal=_truncate(goal, 2000),
+            contract_block=contract.render_block(),
+            response=_truncate(last_response, _JUDGE_RESPONSE_SNIPPET_CHARS),
+            background_block="",
+            current_time=current_time,
+        )
+    elif clean_subgoals:
         subgoals_block = "\n".join(
             f"- {i}. {text}" for i, text in enumerate(clean_subgoals, start=1)
         )
@@ -512,7 +817,13 @@ class GoalManager:
 
     # --- mutation -----------------------------------------------------
 
-    def set(self, goal: str, *, max_turns: Optional[int] = None) -> GoalState:
+    def set(
+        self,
+        goal: str,
+        *,
+        max_turns: Optional[int] = None,
+        contract: Optional[GoalContract] = None,
+    ) -> GoalState:
         goal = (goal or "").strip()
         if not goal:
             raise ValueError("goal text is empty")
@@ -523,6 +834,7 @@ class GoalManager:
             max_turns=int(max_turns) if max_turns else self.default_max_turns,
             created_at=time.time(),
             last_turn_at=0.0,
+            contract=contract or GoalContract(),
         )
         self._state = state
         save_goal(self.session_id, state)
@@ -646,7 +958,10 @@ class GoalManager:
         state.last_turn_at = time.time()
 
         verdict, reason, parse_failed = judge_goal(
-            state.goal, last_response, subgoals=state.subgoals or None
+            state.goal,
+            last_response,
+            subgoals=state.subgoals or None,
+            contract=state.contract if state.has_contract() else None,
         )
         state.last_verdict = verdict
         state.last_reason = reason
@@ -732,6 +1047,11 @@ class GoalManager:
     def next_continuation_prompt(self) -> Optional[str]:
         if not self._state or self._state.status != "active":
             return None
+        if self._state.has_contract():
+            return CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE.format(
+                goal=self._state.goal,
+                contract_block=self._state.render_contract(),
+            )
         if self._state.subgoals:
             return CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE.format(
                 goal=self._state.goal,
@@ -890,10 +1210,15 @@ def run_kanban_goal_loop(
 __all__ = [
     "GoalState",
     "GoalManager",
+    "GoalContract",
+    "parse_contract",
+    "draft_contract",
     "CONTINUATION_PROMPT_TEMPLATE",
     "CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE",
+    "CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE",
     "JUDGE_USER_PROMPT_TEMPLATE",
     "JUDGE_USER_PROMPT_WITH_SUBGOALS_TEMPLATE",
+    "JUDGE_USER_PROMPT_WITH_CONTRACT_TEMPLATE",
     "KANBAN_GOAL_CONTINUATION_TEMPLATE",
     "KANBAN_GOAL_FINALIZE_TEMPLATE",
     "DEFAULT_MAX_TURNS",
