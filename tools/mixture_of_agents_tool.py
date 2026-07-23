@@ -236,7 +236,8 @@ async def _run_aggregator_model(
 async def mixture_of_agents_tool(
     user_prompt: str,
     reference_models: Optional[List[str]] = None,
-    aggregator_model: Optional[str] = None
+    aggregator_model: Optional[str] = None,
+    conversation_id: Optional[str] = None,
 ) -> str:
     """
     Process a complex query using the Mixture-of-Agents methodology.
@@ -275,7 +276,15 @@ async def mixture_of_agents_tool(
         Exception: If MoA processing fails or API key is not set
     """
     start_time = datetime.datetime.now()
-    
+
+    # K-4: ambient conversation id (mirror of call_llm / delegate_task).
+    # Each reference model + the aggregator share the same id so post-hoc
+    # routing_decision traces can collapse the whole MoA fan-out to one
+    # conversation. Over-write-on-set, no manual reset needed.
+    if conversation_id is not None:
+        from agent.conversation_context import _ambient_conversation_id
+        _ambient_conversation_id.set(conversation_id)
+
     debug_call_data = {
         "parameters": {
             "user_prompt": user_prompt[:200] + "..." if len(user_prompt) > 200 else user_prompt,

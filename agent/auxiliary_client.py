@@ -5001,6 +5001,7 @@ def call_llm(
     timeout: float = None,
     extra_body: dict = None,
     routing_decision_out: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None,
 ) -> Any:
     """Centralized synchronous LLM call.
 
@@ -5026,6 +5027,15 @@ def call_llm(
     Raises:
         RuntimeError: If no provider is configured.
     """
+    # K-4: ambient conversation id — every aux call site can accept an
+    # explicit conversation_id (typically computed by the caller as
+    # ``SessionDB.get_conversation_root(parent_session_id)`` for fan-out
+    # chains) and bind it for the rest of this call. ContextVar is
+    # over-write-on-set so no manual reset is needed (next call_llm
+    # re-binds or the asyncio task boundary drops it).
+    if conversation_id is not None:
+        from agent.conversation_context import _ambient_conversation_id
+        _ambient_conversation_id.set(conversation_id)
     resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         task, provider, model, base_url, api_key)
     effective_extra_body = _get_task_extra_body(task)
@@ -5638,11 +5648,17 @@ async def async_call_llm(
     timeout: float = None,
     extra_body: dict = None,
     routing_decision_out: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None,
 ) -> Any:
     """Centralized asynchronous LLM call.
 
     Same as call_llm() but async. See call_llm() for full documentation.
     """
+    # K-4: ambient conversation id (mirror of call_llm). Over-write-on-set
+    # so no manual reset is needed.
+    if conversation_id is not None:
+        from agent.conversation_context import _ambient_conversation_id
+        _ambient_conversation_id.set(conversation_id)
     resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         task, provider, model, base_url, api_key)
     effective_extra_body = _get_task_extra_body(task)

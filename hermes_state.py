@@ -2405,6 +2405,35 @@ class SessionDB:
                 current = row["parent_session_id"] if hasattr(row, "keys") else row[0]
         return list(reversed(chain)) or [session_id]
 
+    def get_conversation_root(self, session_id: str) -> Optional[str]:
+        """Return the root session id in this session's lineage chain.
+
+        Used by K-4 (upstream ``9ce0e67f2 ambient conversation context``)
+        to compute a stable ``conversation_id`` that crosses aux / MoA /
+        delegate fan-outs: the root of the chain is the original user
+        turn, every fan-out child shares the same id, and post-hoc
+        routing_decision traces can collapse to a single conversation.
+
+        Reuses the lineage walk in
+        :meth:`_session_lineage_root_to_tip` — the root is the first
+        element of the reversed chain. Returns ``None`` when the
+        session_id is empty or unrecognised (the latter happens when a
+        caller passes a session id that was never persisted; treating
+        unknown as "no root" lets callers fall back to using the
+        session id itself as a stable conversation id rather than
+        silently returning a stale value).
+        """
+        if not session_id:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        chain = self._session_lineage_root_to_tip(session_id)
+        return chain[0] if chain else None
+
     @staticmethod
     def _is_duplicate_replayed_user_message(messages: List[Dict[str, Any]], msg: Dict[str, Any]) -> bool:
         if msg.get("role") != "user":

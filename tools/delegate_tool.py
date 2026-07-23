@@ -1958,6 +1958,7 @@ def delegate_task(
     acp_args: Optional[List[str]] = None,
     role: Optional[str] = None,
     parent_agent=None,
+    conversation_id: Optional[str] = None,
 ) -> str:
     """
     Spawn one or more child agents to handle delegated tasks.
@@ -1975,6 +1976,13 @@ def delegate_task(
     """
     if parent_agent is None:
         return tool_error("delegate_task requires a parent agent context.")
+
+    # K-4: ambient conversation id — child agent sessions inherit the
+    # parent's id so SessionDB lineage queries resolve back to the root
+    # turn. Over-write-on-set, no manual reset needed.
+    if conversation_id is not None:
+        from agent.conversation_context import _ambient_conversation_id
+        _ambient_conversation_id.set(conversation_id)
 
     # Operator-controlled kill switch — lets the TUI freeze new fan-out
     # when a runaway tree is detected, without interrupting already-running
