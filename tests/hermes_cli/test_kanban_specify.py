@@ -48,15 +48,13 @@ def _mock_client_returning(content: str):
 
 
 def _patch_aux_client(content: str, *, model: str = "test-model"):
-    """Patch get_text_auxiliary_client at its source + at the module that
-    imported it lazily inside specify_task. Both patches are needed
-    because kanban_specify imports the function inside the function body.
-    """
-    client = _mock_client_returning(content)
+    """Mock the unified call_llm entry so kanban_specify's call_llm(task=...)
+    call returns a canned response. The previous get_text_auxiliary_client
+    path is gone (K-2: route direct-create aux callers through call_llm)."""
     return patch(
-        "agent.auxiliary_client.get_text_auxiliary_client",
-        return_value=(client, model),
-    ), client
+        "agent.auxiliary_client.call_llm",
+        return_value=_fake_aux_response(content),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +156,11 @@ def test_specify_task_no_aux_client_configured(kanban_home):
     with kb.connect() as conn:
         tid = kb.create_task(conn, title="rough", triage=True)
 
+    # K-2: no-provider case now surfaces as a RuntimeError from call_llm,
+    # which specify_task catches and reports as "auxiliary client unavailable".
     with patch(
-        "agent.auxiliary_client.get_text_auxiliary_client",
-        return_value=(None, ""),
+        "agent.auxiliary_client.call_llm",
+        side_effect=RuntimeError("No auxiliary LLM provider configured"),
     ):
         outcome = spec.specify_task(tid)
 
@@ -175,11 +175,9 @@ def test_specify_task_llm_api_error_keeps_task_in_triage(kanban_home):
     with kb.connect() as conn:
         tid = kb.create_task(conn, title="rough", triage=True)
 
-    client = MagicMock()
-    client.chat.completions.create = MagicMock(side_effect=RuntimeError("429 rate limited"))
     with patch(
-        "agent.auxiliary_client.get_text_auxiliary_client",
-        return_value=(client, "test-model"),
+        "agent.auxiliary_client.call_llm",
+        side_effect=RuntimeError("429 rate limited"),
     ):
         outcome = spec.specify_task(tid)
 
@@ -193,7 +191,7 @@ def test_specify_task_empty_llm_response(kanban_home):
     with kb.connect() as conn:
         tid = kb.create_task(conn, title="rough", triage=True)
 
-    p, _ = _patch_aux_client("")
+    p = _patch_aux_client("")
     with p:
         outcome = spec.specify_task(tid)
 
@@ -287,9 +285,10 @@ def test_cli_specify_all_returns_1_when_every_task_fails(kanban_home, capsys):
         kb.create_task(conn, title="a", triage=True)
         kb.create_task(conn, title="b", triage=True)
 
+    # K-2: no-provider case now surfaces as a RuntimeError from call_llm.
     with patch(
-        "agent.auxiliary_client.get_text_auxiliary_client",
-        return_value=(None, ""),  # no aux client → every task fails
+        "agent.auxiliary_client.call_llm",
+        side_effect=RuntimeError("No auxiliary LLM provider configured"),
     ):
         rc = _run_cli("specify", "--all")
 

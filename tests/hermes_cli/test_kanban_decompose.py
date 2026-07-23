@@ -43,17 +43,22 @@ def _mock_client_returning(content: str):
 
 
 def _patch_aux_client(content: str, *, model: str = "test-model"):
-    client = _mock_client_returning(content)
+    """Mock the unified call_llm entry so kanban_decompose's call_llm(task=...)
+    call returns a canned response. The previous get_text_auxiliary_client
+    path is gone (K-2: route direct-create aux callers through call_llm)."""
     return patch(
-        "agent.auxiliary_client.get_text_auxiliary_client",
-        return_value=(client, model),
+        "agent.auxiliary_client.call_llm",
+        return_value=_fake_aux_response(content),
     )
 
 
 def _patch_extra_body():
+    """No-op stub kept for backwards compatibility with tests that combine
+    it with _patch_aux_client. call_llm reads auxiliary.<task>.extra_body
+    internally now, so the caller no longer needs to wire it up."""
     return patch(
-        "agent.auxiliary_client.get_auxiliary_extra_body",
-        return_value={},
+        "agent.auxiliary_client.call_llm",
+        return_value=_fake_aux_response("{}"),
     )
 
 
@@ -336,9 +341,11 @@ def test_decompose_no_aux_client_configured(kanban_home):
     for p in patches:
         p.start()
     try:
+        # K-2: no-provider case now surfaces as a RuntimeError from call_llm,
+        # which decompose_task catches and reports as "auxiliary client unavailable".
         with patch(
-            "agent.auxiliary_client.get_text_auxiliary_client",
-            return_value=(None, ""),
+            "agent.auxiliary_client.call_llm",
+            side_effect=RuntimeError("No auxiliary LLM provider configured"),
         ):
             outcome = decomp.decompose_task(tid, author="me")
     finally:
@@ -346,4 +353,4 @@ def test_decompose_no_aux_client_configured(kanban_home):
             p.stop()
 
     assert outcome.ok is False
-    assert "no auxiliary client" in outcome.reason
+    assert "auxiliary client unavailable" in outcome.reason
