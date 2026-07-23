@@ -302,15 +302,16 @@
 
 ### [CAND-041] 🎯 MoA (Mix-of-Agents) virtual provider (8 commits, 极创新)
 
-- **状态**: 🟡 proposed
+- **状态**: ✅ accepted → **DONE** (already implemented pre-sprint, 2026-07-23 audit 确认)
 - **来源**: upstream `c6575df92` (2026-06-25 起点) 到 `9e044cf79` (2026-07-03) — 8 feat commits
 - **估时**: 4-6 h (4 文件: `agent/moa_loop.py` + `agent/moa_trace.py` + `hermes_cli/moa_cmd.py` + `hermes_cli/moa_config.py` + tests)
-- **风险**: 🟡 中 (新 virtual provider 概念 + bounded ThreadPoolExecutor 并行 fan-out + 跟现有 routing_decision 关系)
+- **风险**: 🟢 低 → 已 done
 - **价值**: 🔴 极高 (multi-model aggregator, reference models 并行 → 主模型综合. 跟 cn "thorough" 风格天然契合)
 - **触发条件**: 任一:
   - user 反映 "想用多个模型综合"
   - cn S12 routing_decision 准备扩 Phase 3
 - **关联**: NEEDS_BACKLOG §1 P1 (RoutingDecision, done) — **可考虑扩展 MoA 作为 routing_decision 的高级 mode**
+- **实施现状** (2026-07-23 sprint audit): cn `tools/mixture_of_agents_tool.py:236-409` `mixture_of_agents_tool` async function 已 fully working, 4 reference models (claude-opus-4.6, gemini-2.5-pro, gpt-5.4-pro, deepseek-v3.2) + 1 aggregator (claude-opus-4.6) + `asyncio.gather` parallel fan-out + 6 retries exponential backoff + `MIN_SUCCESSFUL_REFERENCES=1` partial fail tolerance + `tools/registry.py` 已注册 `mixture_of_agents` tool (toolset=moa, requires_env=OPENROUTER_API_KEY). `git log tools/mixture_of_agents_tool.py` 确认 cherry-pick 来源含 `c6575df92 feat(moa): expose MoA presets as selectable virtual models (#46081)` + `4c367df56 feat(moa): move mixture of agents to slash command mode` + follow-up fixes. cn 实际跟 upstream 8 commits 几乎 1:1 mirror, 不需要再 cherry-pick. Sprint plan Task 3 (CAND-041) skipped — 跳 K-4 (MoA ambient, post-CAND-041 enhancement).
 - **备注**: `c6575df92` 把 moa 作为 virtual provider 注册到 PROVIDER_REGISTRY (HERMES_OVERLAYS auth_type='virtual'). 跟 cn 现有的 auxiliary_client.call_llm 架构**可能能结合** — MoA 本质就是 reference models + aggregator 的 fan-out, 跟 routing_decision.multi_mode 重叠度**高**. 建议: **不要直接 cherry-pick**, 而是把 MoA 的核心 fan-out 逻辑 port 到 cn 现有的 `routing_decision` 框架下. 估时 1-2 d.
 
 ### [CAND-042] 🏢 Managed-scope (MDM-style config override, 5 commits, 企业关键)
@@ -750,7 +751,7 @@
 - **Cn state**: ❌ `GoalContract` dataclass / `parse_contract` / `draft_contract` / `/goal show` / `/goal draft` 命令 / `kanban_complete` 工具层 judge gate — **全部缺失** (clean port, 0 dead code)
 - **Port plan**: 1-2d, 1-commit manual port. 4 文件改动: `hermes_cli/goals.py` (dataclass + parsers + 3 prompt templates) + `hermes_cli/cli_commands_mixin.py` + `gateway/slash_commands.py` (CLI + gateway 镜像) + `tools/kanban_tools.py` (judge gate, fail-open per upstream review)
 - **估时**: 1-2d | **风险**: 🟡 中 (judge prompt 改; goal_mode worker 行为变化)
-- **价值**: 🔴 极高 (S12 P3 闭环关键, 跟 CAND-041/CAND-042 unblock)
+- **价值**: 🔴 极高 (S12 P3 闭环关键, 跟 CAND-042 unblock; CAND-041 已 done pre-sprint 2026-07-23)
 - **详细分析**: `phase3c-cand-046-deep-dive.md`
 - **备注**: ⚠️ 跟 K-2 交互 — `draft_contract` 走 `goal_judge` aux call, 当前 silent config drop (K-2 修了才能真吃 `auxiliary.goal_judge.extra_body`)
 
@@ -782,7 +783,7 @@
 - **状态**: 🟡 proposed (post CAND-041, 0.5d)
 - **Source**: upstream `9ce0e67f2` `feat(portal): ambient conversation context entangles aux/MoA/delegate calls`
 - **Axiom match**: **2 整体最优 (strongest)** — 跨 module (aux + MoA + delegate) 共享 conversation lineage
-- **Cn state**: ⚠️ 跟 CAND-041 (MoA cherry-pick) 直接关联; cn 现在 MoA 没实现, 这是 post-cherry-pick 增强
+- **Cn state**: ⚠️ 跟 CAND-041 (MoA) 直接关联; cn MoA 已 working pre-sprint (2026-07-23 audit 确认), 这是 ambient 增强 (cross-module aux/MoA/delegate conversation_id 共享)
 - **Port plan**: 0.5d, post CAND-041. ContextVar-based `conversation_id` 跨 aux/MoA/delegate 传播, `SessionDB.get_conversation_root()` 返回 root session id
 - **估时**: 0.5d | **风险**: 🟢 低 (ContextVar 模式成熟)
 - **价值**: 🟡 中 (enhancement, not core)
@@ -822,7 +823,7 @@
 | gateway 启动 / 重启相关 | CAND-007 / CAND-054 |
 | hermes-tray v0.2.0 接 dashboard / S15 | CAND-008 / CAND-009 / CAND-011 / CAND-014 / CAND-019 / CAND-021 / CAND-022 / CAND-026 / CAND-058 / CAND-059 |
 | S15 plugin marketplace 启动 | CAND-012 / CAND-048 |
-| 多模型综合 / thorough 风格 | **CAND-041 (MoA) ← 重点** |
+| 多模型综合 / thorough 风格 | CAND-041 (MoA, ✅ done pre-sprint 2026-07-23) |
 | user 提 "agent 怎么好玩" / demo 场景 | **CAND-040 (pets) ← 重点** |
 | IT 部门 / MDM 部署 | **CAND-042 (managed-scope) ← 重点** |
 | 多频道不同模型 (某群固定 deepseek) | **CAND-043 (per-channel override) ← 重点** |
@@ -846,7 +847,7 @@
 | cron freeze | CAND-003 |
 | 用户用 hermes send / tray 接 media | CAND-006 / CAND-040 |
 | gateway 启动 / 重启相关 | CAND-007 |
-| hermes-tray v0.2.0 接 dashboard / S15 | CAND-008 / CAND-009 / CAND-011 / CAND-014 / CAND-041 |
+| hermes-tray v0.2.0 接 dashboard / S15 | CAND-008 / CAND-009 / CAND-011 / CAND-014 |
 | S15 plugin marketplace 启动 | CAND-012 |
 | upstream v0.19.0 发布 (12 天窗口 3057 commits) | 重新审计上游, 重做本文件; 现有 K-1~K-5 (Section K) 跟 5 候选 deep dive 文档可作 reference |
 | S12 P3 启动 (闭环反馈层) | K-1 (completion contracts) + K-5 (跟 CAND-080 互补) |
