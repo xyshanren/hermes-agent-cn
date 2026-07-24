@@ -554,6 +554,51 @@ def _handle_complete(args: dict, **kw) -> str:
         kb, conn = _connect(board=board)
         try:
             try:
+                # K-1b port: Goal-mode pre-completion judge gate (upstream
+                # 0b33bc539, PR #38388). Cherry-pick companion to
+                # K-1 (completion contracts) — prevents workers in
+                # goal_mode from bypassing the auxiliary judge by
+                # calling kanban_complete before acceptance criteria
+                # are met. The tool handler now synchronously invokes
+                # the goal judge against the task's title/body and the
+                # completion summary. If the verdict is not "done",
+                # the completion is rejected with actionable guidance
+                # for the agent.
+                #
+                # This keeps kanban_db.py as a pure SQLite wrapper while
+                # intercepting the bypass exactly at the agent tool-call
+                # boundary, aligning with Hermes separation of concerns.
+                # K-1 (completion contracts) added the contract param to
+                # judge_goal; tasks don't yet store a contract column so
+                # we omit it here.
+                task = kb.get_task(conn, tid)
+                if task and task.goal_mode:
+                    try:
+                        from hermes_cli.goals import judge_goal
+                        verdict, reason, _ = judge_goal(
+                            goal=f"{task.title}\n\n{task.body or ''}".strip(),
+                            last_response=(summary or result or "").strip(),
+                        )
+                        if verdict != "done":
+                            return tool_error(
+                                f"Goal completion rejected by judge: {reason}. "
+                                f"To proceed, either: (1) provide explicit "
+                                f"acceptance evidence in your summary matching "
+                                f"the task's criteria, or (2) create "
+                                f"continuation tasks with parent={tid} and keep "
+                                f"this task alive."
+                            )
+                    except Exception as judge_exc:
+                        # Fail-open to avoid wedging the worker if the
+                        # judge is temporarily unavailable or
+                        # misconfigured (e.g. auxiliary provider API
+                        # down, model misconfig, transport timeout).
+                        # The judge is a gate, not a hard requirement;
+                        # log loudly so ops can see it.
+                        logger.warning(
+                            "goal judge check failed, allowing completion: %s",
+                            judge_exc,
+                        )
                 ok = kb.complete_task(
                     conn, tid,
                     result=result, summary=summary, metadata=metadata,

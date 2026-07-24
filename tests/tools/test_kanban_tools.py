@@ -596,6 +596,179 @@ def test_complete_retry_with_corrected_created_cards_succeeds(worker_env):
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# K-1b: Goal-mode pre-completion judge gate (upstream 0b33bc539, PR #38388)
+# ---------------------------------------------------------------------------
+def test_complete_goal_mode_rejected_by_judge(monkeypatch, tmp_path):
+    """Goal-mode tasks must pass the auxiliary judge before completion.
+
+    Cherry-pick companion to upstream 0b33bc539 ('fix(kanban): gate goal_mode
+    task completion with auxiliary judge'). Workers in goal_mode must not
+    bypass the auxiliary judge by calling kanban_complete before the
+    acceptance criteria are met — the tool handler synchronously invokes
+    ``judge_goal`` against the task's title/body and the completion summary,
+    and rejects the completion if the verdict is not 'done'.
+    """
+    from pathlib import Path as _Path
+    from hermes_cli import kanban_db as kb
+    from tools import kanban_tools as kt
+
+    # Set up an isolated worker context with a goal_mode task.
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("HERMES_PROFILE", "test-worker")
+    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
+    monkeypatch.setattr(_Path, "home", lambda: tmp_path)
+
+    kb._INITIALIZED_PATHS.clear()
+    kb.init_db()
+    conn = kb.connect()
+    try:
+        goal_task_id = kb.create_task(
+            conn,
+            title="goal-mode-test",
+            assignee="test-worker",
+            body="Must achieve X with verified evidence.",
+            goal_mode=True,
+        )
+        kb.claim_task(conn, goal_task_id)
+    finally:
+        conn.close()
+    monkeypatch.setenv("HERMES_KANBAN_TASK", goal_task_id)
+
+    # Mock the judge to reject the completion: verdict != "done".
+    def mock_judge_goal_reject(goal, last_response, *, timeout=30.0,
+                                subgoals=None, contract=None):
+        return ("continue", "missing verification evidence", False)
+
+    monkeypatch.setattr(
+        "hermes_cli.goals.judge_goal", mock_judge_goal_reject
+    )
+
+    # Attempt to complete should be rejected with actionable guidance.
+    out = kt._handle_complete({"summary": "I did some stuff but not X"})
+    d = json.loads(out)
+    assert "error" in d, f"expected rejection, got {d!r}"
+    assert "Goal completion rejected by judge" in d["error"]
+    assert "missing verification evidence" in d["error"]
+    assert "continuation tasks" in d["error"]
+
+    # Critically: the task is NOT mutated — the gate runs before the
+    # write txn, so the worker can retry with better evidence.
+    conn2 = kb.connect()
+    try:
+        task = kb.get_task(conn2, goal_task_id)
+        assert task.status == "running", (
+            f"task must remain running after judge rejection; "
+            f"got status={task.status!r}"
+        )
+    finally:
+        conn2.close()
+
+
+def test_complete_goal_mode_accepted_by_judge(monkeypatch, tmp_path):
+    """A goal-mode task whose completion summary passes the judge is
+    marked done normally. Regression guard for the K-1b gate: it must
+    not break the happy path.
+    """
+    from pathlib import Path as _Path
+    from hermes_cli import kanban_db as kb
+    from tools import kanban_tools as kt
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("HERMES_PROFILE", "test-worker")
+    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
+    monkeypatch.setattr(_Path, "home", lambda: tmp_path)
+
+    kb._INITIALIZED_PATHS.clear()
+    kb.init_db()
+    conn = kb.connect()
+    try:
+        goal_task_id = kb.create_task(
+            conn,
+            title="goal-mode-happy",
+            assignee="test-worker",
+            body="Achieve X.",
+            goal_mode=True,
+        )
+        kb.claim_task(conn, goal_task_id)
+    finally:
+        conn.close()
+    monkeypatch.setenv("HERMES_KANBAN_TASK", goal_task_id)
+
+    # Mock the judge to accept.
+    def mock_judge_goal_accept(goal, last_response, *, timeout=30.0,
+                                subgoals=None, contract=None):
+        return ("done", "criteria met", False)
+
+    monkeypatch.setattr(
+        "hermes_cli.goals.judge_goal", mock_judge_goal_accept
+    )
+
+    out = kt._handle_complete({
+        "summary": "X is achieved with verified evidence: ...",
+    })
+    d = json.loads(out)
+    assert d.get("ok") is True, f"expected success, got {d!r}"
+
+    conn2 = kb.connect()
+    try:
+        task = kb.get_task(conn2, goal_task_id)
+        assert task.status == "done"
+    finally:
+        conn2.close()
+
+
+def test_complete_goal_mode_judge_exception_fails_open(monkeypatch, tmp_path):
+    """If the judge raises (provider down, transport timeout, etc.), the
+    completion is allowed to proceed — the judge is a gate, not a hard
+    requirement, and a flaky judge must not wedge the worker.
+    """
+    from pathlib import Path as _Path
+    from hermes_cli import kanban_db as kb
+    from tools import kanban_tools as kt
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("HERMES_PROFILE", "test-worker")
+    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
+    monkeypatch.setattr(_Path, "home", lambda: tmp_path)
+
+    kb._INITIALIZED_PATHS.clear()
+    kb.init_db()
+    conn = kb.connect()
+    try:
+        goal_task_id = kb.create_task(
+            conn,
+            title="goal-mode-judge-down",
+            assignee="test-worker",
+            body="Achieve X.",
+            goal_mode=True,
+        )
+        kb.claim_task(conn, goal_task_id)
+    finally:
+        conn.close()
+    monkeypatch.setenv("HERMES_KANBAN_TASK", goal_task_id)
+
+    # Mock the judge to raise.
+    def mock_judge_goal_raises(goal, last_response, *, timeout=30.0,
+                                 subgoals=None, contract=None):
+        raise RuntimeError("auxiliary provider unreachable")
+
+    monkeypatch.setattr(
+        "hermes_cli.goals.judge_goal", mock_judge_goal_raises
+    )
+
+    out = kt._handle_complete({"summary": "X is done."})
+    d = json.loads(out)
+    # Fail-open: completion succeeds despite judge failure.
+    assert d.get("ok") is True, f"expected fail-open success, got {d!r}"
+
+
 def test_block_happy_path(worker_env):
     from tools import kanban_tools as kt
     out = kt._handle_block({"reason": "need clarification"})
