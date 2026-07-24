@@ -684,15 +684,21 @@
 
 ### [CAND-080] 🔄 Skills 自进化系统 (rule-based routing 自迭代)
 
-- **状态**: 🟡 proposed
+- **状态**: 🟡 partial done → 🔄 2/4 sub-layers implemented pre-sprint (2026-07-23 audit), 留 2 sub-layers 给 next sprint 跟 CAND-081/082 + K-5 upstream 参考一起做
 - **来源**: 文章 (Datawhale, 2026-07-10) "Agent Skills 自进化" + cn 现有 routing 框架
 - **一句话**: rule-based routing 在真实反馈中持续更新, 三层结构渐进式加载
-- **估时**: 2-3 d
-- **风险**: 🟡 中
+- **估时**: 2-3 d → 1-1.5 d 剩余 (routing rule 自迭代 + rule 抽象 留给 next sprint)
+- **风险**: 🟡 中 → 🟢 低 (已 working 的 2 层 (curator + background_review) 不动, 只加 patch mechanism + rule 抽象)
 - **价值**: 🟢 高
 - **触发条件**: rule-based 路由需要自动化优化
 - **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
 - **Upstream 对齐 (2026-07-23)**: 跟 `e32ebc6aa feat(skills): /learn` (PR #51506) concept 70% 重合, 区别在 /learn 是 skill-distillation 层级 (描述 → SKILL.md), CAND-080 是 rule-update 层级 (反馈 → 路由规则 patch). 实施时借鉴 upstream 4-surface 集成 (CLI/gateway/TUI/dashboard) + 硬性 skill-authoring standards (description <=60 char + section order). 详见 K-5
+- **实施现状** (2026-07-23 sprint audit, 4-phase 跨 project borrow):
+  - ✅ **第 3 层 资源层 skill self-evolution** — `agent/curator.py` (74KB, 12+ fix commits) 已 fully working. Periodically review agent-created skills, auto-transition lifecycle (pin / archive / consolidate / **patch** via `skill_manage action=patch`), persist `.curator_state` (last_run_at / paused / ...), 5+ 关键 fix commits (preserve cron-referenced skills `4c2961c51` / protect external `96bc524a7` / protect load-bearing built-in `702aa743e` / make consolidation opt-in `7bbffceb9` / shared atomic state writer `47e77ae16` / preserve resolved fork metadata `97e9c6466` / forward credential pool `304cdbdc7` / prune after inactivity `70e1571d8` / pluginify `476d8d9cc`)
+  - ✅ **Per-turn 反馈循环** — `agent/background_review.py` (35KB, 12+ fix commits) 已 fully working. `spawn_background_review_thread` daemon per turn, 问 "should save/update memory/skill?", inherit parent runtime cache (reasoning_config inheritance `17cfa0f0a` fix), tool whitelist (read-before-write `20871c1d9`), 3-mode notification (off / on / verbose `955a914e4`), aux-model selector `87c4a5ebb`. 12+ fix commits 覆盖 list-shape guard / pin-improvements / memory-tool gate / opt-out-of-finalization / verbose preview 等
+  - ❌ **第 1 层 路由层 rule 自迭代** — `agent/routing_decision.py` 有 `rule_id` label 观测 (commit `b49ef1a31` S12 P2 cost-aware fallback + `4cd26c480` Phase 1 dataclass), 但 0 patch 机制. Sprint plan 范围外, 留 next sprint
+  - ❌ **第 2 层 指令层 rule 抽象** — fallback chain 是 hard-coded 字符串 (e.g. `"vision_fallback_chain[1]"`), 没 patchable rule layer. Sprint plan 范围外, 留 next sprint 跟 CAND-081 (Compaction) + CAND-082 (A/B test) 一起做
+- **Sprint 决定 (2026-07-23)**: mark partial done per CAND-041 pattern. **不**实施 routing rule 自迭代 (1-1.5d) / rule 抽象 (1d) / CAND-081 (1-2d) / CAND-082 (2-3d) 在本次 sprint — 留 next sprint 跟 K-5 upstream 4-surface 集成 + 硬性 skill-authoring standards 一起 borrow, 边界清晰风险小
 
 ### [CAND-081] 🗜️ Compaction 工具 (定期合并/下沉/删除冗余规则)
 
@@ -794,7 +800,7 @@
 - **状态**: 🟢 verified (1-line update to CAND-080/082/044, **不**新加候选)
 - **Source**: upstream 12 commits (`e32ebc6aa` #51506 main /learn + `e971dc1e9` main /journey + 10 follow-up)
 - **Axiom match**: **3 闭环反馈 (strongest)** — /learn (描述 → SKILL.md → /journey 可见 → user review/edit) + /journey (memory/skill graph, user 可编辑) 是闭环
-- **Cn state**: ✅ CAND-044 已对齐 /journey (100% source match, 6 commits covered). ⚠️ CAND-080/081/082 concept 70% 对齐 /learn (Datawhale 文章 source vs upstream 源码 source 路径不同, rule 层面 vs skill 层面 粒度不同). ❌ cn 0 /learn 实现 — 真 gap 但不新加候选, 在 CAND-080 实施时参考 upstream 4-surface 集成 + 硬性 skill-authoring standards
+- **Cn state**: ✅ CAND-044 已对齐 /journey (100% source match, 6 commits covered). ⚠️ CAND-080/081/082 concept 70% 对齐 /learn (Datawhale 文章 source vs upstream 源码 source 路径不同, rule 层面 vs skill 层面 粒度不同). 🟡 CAND-080 已 partial done pre-sprint (curator + background_review 2/4 sub-layers, 2026-07-23 audit 确认). ❌ cn 0 /learn 实现 — 真 gap 但不新加候选, 在 CAND-080 剩余 sub-layers (routing rule 自迭代 + 抽象) 实施时参考 upstream 4-surface 集成 + 硬性 skill-authoring standards
 - **Port plan**: 0 implementation — 1-line edit 加 upstream 对齐注释到 CAND-080/082/044 (Phase 4 同 commit 做)
 - **估时**: 0d (verification) + 0.25d (3 个候选补 1 行) | **风险**: 🟢 低
 - **价值**: 🟢 验证 (不加候选, 确认 CAND-080 方向对)
@@ -806,7 +812,7 @@
 - **Axiom 1 强 match = 0** — 5 候选都是"优化现有路径" (axiom 2) 或"补闭环" (axiom 3), 没有任何"enable new design phase". 未来 borrow 窗口关注 axiom 1 类 (e.g. goal spec / plan mode / intent declaration layer)
 - **Borrow = bug 发现机制** — K-2 是借 upstream #35566 fix 发现的 cn 隐藏 P0 bug, 不只是 feature add
 - **附件 1 钱学森 3-layer 双向闭环** 跟 mavis 4 件套 + borrow plan 4 phase 完美同构, 是跨 project design pattern
-- **Section K 不冲掉 CAND-080 实施** — K-5 在 CAND-080 实施时提供 upstream 参考 (4-surface 集成 pattern + 硬性 skill-authoring standards)
+- **Section K 不冲掉 CAND-080 实施** — K-5 在 CAND-080 剩余 sub-layers (routing rule 自迭代 + 抽象) 实施时提供 upstream 参考 (4-surface 集成 pattern + 硬性 skill-authoring standards). CAND-080 已 partial done (curator + background_review 2/4 sub-layers, 2026-07-23 audit)
 
 ---
 
