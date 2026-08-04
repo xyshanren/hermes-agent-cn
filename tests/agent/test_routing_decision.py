@@ -15,7 +15,9 @@ CI tier.
 import math
 
 from agent.routing_decision import (
+    KNOWN_RULES,
     RoutingDecision,
+    RuleSpec,
     init_routing_decision,
     record_fallback,
     resolve_routing,
@@ -377,3 +379,156 @@ class TestMathHelpersAreSound:
         # refactors don't silently break the check.
         assert math.nan != math.nan  # NaN is never equal to itself
         assert math.isnan(math.nan)
+
+
+# ── CAND-080 layer 2: rule registry + structured params ─────────────────
+
+
+class TestRuleRegistry:
+    """Pin the KNOWN_RULES schema so future CAND-080 layer 1 patch
+    consumers can rely on it.
+
+    Each known rule has a stable ``rule_id``, an owner module, and an
+    explicit ``params_schema``. The registry is the layer 2 abstraction:
+    pre-layer-2 callers passed a hard-coded ``"fallback_chain[0](kimi)"``
+    string; layer 2 callers pass ``rule_id="fallback_chain"`` plus
+    ``params={"chain_index": 0, "provider": "kimi"}``.
+    """
+
+    EXPECTED_RULE_IDS = {
+        "fallback_chain",
+        "cost_aware_fallback",
+        "vision_fallback_config",
+        "vision_fallback_chain",
+        "payment_fallback",
+        "main_agent_model_fallback",
+    }
+
+    def test_registry_contains_expected_rule_ids(self):
+        assert set(KNOWN_RULES) == self.EXPECTED_RULE_IDS, (
+            f"registry drifted: {set(KNOWN_RULES) ^ self.EXPECTED_RULE_IDS}"
+        )
+
+    def test_every_entry_is_a_rulespec(self):
+        for rule_id, spec in KNOWN_RULES.items():
+            assert isinstance(spec, RuleSpec), f"{rule_id} is {type(spec).__name__}"
+            assert spec.rule_id == rule_id, (
+                f"{rule_id} spec.rule_id mismatch: {spec.rule_id!r}"
+            )
+
+    def test_fallback_chain_has_chain_index_and_provider_params(self):
+        spec = KNOWN_RULES["fallback_chain"]
+        assert "chain_index" in spec.params_schema
+        assert "provider" in spec.params_schema
+        assert spec.params_schema["chain_index"] == "int"
+        assert spec.params_schema["provider"] == "str"
+
+    def test_cost_aware_fallback_reuses_fallback_chain_params(self):
+        """cost_aware_fallback is the same family shape as fallback_chain
+        (chain_index + provider) — different ``owner`` module only.
+        """
+        spec = KNOWN_RULES["cost_aware_fallback"]
+        assert spec.params_schema == {"chain_index": "int", "provider": "str"}
+        assert spec.owner != KNOWN_RULES["fallback_chain"].owner, (
+            "owner must differ so the registry disambiguates who fired the rule"
+        )
+
+    def test_vision_fallback_config_has_no_params(self):
+        """Single-step fallback — no chain index to record."""
+        spec = KNOWN_RULES["vision_fallback_config"]
+        assert spec.params_schema == {}
+
+
+class TestSetRuleIdParams:
+    """set_rule_id gained an optional ``params`` keyword in CAND-080
+    layer 2. Verify the migration-safety guarantee: pre-layer-2 callers
+    that pass only ``rule_id`` see a byte-identical SSE payload, while
+    layer-2 callers that pass ``params`` get a structured ``rule_params``
+    field the front-end can parse.
+    """
+
+    def test_legacy_string_only_does_not_emit_rule_params(self):
+        """The migration-safety guarantee. ``rule_params`` must NOT appear
+        in the dict when ``params`` is not passed — otherwise pre-layer-2
+        SSE consumers that filter on "unknown keys" would break.
+        """
+        out: dict = {}
+        set_rule_id(out, rule_id="fallback_chain[0](anthropic)")
+        assert out["rule_id"] == "fallback_chain[0](anthropic)"
+        assert "rule_params" not in out, (
+            "legacy call must not write rule_params; SSE compat would break"
+        )
+
+    def test_empty_string_to_none_does_not_emit_rule_params(self):
+        out: dict = {}
+        set_rule_id(out, rule_id="")
+        assert out["rule_id"] is None
+        assert "rule_params" not in out
+
+    def test_params_dict_writes_rule_params(self):
+        out: dict = {}
+        set_rule_id(
+            out,
+            rule_id="fallback_chain",
+            params={"chain_index": 0, "provider": "anthropic"},
+        )
+        assert out["rule_id"] == "fallback_chain"
+        assert out["rule_params"] == {"chain_index": 0, "provider": "anthropic"}
+
+    def test_params_dict_is_copied_not_aliased(self):
+        """Defensive: if a caller mutates the params dict after passing it,
+        the SSE payload must not silently change. ``set_rule_id`` makes
+        an internal copy.
+        """
+        params = {"chain_index": 1, "provider": "kimi"}
+        out: dict = {}
+        set_rule_id(out, rule_id="fallback_chain", params=params)
+        params["chain_index"] = 99
+        assert out["rule_params"] == {"chain_index": 1, "provider": "kimi"}, (
+            "rule_params aliased the caller's dict — SSE payload would "
+            "drift if the caller mutates params later"
+        )
+
+    def test_empty_params_dict_does_not_emit_rule_params(self):
+        """``params={}`` is treated as "no params to record" — don't write
+        an empty dict (would clutter the SSE payload).
+        """
+        out: dict = {}
+        set_rule_id(out, rule_id="vision_fallback_config", params={})
+        assert out["rule_id"] == "vision_fallback_config"
+        assert "rule_params" not in out
+
+    def test_none_params_does_not_emit_rule_params(self):
+        out: dict = {}
+        set_rule_id(out, rule_id="payment_fallback", params=None)
+        assert out["rule_id"] == "payment_fallback"
+        assert "rule_params" not in out
+
+    def test_routing_decision_dataclass_carries_rule_params(self):
+        """Dataclass-level: ``rule_params`` is a real field that round-trips
+        through ``to_dict`` (after the None-strip). Pre-layer-2 callers
+        who never set it get ``None`` and an SSE payload unchanged.
+        """
+        decision = RoutingDecision(
+            mode="text",
+            rule_id="fallback_chain",
+            rule_params={"chain_index": 0, "provider": "anthropic"},
+        )
+        assert decision.rule_params == {"chain_index": 0, "provider": "anthropic"}
+        rendered = decision.to_dict()
+        assert rendered["rule_id"] == "fallback_chain"
+        assert rendered["rule_params"] == {"chain_index": 0, "provider": "anthropic"}
+
+    def test_routing_decision_default_rule_params_is_none(self):
+        """Pre-layer-2 callers that construct ``RoutingDecision`` without
+        passing ``rule_params`` must not see the key in ``to_dict``
+        (None-strip behavior matches the rest of the dataclass).
+        """
+        decision = RoutingDecision(mode="text", rule_id="legacy_label")
+        assert decision.rule_params is None
+        rendered = decision.to_dict()
+        assert rendered["rule_id"] == "legacy_label"
+        assert "rule_params" not in rendered, (
+            "to_dict must None-strip rule_params to keep the pre-layer-2 "
+            "SSE payload byte-identical"
+        )

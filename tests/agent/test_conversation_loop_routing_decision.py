@@ -53,7 +53,11 @@ class TestBuildMainAgentRoutingDecision:
         assert rd["fallback_used"] is True
         assert rd["fallback_reason"] == "fallback_chain"
         assert rd["fallback_provider"] == "kimi-for-coding"
-        assert rd["rule_id"] == "fallback_chain[0](kimi-for-coding)"
+        # CAND-080 layer 2: rule_id is now the family name and the legacy
+        # "[0](provider)" suffix is split into a structured ``rule_params``
+        # payload. The structured payload is what the SSE consumer parses.
+        assert rd["rule_id"] == "fallback_chain"
+        assert rd["rule_params"] == {"chain_index": 0, "provider": "kimi-for-coding"}
         assert rd["retries"] == 2
 
     def test_no_primary_runtime_falls_back_to_current(self):

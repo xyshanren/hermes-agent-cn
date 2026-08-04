@@ -429,7 +429,15 @@ def _build_main_agent_routing_decision(
             fallback_reason="fallback_chain",
         )
         if fb_provider:
-            set_rule_id(out, rule_id=f"fallback_chain[{idx}]({fb_provider})")
+            # CAND-080 layer 2 sample upgrade: emit structured ``rule_params``
+            # alongside the legacy ``rule_id`` label so the SSE consumer can
+            # parse the fire shape without regex. The legacy label is still
+            # emitted (callers that don't read ``rule_params`` keep working).
+            set_rule_id(
+                out,
+                rule_id="fallback_chain",
+                params={"chain_index": idx, "provider": fb_provider},
+            )
 
     if retry_count and retry_count > 0:
         out["retries"] = int(retry_count)
