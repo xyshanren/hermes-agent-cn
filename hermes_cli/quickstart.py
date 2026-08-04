@@ -1034,6 +1034,156 @@ def _build_fallback_chain(
     return chain
 
 
+def _generate_routing_rules(
+    api_providers: list[dict],
+    local_backends: list[dict],
+    primary_provider: str,
+    primary_model: str,
+    ollama_info: Optional[dict] = None,
+    vision_model: Optional[str] = None,
+    vision_provider: Optional[str] = None,
+) -> list[dict]:
+    """CAND-084: smart generation of ``model_routing.rules`` (2026-08-04).
+
+    Replaces the previous inline hardcoded rule appending in
+    ``_write_smart_routing``. The behavior is identical for all
+    configurations that worked before; this refactor is the substrate
+    for future CAND-085-aware variants (AIMC group name as ``model``
+    field) without forcing a per-rule edit in the caller.
+
+    Engine constraints (verified 2026-08-03 against
+    ``docs/PROPOSAL-multi-model-routing.md`` line 48-53 and
+    ``docs/ARCHITECTURE.md`` line 464-465 — see CAND-084 entry):
+
+      * ``model_routing.rules`` is **provider-scoped**. Every rule's
+        ``model`` field inherits the top-level ``model.provider``. We
+        therefore never write a rule whose model lives under a
+        different provider than ``primary_provider`` (cross-provider
+        routing is the fallback chain's job).
+      * The match engine ``_match_rule()`` supports 4 conditions only:
+        ``has_image: bool``, ``keywords: list + threshold``,
+        ``max_length: int`` (≤ char count), ``exclude_keywords: list``.
+        There is no ``min_length``, no ``min_tokens``, no dynamic
+        ``min_tool_calls``, no ``any:`` combinator. Generating a rule
+        with any of those would be silently invalid.
+
+    4 scenes covered (mirrors CAND-084 entry "修复方向"):
+
+      Scene 1 (1 local + 1 cloud) — most common user case. Cloud primary
+        carries a short_keywords ``reasoning`` rule; local backends with
+        a small (≤ 8B) model also generate a ``short_chat`` rule
+        (max_length 80 + exclude_keywords) so trivial prompts don't
+        hit the cloud round trip.
+      Scene 2 (multi-local, N local) — same as Scene 1 with more
+        tiers; the existing ``_write_smart_routing`` already detects
+        "coder" / "code-" substrings and emits a ``coding`` rule.
+      Scene 3 (cloud-only, 0 local) — only the ``default`` rule plus
+        the cloud ``vision`` rule if a vision model is in scope.
+      Scene 4 (1 local + AIMC) — handled by CAND-085 integration. The
+        helper doesn't branch on ``is_aimc`` explicitly; the primary
+        ``model`` field is whatever the caller passes (e.g. ``"tier:balanced"``)
+        and we just write it into the ``reasoning`` / ``coding`` /
+        ``default`` rules verbatim. The fact that the engine treats
+        this as a single "provider" entry (AIMC) is what makes the
+        cross-model routing work transparently.
+
+    Returns: a list of rule dicts ready to drop into
+    ``cfg["model_routing"]["rules"]``. Always ends with a
+    ``"name": "default"`` rule (callers depend on this for the
+    old-format keys ``model_routing.{default,vision,reasoning}``).
+    """
+    is_cloud_primary = primary_provider not in ("ollama", "custom", "embedded", "")
+    rules: list[dict] = []
+
+    # --- vision ----------------------------------------------------------
+    # Prefer an Ollama vision model (sits on the local server, can
+    # answer "has_image" prompts without going to the cloud). Fall
+    # back to the cloud provider's vision model if cloud-primary.
+    if ollama_info and ollama_info.get("vision_model"):
+        rules.append({
+            "name": "vision",
+            "match": {"has_image": True},
+            "model": ollama_info["vision_model"],
+        })
+    elif is_cloud_primary and vision_provider and vision_model:
+        rules.append({
+            "name": "vision",
+            "match": {"has_image": True},
+            "model": vision_model,
+        })
+
+    # --- reasoning -------------------------------------------------------
+    # Keywords-only — supported by the match engine; the rule fires on
+    # Chinese / English reasoning prompts (mixed list). Model inherits
+    # the primary; if primary is an AIMC group, AIMC resolves the
+    # actual model at request time.
+    rules.append({
+        "name": "reasoning",
+        "match": {"keywords": ["分析", "推理", "思考", "证明"]},
+        "model": primary_model,
+    })
+
+    # --- coding ----------------------------------------------------------
+    # Only emit when the local backend has a coding-named model AND
+    # the primary is local. Sending a bare local model name to a
+    # cloud provider would 404; the existing is_cloud_primary guard
+    # protects against that.
+    classified = (
+        ollama_info.get("classified_models", []) if ollama_info else []
+    )
+    coding_models = [
+        m for m in classified
+        if any(
+            kw in m.get("name", "").lower()
+            for kw in ("coder", "code-")
+        )
+    ]
+    if coding_models and not is_cloud_primary:
+        rules.append({
+            "name": "coding",
+            "match": {
+                "keywords": [
+                    "写代码", "函数", "class", "debug",
+                    "实现一个", "编程", "refactor", "coding",
+                ],
+                "threshold": 1,
+            },
+            "model": coding_models[0]["name"],
+        })
+
+    # --- short_chat ------------------------------------------------------
+    # Local-only: route short prompts to a small (≤ 8B) local model.
+    # Cloud-primary skips this so the cloud isn't accidentally hit with
+    # a bare local model name (which the engine would fail to resolve).
+    if not is_cloud_primary and ollama_info:
+        text_models = [
+            m for m in classified if m.get("type") != "vision"
+        ]
+        small_models = [
+            m for m in text_models
+            if _get_local_model_param_size(m["name"]) <= 8.0
+            and m["name"] != primary_model
+        ]
+        if small_models:
+            rules.append({
+                "name": "short_chat",
+                "match": {
+                    "max_length": 80,
+                    "exclude_keywords": [
+                        "bug", "报错", "crash", "fix", "error", "分析",
+                    ],
+                },
+                "model": small_models[0]["name"],
+            })
+
+    # --- default (always last) -----------------------------------------
+    rules.append({
+        "name": "default",
+        "model": primary_model,
+    })
+    return rules
+
+
 def _write_smart_routing(
     primary_provider_id: str,
     primary_model: str,
@@ -1171,65 +1321,15 @@ def _write_smart_routing(
                     and m["name"] != primary_model
                 ]
 
-        rules = []
-
-        # 每个规则中的 model 名会由 SmartRouter 按当前 provider 解析。
-        # 云端主力时只用 primary_model，避免路由到本地模型名后错发到云端 API。
-
-        # vision 规则
-        if vision_models:
-            rules.append({
-                "name": "vision",
-                "match": {"has_image": True},
-                "model": vision_models[0]["name"],
-            })
-        elif is_cloud_primary and vision_provider and vision_model:
-            # 云端主力 + 云端视觉模型 → 用 auxiliary.vision 的模型名
-            rules.append({
-                "name": "vision",
-                "match": {"has_image": True},
-                "model": vision_model,
-            })
-
-        # reasoning 规则
-        rules.append({
-            "name": "reasoning",
-            "match": {
-                "keywords": ["分析", "推理", "思考", "证明"],
-            },
-            "model": primary_model,
-        })
-
-        # coding 规则（有编码专用模型时）
-        if coding_models:
-            rules.append({
-                "name": "coding",
-                "match": {
-                    "keywords": [
-                        "写代码", "函数", "class", "debug",
-                        "实现一个", "编程", "refactor", "coding",
-                    ],
-                    "threshold": 1,
-                },
-                "model": coding_models[0]["name"] if not is_cloud_primary else primary_model,
-            })
-
-        # short_chat 规则（仅本地主力时生成，避免短消息路由到本地模型名后错发到云端）
-        if not is_cloud_primary and small_models:
-            rules.append({
-                "name": "short_chat",
-                "match": {
-                    "max_length": 80,
-                    "exclude_keywords": ["bug", "报错", "crash", "fix", "error", "分析"],
-                },
-                "model": small_models[0]["name"],
-            })
-
-        # default 规则（始终在最后）
-        rules.append({
-            "name": "default",
-            "model": primary_model,
-        })
+        rules = _generate_routing_rules(
+            api_providers=api_providers,
+            local_backends=local_server_infos,
+            primary_provider=primary_provider_id,
+            primary_model=primary_model,
+            ollama_info=ollama_info,
+            vision_model=vision_model,
+            vision_provider=vision_provider,
+        )
 
         routing["rules"] = rules
         # 同步旧格式键（doctor / run_agent 仍检查 model_routing.default/vision/reasoning）
