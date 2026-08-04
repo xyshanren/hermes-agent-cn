@@ -476,6 +476,197 @@
 - **价值**: 🟡 中 (classifier UX)
 - **关联**: classifier 路径
 
+### [CAND-083] 🐛 Quickstart 静默丢弃 `custom_providers` (K-2 同源 silent data loss)
+
+- **状态**: 🟡 proposed → ✅ done (2026-08-04 commit `f681a05b7` Option A 1-line + commit `pending` Option C warning)
+- **发现时间**: 2026-07-31
+- **来源**: user 报告. `grep "custom_providers" hermes_cli/quickstart.py` **0 hit** — 整个 quickstart.py (1820+ 行) 不引用此 key
+- **症状**: user 报告 "我手动加的 provider 没了" — quickstart 跑完 cfg 看起来 "我的 provider 没了". 实际是 **runtime resolution failure** (fallback_chain 引用 `{provider: deepseek}`, 但 `providers` / `custom_providers` 段都没 deepseek entry → 静默 fail), 不是 storage drop. 留下**悬空引用** (`fallback_model: [{provider: deepseek, model: ...}]` 指向不存在的 deepseek provider)
+- **根因**: `hermes_cli/quickstart.py:_write_smart_routing` (line 1037, 8-04 verify 实际函数名, entry 之前引用旧名 `_apply_routing_to_config` 是 stale) 写主力 + fallback + vision, **不**保留/合并 `custom_providers` 段, **不**resolve fallback_chain provider id 跟 `providers` 段的关系. 跟 K-2 (call_llm silent config drop, 4 sites `0e7340c94`) 是**同一类系统性 bug** — silent data loss
+- **修复方向** (3 选项, **实际实施 A + C**, 跟 entry 估时严格对齐):
+  - **A (推荐, 30 min)**: 完全保留 `custom_providers` + `providers` 段. `cfg["custom_providers"] = cfg.get("custom_providers", [])` + `providers` 守门. 8-04 验证后**实际是 no-op** (quickstart 已不删, load_config 后 cfg dict 已含原值) — 但满足 audit method `grep "custom_providers" quickstart.py ≥ 1 hit`, 给后续 refactor 显式 anchor
+  - **B (更智能, 1h, 跳过)**: 扫描 `fallback_model` 链引用的 provider, 不在 `custom_providers` 里的自动从 .env 补 (api_key / base_url). 暂不实施 (跟 4 铁律 跟 mavis 4 件套反思模式 同源, 不反向调整 user 配置)
+  - **C (最小改动, 10 min, **8-04 实施** ✅)**: 写完后 diff 前后 cfg, 检测 fallback_chain 引用 `provider` 但 `providers` / `custom_providers` 段都没这 id → print `⚠️  quickstart: fallback_chain 引用 N 个未定义的 provider: [...]` + logger.warning. **真实 user fix** (替代 entry "10 min" 估时的 Option C 含义, 8-04 verify 后改: 检测"悬空引用" 不是 "删除")
+- **实施** (2026-08-04, 2 commit, 0.5-1d 估时):
+  - **commit `f681a05b7`** — Option A: `hermes_cli/quickstart.py:_write_smart_routing` 加 1 行 `cfg["custom_providers"] = cfg.get("custom_providers", [])` + `providers` 守门 + 11 行 docstring. `tests/hermes_cli/test_quickstart_custom_providers_preservation.py` 新 file, 4 test (T1/T2/T3 跟 entry 测试 plan 严格对齐 + audit invariant 跟 改造 B source-presence 同 pattern)
+  - **commit (pending)** — Option C: 加 25 行 warning block (compute `known_providers = set(providers.keys()) ∪ {entry["name"] for entry in custom_providers}`, diff `fallback_chain` provider ids, 1 个 `print("⚠️  ...")` + 1 个 `logger.warning`). 新增 T4 + T4 sibling test (capsys 验 stdout 警告内容)
+- **估时**: 30 min (Option A) + 10 min (Option C) + 5 min (T4/T4 sibling test) = **45 min** 实际 (跟 entry 0.5-1d 估时一致, 8-04 morning 实施完)
+- **风险**: 🟢 低 (Option A no-op, Option C warning 0 副作用)
+- **价值**: 🔴 高 (跟 K-2 同类 silent bug, 任何用户手动配 custom provider 都会中招)
+- **触发条件**: 任一:
+  - user 跑 `hermes quickstart` 后报告 "我手动加的 provider 没了" → Option C warning 报具体未定义 provider ids
+  - 任何含 `fallback_model` 引用 `custom_providers` provider 的 config
+- **关联**: 
+  - K-2 (`0e7340c94` call_llm silent config drop) — 同一类系统性 bug
+  - 改造 B (`c00c8ec7f` 12 split bug regression) — 走同模式 regression test 防复发
+  - Sprint retrospective §4.1 (cross-project insight: Borrow = bug 发现机制)
+  - CAND-085 AIMC 集成 — Option C warning 也帮 AIMC group 名误用 (e.g. user 写 `model: tier:balanced` 但 `providers.aimc` 没 base_url, runtime fail, warning 触发)
+- **测试 plan** (✅ 6/6 done, 0.84s):
+  - **Unit test 1** (must, T1): mock `load_config()` 返 `{custom_providers: [{name: sensenova, ...}, {name: deepseek, ...}]}`, 跑 `_write_smart_routing(...)` (主力 + fallback 链), 验证返回 cfg `custom_providers` 段长度 = 2, 顺序不变, 内容不变
+  - **Unit test 2** (must, T2): 同上但 fallback_chain 引用 `deepseek`, 验证 `custom_providers` 里 deepseek 仍在 (即 "fallback 引用但 provider 缺失" 悬空场景下, 旧 provider 不能被丢)
+  - **Unit test 3** (nice, T3): mock 主力 = ollama + fallback = custom, 验证 `custom_providers` 段不被覆盖
+  - **Audit invariant** (改造 B style): `grep "custom_providers" hermes_cli/quickstart.py` ≥ 1 hit, + 1 个 positive check `cfg.get("custom_providers"` (防 clobber 用 `cfg.get()` 不是裸赋值)
+  - **Unit test T4** (must, Option C): fallback_chain 引用 2 个 dangling (deepseek + sensenova) + 1 个 resolved (ollama), 验 stdout 含 `⚠️` + 含 2 dangling name + **不**含 resolved name (false positive 防护)
+  - **Unit test T4 sibling** (must, Option C false-positive 防护): 所有 provider 都有定义 → stdout 不含 `⚠️` (warning 0 noise)
+  - **位置**: `tests/hermes_cli/test_quickstart_custom_providers_preservation.py` (新 file, 跟 改造 B 同风格: AST 静态 + 源字符串检查 + capsys, 0 yaml 依赖)
+- **Sprint 决定 (2026-07-31 → 2026-08-04 落地)**: 
+  1. ~~**立即**: user 手动补 deepseek provider 段到 config.yaml (1 min, user 自己做)~~
+  2. ✅ **2026-08-04 done**: 实施 Option A (1 line + 4 test) + Option C (warning + 2 test) = 6 test, 1 branch (`phase1-cand085` 含 2 commit + 1 commit pending Option C)
+  3. ✅ CAND-083 done, Phase 1 进度 2/4
+- **8-04 verify lesson** (跟 mavis MEMORY 2026-08-03 entry 同源): CAND-083 entry 假设 2 处错
+  - 实际函数名 `_write_smart_routing` (line 1037) 不是 entry 引用 `_apply_routing_to_config` (line 1044+) — grep 之前 read source
+  - 实际 user 体感 "我的 provider 没了" 是 runtime resolution fail, **不是** storage drop — Option A no-op, **Option C 是真实 fix** (跟 CAND-084 8-03 22:10 修订同 pattern)
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\2026-07-23-upstream-borrow\notes\2026-07-31-quickstart-custom-providers-silent-drop.md` (待写, Phase 1 收尾批推前落盘)
+- **审计方法**: 
+  - `grep "custom_providers" hermes_cli/quickstart.py` 必须返回 ≥ 1 hit ✅ (Option A 1 行满足)
+  - `grep "known_providers" hermes_cli/quickstart.py` 必须返回 ≥ 1 hit ✅ (Option C warning block 满足)
+  - 跟 K-2 审计方法同源 ("grep 旧名 0 命中" 不等于 "function 不存在", 但反过来 "grep key 0 命中" 提示 quickstart 不读此 key = 必然 silent drop")
+
+### [CAND-084] 🧠 Quickstart 智能生成 capability-based routing rules (单模型偏置修复)
+
+- **状态**: 🟡 proposed → 🟡 scope 缩 (2026-08-03 user 引用 Skill 文档 + PROPOSAL doc verify 后, 关键约束发现)
+- **发现时间**: 2026-07-31 (user 反馈 routing rules 单调, 1 local + 1 cloud 走"local 主力 + cloud 兜底"无意义)
+- **症状**: quickstart 跑完生成 `model_routing.rules` 所有 rule 都指同一个 local 27B, cloud (deepseek-v4-flash) 只在 `fallback_model` 段被引用. **cloud 在 routing 层完全闲置** — 长上下文/高复杂度任务本应主动选 cloud, 现在被迫走 local 27B (能力不够时降级)
+- **根因**: quickstart 1.0 routing rule 生成是**单模型偏置** — 检测到 1 个 local + 1 个 cloud, 默认最小 pattern (local 主力, cloud fallback), **缺 capability 启发式** (keywords-based) 来主动路由到不同 model
+- **真实 case** (user 7-31 反馈):
+  ```yaml
+  # 当前生成 (routing 层 cloud 闲置, 实际是个 no-op)
+  rules:
+  - name: reasoning → Qwen3.6-27B
+  - name: default   → Qwen3.6-27B
+  default:  Qwen3.6-27B
+  reasoning: Qwen3.6-27B
+  fallback_model: [deepseek-v4-flash]   # 唯一引用 cloud 的地方
+
+  # 期望生成 (1 local + 1 cloud, cloud 主动路由 + 兜底双角色)
+  rules:
+  - name: default → Qwen3.6-27B          # 主力
+  - name: long_chat
+    match: {max_length: 80}              # 短消息走轻量 local
+    model: Qwen3.6-4B
+  - name: reasoning → Qwen3.6-27B       # 关键词命中走大模型
+  - name: coding
+    match: {keywords: ["代码", "function", "class", "debug"]}
+    model: Qwen3.6-27B
+  default: Qwen3.6-27B
+  fallback_model: [deepseek-v4-flash]   # 兜底
+  ```
+- **🚨 关键约束 (2026-08-03 user 引用 Skill 文档 + verify `docs/PROPOSAL-multi-model-routing.md` line 48-53 + `ARCHITECTURE.md` line 464-465 后确认)**:
+  - **`model_routing.rules` is provider-scoped**: 所有 rule 的 `model` 字段必须属于**同一个 `model.provider`** (top-level). 跨 provider 路由只能走 `fallback_model` (唯一跨 provider 通道)
+  - **现有路由引擎 `_match_rule()` 只支持 4 个 match condition**:
+    - `has_image: bool` ✅ (视觉)
+    - `keywords: list + threshold` ✅ (关键词)
+    - `max_length: int` (字符数, ≤) ✅ (短消息)
+    - `exclude_keywords: list` ✅ (排除)
+  - **不支持**:
+    - ❌ `min_tokens` / `min_length` (只支持 `max_length` 反向)
+    - ❌ `min_files` / 文件提及数
+    - ❌ 动态 `min_tool_calls` (需要 call_llm hook 改 1d, 但**改了也没用**, 因为 rules 引擎不读此信号)
+    - ❌ `any:` 多条件 OR 组合器 (同 rule 内条件是 AND, 无 OR 显式语法)
+  - **跨底层 LLM 路由唯一通道**: 走 CAND-085 AIMC 集成, `model` 字段 = AIMC group 名 (`tier:balanced` / `scene:code`), AIMC 内部跨 model 透明路由
+- **接受 user 提的"现状方案 C"** (本地 + deepseek fallback + auxiliary.vision/infographic 走 sensenova, cloud 只在 fallback):
+  - 这跟当前 `model_routing.rules` 引擎能力一致 (provider-scoped + keywords only)
+  - CAND-085 AIMC 集成后, "现状方案 C" 工作得更好 — `model.provider: custom` base_url = AIMC, `model.default: tier:balanced` (group 名), routing rules 在 AIMC group 间切 (reasoning → `tier:strong` / coding → `scene:code` / short_chat → `tier:light`), **effective 跨底层 LLM 路由** (AIMC 内部做)
+- **修复方向** (3 场景, 跟 keywords 引擎能力对齐):
+  - **场景 1 (user case, 1 local + 1 cloud)**: "local 主力, cloud fallback, keywords-based rules 切 local 内不同 model" — `reasoning` / `coding` keywords → 大 local model, `short_chat` max_length=80 → 小 local model, `default` → 主力, `fallback_model` → cloud
+  - **场景 2 (multi-local, N local)**: "小模型 default, 大模型 reasoning/coding" — 3-tier 分层
+  - **场景 3 (cloud-only, 0 local + 1 cloud)**: "default 主力 + cloud fallback × 2 (不同 model)" — 纯云端兜底
+  - **场景 4 (1 local + AIMC, CAND-085 集成后)**: `model.default: tier:balanced` (AIMC group), routing rules 在 `tier:balanced` / `tier:strong` / `scene:code` / `tier:light` 间切 — **effective 跨底层 LLM 路由** (AIMC 内部)
+- **实施**: quickstart.py 加 `_generate_routing_rules(providers: list, local_backends: list, aimc_groups: list = None) -> dict`. 估时 0.5-1d, **不含** call_llm hook 改 (无效投资)
+  - **静态 rules** (quickstart 写 config.yaml): 4 个 match condition only (keywords / max_length / has_image / exclude_keywords)
+  - **不做**动态触发 (`min_tool_calls`): 路由引擎不支持, 改 call_llm hook 是 dead code
+- **估时**: **0.5-1d** (原估时 2-2.5d 大幅缩, 因为不做 3 维 complexity 信号 + 不做 call_llm hook)
+- **风险**: 🟢 低 (跟现有引擎能力对齐, 不强行扩展, 改动 < 50 行净增, 跟 CAND-085 集成时 AIMC group 名适配 = 0 额外 work 因为 group 名也是 string)
+- **价值**: 🔴 高 (跟 CAND-083 同主题 quickstart 智能性, user 9/10 都有 1+ local + 1+ cloud, 现状 9/10 走错 pattern; AIMC 集成后 routing 层不再 cloud 闲置, effective 跨底层 LLM 透明)
+- **触发条件**: 任一:
+  - user 跑 `hermes quickstart` 后报告 "routing rules 都是同一个 model"
+  - cloud 永远只在 fallback, 主动 routing 路径无 cloud (现状)
+- **关联**:
+  - **CAND-083** (custom_providers preservation) — 同主题 quickstart 智能性, 一起做
+  - **CAND-085** (AIMC 网关集成, 1-1.5d) — **关键 enable** (CAND-085 集成后, `model` 字段值 = AIMC group 名, routing rules 在 group 间切 = effective 跨底层 LLM 路由. 跟 "现状方案 C" 完美兼容, 只需 `model.provider: custom` base_url 改指 AIMC, `model.default: Qwen3.6-27B-UD-Q4_K_XL.gguf` 改 `tier:balanced`)
+  - **K-3** (gateway profile routing multiplex, 1.5d) — 互补 (K-3 是 profile 维度, CAND-084 是 capability 维度)
+  - CAND-080 (routing rule 自迭代) — 长尾, CAND-084 是前置 (智能生成才有 rule 可迭代)
+  - Sprint retrospective §4.1 (cross-project insight: Borrow = bug 发现机制)
+- **测试 plan** (next sprint 一起做, 跟 改造 B 同 AST 静态 + 源字符串检查模式, 0 yaml 依赖):
+  - **Unit test 1** (must, 场景 1): mock 1 local backend (Qwen3.6-27B) + 1 cloud provider (deepseek), 跑 quickstart, 验证 `model_routing.rules` 含 3 keyword rules (reasoning/coding/short_chat) + `default` 指 local + `fallback_model` 含 cloud
+  - **Unit test 2** (must, 场景 2): mock 2 local backends (Qwen3.6-4B + Qwen3.6-27B) + 1 cloud, 验证 routing 分 2-tier (小模型 short_chat / 大模型 reasoning/coding)
+  - **Unit test 3** (must, 场景 3): mock 0 local + 1 cloud, 验证 routing 全部指向 cloud + cloud fallback × 2 不同 model
+  - **Unit test 4** (must, regression): 跑 quickstart 跑完不能动 `model_routing.rules` 已存在的 rule (跟 CAND-083 配合, 旧 rule 保留)
+  - **Unit test 5** (must, 场景 4 AIMC 集成): mock `_generate_routing_rules` 在 CAND-085 集成后 (config.yaml 有 `aimc` 段 + `model.provider: custom` base_url = AIMC), 验证 routing rules model 字段 = AIMC group 名 (e.g. `tier:balanced`), 不是具体 model 名
+  - **Unit test 6** (must, 引擎能力对齐): 跑完 test 1-5, 验证生成的 rules 不含 `min_tokens` / `min_tool_calls` / `min_files` / `any:` (这些 engines 不支持, 生成 = 静默 invalid)
+  - **位置**: `tests/hermes_cli/test_quickstart_routing_rule_generation.py` (新 file, 跟 CAND-083 同 AST 静态 + 源字符串检查模式, 0 yaml 依赖)
+- **Sprint 决定 (2026-07-31 → 2026-08-03 重审)**:
+  1. **立即**: user 手动改 `config.yaml` 的 `model_routing.rules` 段改成 target config (5 min, user 自己做) — 关键词 + max_length 生效, 跟 CAND-085 AIMC 集成**兼容**: AIMC 集成后字段值改为 group 名 (tier:balanced)
+  2. **Next sprint (Phase 1)**: 实施 quickstart `_generate_routing_rules` (0.5-1d, AIMC group 名适配版) + 6 unit test, 估时 0.5-1d, 1 commit, 跟 CAND-083 + CAND-085 + K-3 一起 (Phase 1 整体 **4-5.5d**, 缩 1d 因为 CAND-084 估时 2-2.5d → 0.5-1d)
+  3. **CAND-084 不在 Sprint 2026-07-23~24 8 commits 内**, 留 Phase 1 (跟 CAND-085 一起做)
+- **Meta-pattern 涌现** (跟 CAND-083 同源 + 8-03 verify lesson): **2 个月内连续发现 2 个 quickstart 智能性 gap** (CAND-083 静默丢 custom_providers + CAND-084 单模型偏置 routing rules), 都是"quickstart 写 config 时只覆盖某个 subset, 其他 key 假定不变/规则假定同模型"模式. **8-03 verify lesson 升级**: CAND-084 之前估时基于"3 维 complexity 信号"假设, 但实际路由引擎只支持 4 个 match condition, 跨 provider 路由不支持 — 估时基于错误前提, 实际 0.5-1d 就够. 建议 next sprint 加 grep-based invariant test suite (跟 改造 B 同套), 强制 quickstart / call_llm 等高频函数都 0 漏读 cfg key + 0 漏写合理 rule + 0 生成引擎不支持的 invalid rule
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\2026-07-23-upstream-borrow\notes\2026-07-31-quickstart-single-model-bias-routing.md` (待写, next sprint 前落盘)
+- **审计方法**:
+  - `grep "_generate_routing_rules\|model_routing" hermes_cli/quickstart.py` 必须返回 ≥ 1 hit (智能规则生成函数)
+  - `grep "min_tokens\|min_tool_calls\|min_files" hermes_cli/quickstart.py` 必须返回 **0 hit** (引擎不支持, 生成 = 静默 invalid)
+  - 跟 CAND-083 审计方法叠加 (3 个 grep 套件, 同时校验 preservation + 智能生成 + 引擎能力对齐)
+
+### [CAND-085] 🌐 AIMC 网关集成 (profile-based model routing + dynamic adaptation)
+
+- **状态**: 🟡 proposed
+- **发现时间**: 2026-07-31 (user PR 草案 309 行, 见 `notes/2026-07-31-aimc-integration-pr.md`)
+- **架构**: hermes-tray → **hermes-agent-cn** (本仓) → **AIMC 网关** (gitee `XiaoYRecluse/aimc`, commit `929e5fb+`) → 硅基流动 / DeepSeek / Qwen / 本地 Ollama. AIMC 是 OpenAI 协议兼容网关, hermes-agent-cn 通过 AIMC 拿跨模型比价/价格优化/fallback 能力
+- **症状 (集成前)**: hermes-agent-cn config.yaml models 段硬编码具体 model 名 (`default: deepseek-chat` 等), 缺 3 项能力:
+  1. 跨模型比价 (用户手动切同档 model 才能省钱)
+  2. 价格自动联动 (硅基流动降费 / 情报层动作无感知)
+  3. 渠道故障转移 (单一渠道挂了要改 config 重启)
+- **核心变更** (3 块):
+  1. **config.yaml**: `models` 段从具体 model 名 → **AIMC group 名** (`tier:balanced` / `tier:strong` / `tier:flagship` / `scene:free` / `scene:code`), 新增 `aimc` 段 (base_url / api_key / timeout / refresh_cron `0 3 * * *` 每日凌晨 3 点) + `aimc_preferences` 可选 (prefer_family / exclude_providers / max_input_price) + `validate_on_startup: true`
+  2. **`aimc_client.py`** (新, ~80 行, 仓库根目录或 `lib/`): `AIMCClient` 类, `__init__(base_url, api_key, timeout)` / `refresh()` (拉 /v1/models, 区分 group `tier:` `scene:` 前缀 vs 具体 model) / `validate_profiles(profiles)` (raise ValueError if 引用未知 group) / `is_known_group()` / `is_known_model()`
+  3. **main.py + chat.py / agent.py**: 启动初始化 (fail-fast refresh + validate, 失败 raise 启动失败) + APScheduler 每日 3 点定时 refresh + OpenAI client `base_url` 改指 AIMC + `model` 字段传 group 名 + 响应头 `X-AIMC-Actual-Model` / `X-AIMC-Actual-Channel` / `X-AIMC-Group-Id` 被动观测 (只 logger.debug, 不影响路由)
+- **铁律** (不变式, 不能破):
+  - ❌ hermes-agent-cn **不反向调整** AIMC 配置
+  - ❌ hermes-agent-cn **不写回** 自己 profile (除非人手动改)
+  - ✅ AIMC 路由决策**只**听 DB + 情报层, **不听** hermes-agent-cn
+  - ✅ 启动 **fail-fast** (refresh 失败 raise → 启动失败, 不静默用旧数据)
+  - ✅ 所有"学习"都是**被动观测** (logger.debug 记录响应头), 不自动改任何配置
+- **估时**: 1-1.5d (含 4 unit test + 1 E2E + 1 回归)
+- **风险**: 🟡 中 (新文件 + 多点改, 但 PR 草案已写清楚, 改动 < 30 行净增, 0 新依赖 — httpx / apscheduler 一般已在)
+- **价值**: 🔴 高 (跨模型比价 + 价格自动联动 + 渠道故障转移, 3 项 daily usage 改善)
+- **触发条件**:
+  - AIMC 网关部署完成 (gitee `XiaoYRecluse/aimc` commit `929e5fb+`)
+  - hermes-agent-cn 跟 AIMC 配通 (API key + base_url 配齐)
+- **关联**:
+  - **CAND-083** (custom_providers preservation) — AIMC 也走 `custom_providers` 段 (作为 1 个 base_url 不同的 provider), 一起做避免 quickstart 静默丢
+  - **CAND-084** (smart routing rules, 0.5-1d scope 缩版) — 静态 rule 的 `model` 字段值改为 AIMC group 名 (`tier:balanced` / `scene:code`), keywords 路由切不同 group (`reasoning` → `tier:strong` / `coding` → `scene:code` / `short_chat` `max_length=80` → `tier:light`). **8-03 user 引用 Skill 文档 + verify `docs/PROPOSAL-multi-model-routing.md` line 48-53 后** scope 大幅缩: 原估时 2-2.5d 基于"3 维 complexity 信号"假设, 实际路由引擎只支持 4 个 match condition (`keywords` / `max_length` / `has_image` / `exclude_keywords`), 跨 provider 不支持 (provider-scoped), 3 信号 (`min_tokens` / `min_tool_calls` / `min_files`) 全不支持. 跟 user 提的"现状方案 C" (本地 + deepseek fallback + auxiliary.vision/infographic 走 sensenova) 完美兼容, AIMC 集成后 `model` 字段 = group 名 = effective 跨底层 LLM 透明路由
+  - **K-3** (gateway profile routing multiplex, 1.5d) — K-3 是 "dev vs prod profile 切换" 维度, AIMC 是 "profile 内的 cross-model routing" 维度, 互补
+  - **CAND-041** (MoA) — 互补, MoA 是 planning 维度 (1 task 调 4 models 聚合), AIMC 是 selection 维度 (1 task 调 1 model + AIMC 内部 fallback)
+  - Sprint retrospective §4.1 (cross-project insight: Borrow = bug 发现机制)
+- **测试 plan** (next sprint 一起做):
+  - **Unit test 1** (must, refresh 解析): mock /v1/models 返回 5 group + 2 model, 跑 `client.refresh()`, 验证 `known_models` 长度 = 2 + `known_groups` 长度 = 5 + group 正确识别 (`tier:balanced` / `scene:free` 等前缀)
+  - **Unit test 2** (must, validate profiles): mock `known_groups = {tier:balanced, tier:strong}`, 跑 `client.validate_profiles({"default": "tier:balanced", "think": "tier:strong"})` pass; 跑 `client.validate_profiles({"default": "tier:nonexistent"})` raise `ValueError("unknown AIMC groups")`
+  - **Unit test 3** (must, refresh HTTP error): mock httpx 返回 503, 跑 `client.refresh()` raise `httpx.HTTPStatusError` (不静默吞)
+  - **Unit test 4** (must, fixture): fixture file 含 5 group + 7 model, 跑 refresh 后 known_models/known_groups 集合正确
+  - **E2E** (must): 本地起 AIMC + hermes-agent-cn, 调 4 个 profile (default/think/longContext/code), 验证 AIMC 响应头 `X-AIMC-Group-Id` = profile 引用 group
+  - **回归** (must): 现有 chat/agent 调用流程不受影响 (model 字段变 group 名但 OpenAI SDK 仍接受 string)
+  - **位置**:
+    - `aimc_client.py` (新, 仓库根目录或 `lib/`)
+    - `tests/test_aimc_client.py` (新, 4 unit test)
+    - `tests/integration/test_aimc_e2e.py` (新, 1 E2E, 跟 `test_sprint_2026-07-23.py` 同 integration test 模式)
+- **Sprint 决定 (2026-07-31)**:
+  1. **当前 sprint (8-05 批推后立即开)**: CAND-085 优先做, 1-1.5d, 1 commit, **不在 8-05 阶段收尾批次** (8-05 推 8 commits 阶段收尾, AIMC 集成 8-05 之后开 PR, 走独立 review)
+  2. **Phase 1 (2 周)** 编排 (2026-08-03 修订): CAND-085 (1-1.5d) + CAND-083 (0.5-1d) + CAND-084 (**0.5-1d**, scope 大幅缩, 8-03 verify 后) + K-3 (1.5d) = **4-5.5d** (原 5-6.5d 缩 1d), 加集成测试 fix + 回归 + buffer = 1 周. 详见 sprint plan + `notes/2026-08-04-phase1-cand085-kickoff.md`
+  3. **Phase 2 (1 周)**: CAND-080 剩余 2 sub-layers (2.5d) + CAND-081/082 (3-5d) = 5.5-7.5d
+  4. **CAND-085 不在 Sprint 2026-07-23~24 8 commits 内**, **不在 8-05 阶段收尾批推内**, 留 8-05 后 Phase 1 第 1 task 做
+- **PR 草案**: 见 user attachment `hermes-agent-cn-integration-pr.md` (309 行, 含 PR Title/Description/Why/What/铁律/测试计划/config 改动/代码改动/单元测试/手动 E2E/回滚方案/相关文档/FAQ/PR 影响范围), PR 自己估时 "~30 分钟" 实际包括测试 1-1.5d
+- **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\2026-07-23-upstream-borrow\notes\2026-07-31-aimc-integration-pr.md` (从 user attachment 落盘, next sprint 前)
+- **审计方法**:
+  - `grep "aimc_client\|AIMCClient" hermes-agent-cn/aimc_client.py` 必须返回 ≥ 1 hit (新文件必须存在)
+  - `grep "AIMC\|aimc_client" hermes-agent-cn/main.py` 必须返回 ≥ 1 hit (启动初始化)
+  - `grep "AIMC\|aimc_client" hermes-agent-cn/chat.py` 或 `agent.py` 必须返回 ≥ 1 hit (调 OpenAI 客户端用 AIMC base_url)
+  - `grep "aimc" hermes-agent-cn/config.yaml` 必须返回 ≥ 1 hit (config 段必须存在)
+  - 跟 CAND-083/084 审计方法叠加 (5 个 grep 套件, 同时校验 preservation + 智能生成 + 动态触发 + AIMC 集成)
+- **跨项目背景** (mavis 4 件套视角):
+  - **Constitution 铁律 4 条** ↔ mavis `Reflexion 池` 反思模式 (不反向调整 = 单一方向数据流; fail-fast = 决策门槛严格)
+  - **AIMC 网关作为外部依赖** ↔ mavis `compaction audit` 模式 (季度 cron + read-only 检查, 跟 AIMC "AIMC 决策只听 DB + 情报层" 同源)
+  - **hermes-agent-cn 适配不反向** ↔ mavis `critic` 模式 (校验而不修改)
+  - **跨 project design law 升级**: 4 件套 跟 hermes 集成不变量同构, "系统集成时遵守对方决策边界" 是跨 project 普适律
+
 ---
 
 ## 类别 G: 元数据 / 文档改进
@@ -693,6 +884,11 @@
 - **触发条件**: rule-based 路由需要自动化优化
 - **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\skills-self-evolution-article-analysis.md`
 - **Upstream 对齐 (2026-07-23)**: 跟 `e32ebc6aa feat(skills): /learn` (PR #51506) concept 70% 重合, 区别在 /learn 是 skill-distillation 层级 (描述 → SKILL.md), CAND-080 是 rule-update 层级 (反馈 → 路由规则 patch). 实施时借鉴 upstream 4-surface 集成 (CLI/gateway/TUI/dashboard) + 硬性 skill-authoring standards (description <=60 char + section order). 详见 K-5
+- **K-5 实施时 tray 端 UI 检查清单** (2026-08-03 lesson): 借 upstream `/learn` 时, tray 端要加的 UI 必先 grep cn 端有没有对应 pipeline (后端先调查再设计, UI-specific 细化). 例:
+  - `/learn` 触发按钮 → upstream CLI 已有 trigger, 镜像即可 ✅
+  - `/journey` review UI → background_review 已有 per-turn 落库 pipeline, 可做 ✅
+  - **"评价 agent output" 按钮 (点赞/点踩) → grep `feedback|like|dislike|thumbs|/v1/feedback` 0 hit, 不做** ❌
+  - 详见 mavis memory "UI 设计前必查后端 pipeline" (cross-project lesson)
 - **实施现状** (2026-07-23 sprint audit, 4-phase 跨 project borrow):
   - ✅ **第 3 层 资源层 skill self-evolution** — `agent/curator.py` (74KB, 12+ fix commits) 已 fully working. Periodically review agent-created skills, auto-transition lifecycle (pin / archive / consolidate / **patch** via `skill_manage action=patch`), persist `.curator_state` (last_run_at / paused / ...), 5+ 关键 fix commits (preserve cron-referenced skills `4c2961c51` / protect external `96bc524a7` / protect load-bearing built-in `702aa743e` / make consolidation opt-in `7bbffceb9` / shared atomic state writer `47e77ae16` / preserve resolved fork metadata `97e9c6466` / forward credential pool `304cdbdc7` / prune after inactivity `70e1571d8` / pluginify `476d8d9cc`)
   - ✅ **Per-turn 反馈循环** — `agent/background_review.py` (35KB, 12+ fix commits) 已 fully working. `spawn_background_review_thread` daemon per turn, 问 "should save/update memory/skill?", inherit parent runtime cache (reasoning_config inheritance `17cfa0f0a` fix), tool whitelist (read-before-write `20871c1d9`), 3-mode notification (off / on / verbose `955a914e4`), aux-model selector `87c4a5ebb`. 12+ fix commits 覆盖 list-shape guard / pin-improvements / memory-tool gate / opt-out-of-finalization / verbose preview 等
@@ -738,7 +934,7 @@
 > **调研期**: 2026-07-23
 > **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\2026-07-23-upstream-borrow\`
 > **Filter 维度**: 钱学森《工程控制论》3 axioms (事前设计 / 整体最优 / 闭环反馈) + cn 项目 backlog 优先级 (S12/S14/S15/wecom/feishu/WSL2/security-PIPL)
-> **编号说明**: 用 K-N 而非 CAND-N, 避免跟项目内部候选 (CAND-001~082) 编号冲突 (Phase 2 doc 早期用 CAND-046/047/048/049/050 跟 cn 现有候选撞了, 已修正).
+> **编号说明**: 用 K-N 而非 CAND-N, 避免跟项目内部候选 (CAND-001~085) 编号冲突 (Phase 2 doc 早期用 CAND-046/047/048/049/050 跟 cn 现有候选撞了, 已修正).
 > **4 必填字段** (每个 K-N): Source (upstream commit + PR) / **Axiom match** (1/2/3, 注明 strongest) / **Cn state** (gap + grep 验证) / **Port plan** (cherry-pick vs manual, 估时, 风险).
 
 ### Axiom 分布 (5 候选)
@@ -877,7 +1073,7 @@
 - 本文件状态: 🟡 调研阶段, 等待评估后定真计划
 - 调研方法: 按 commit 类型 + scope 分类, 跟项目 backlog 对比评估
 - 调研日期: 2026-07-10
-- 候选 ID 编号: CAND-001~082 (含已迁移到 hermes-tray 候选池的 TRAY-CAND-001~018) + K-1~K-5 (Section K: Upstream Borrow)
+- 候选 ID 编号: CAND-001~085 (含已迁移到 hermes-tray 候选池的 TRAY-CAND-001~018) + K-1~K-5 (Section K: Upstream Borrow)
 - 重点候选分类:
   - **Section A-G** (CAND-001~059): 项目内部候选 (fix / refactor / 新功能)
   - **Section H** (CAND-060~071): MiniCPM-Desk-Pet 跨项目借鉴

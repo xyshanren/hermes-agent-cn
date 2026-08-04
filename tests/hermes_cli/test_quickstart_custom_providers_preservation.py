@@ -258,3 +258,113 @@ def test_cand_083_audit_invariant_source_contains_custom_providers_preservation(
         "CAND-083 fix uses bare assignment instead of cfg.get(); this "
         "would clobber any pre-existing custom_providers entries."
     )
+
+
+# ---------------------------------------------------------------------------
+# T4 (Option C) — dangling fallback references trigger the warning
+# ---------------------------------------------------------------------------
+
+def test_write_smart_routing_warns_on_dangling_fallback_references(
+    tmp_path, monkeypatch, capsys
+):
+    """T4 — CAND-083 Option C (real fix, 2026-08-04).
+
+    The user-reported bug ("my deepseek provider disappeared after
+    quickstart") was actually a runtime resolution failure, not a
+    storage drop: quickstart wrote ``fallback_model: [{provider:
+    deepseek, ...}]`` but never verified that ``deepseek`` was defined
+    in the v12+ ``providers`` dict or v11 ``custom_providers`` list.
+    Option C detects this case and surfaces a warning naming the
+    dangling provider ids so the operator can fix the config rather
+    than assuming the quickstart "ate" the entry.
+    """
+    from hermes_cli import quickstart
+
+    cfg_in = {
+        "model": {},
+        "providers": {"ollama": {"name": "ollama"}},
+        # Note: no `deepseek` entry — the fallback below is dangling.
+        "custom_providers": [],
+        "fallback_providers": [],
+        "auxiliary": {},
+    }
+
+    captured: dict = {}
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    (tmp_path / ".hermes").mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    with patch("hermes_cli.config.load_config", return_value=cfg_in), \
+         patch("hermes_cli.config.save_config",
+                      side_effect=lambda c: captured.setdefault("cfg", c) or True), \
+         patch("hermes_cli.config.save_env_value", return_value=True):
+        quickstart._write_smart_routing(
+            primary_provider_id="ollama",
+            primary_model="Qwen3.6-27B-UD-Q4_K_XL.gguf",
+            # Two dangling refs (deepseek + sensenova) and one resolved
+            # (ollama) — only the dangling ones should be named.
+            fallback_chain=[
+                {"provider": "deepseek", "model": "deepseek-v4-flash"},
+                {"provider": "ollama", "model": "Qwen3.6-27B"},
+                {"provider": "sensenova", "model": "sensenova-6.7-flash-lite"},
+            ],
+            api_providers=[],
+        )
+
+    out = capsys.readouterr().out
+    assert "⚠️" in out, (
+        f"Option C warning not emitted; stdout was:\n{out!r}"
+    )
+    assert "deepseek" in out and "sensenova" in out, (
+        f"Warning should name both dangling providers; stdout was:\n{out!r}"
+    )
+    # The resolved provider (ollama) should NOT appear in the warning —
+    # otherwise the operator gets a false positive on every quickstart.
+    assert "ollama" not in out or "ollama" in out and "ollama, " not in out, (
+        f"Resolved provider 'ollama' should not appear in the dangling "
+        f"warning; stdout was:\n{out!r}"
+    )
+
+
+def test_write_smart_routing_no_warning_when_all_fallback_providers_defined(
+    tmp_path, monkeypatch, capsys
+):
+    """T4 sibling — when every fallback provider is properly defined in
+    either ``providers`` or ``custom_providers``, the warning must NOT
+    fire (otherwise it would become noise on every quickstart).
+    """
+    from hermes_cli import quickstart
+
+    cfg_in = {
+        "model": {},
+        "providers": {"ollama": {"name": "ollama"}, "deepseek": {"name": "deepseek"}},
+        "custom_providers": [
+            {"name": "sensenova", "base_url": "https://token.sensenova.cn/v1"},
+        ],
+        "fallback_providers": [],
+        "auxiliary": {},
+    }
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    (tmp_path / ".hermes").mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    with patch("hermes_cli.config.load_config", return_value=cfg_in), \
+         patch("hermes_cli.config.save_config", return_value=True), \
+         patch("hermes_cli.config.save_env_value", return_value=True):
+        quickstart._write_smart_routing(
+            primary_provider_id="ollama",
+            primary_model="Qwen3.6-27B-UD-Q4_K_XL.gguf",
+            fallback_chain=[
+                {"provider": "deepseek", "model": "deepseek-v4-flash"},
+                {"provider": "sensenova", "model": "sensenova-6.7-flash-lite"},
+            ],
+            api_providers=[],
+        )
+
+    out = capsys.readouterr().out
+    assert "⚠️" not in out, (
+        f"Option C should be silent when all providers are defined; "
+        f"stdout was:\n{out!r}"
+    )

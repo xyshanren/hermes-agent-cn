@@ -1273,6 +1273,49 @@ def _write_smart_routing(
                 providers_section, dict
             ) else {}
 
+        # CAND-083 Option C: detect dangling fallback references. The
+        # fallback_chain we just wrote is `{provider, model}` pairs —
+        # at runtime those `provider` ids must resolve to an entry in
+        # either the v12+ `providers` dict or the v11 `custom_providers`
+        # list. If a quickstart wrote a fallback like `{provider: deepseek}`
+        # but the operator never defined `providers.deepseek` (and has no
+        # `custom_providers` entry by that name), the call will fail at
+        # runtime with a confusing "unknown provider" error and the
+        # operator's first instinct will be to assume the quickstart
+        # dropped the entry. This warning surfaces the real cause.
+        if fallback_chain:
+            known_providers: set[str] = set()
+            providers_dict = cfg.get("providers")
+            if isinstance(providers_dict, dict):
+                known_providers.update(
+                    k for k in providers_dict.keys() if isinstance(k, str)
+                )
+            for entry in cfg.get("custom_providers", []) or []:
+                if isinstance(entry, dict):
+                    name = entry.get("name")
+                    if isinstance(name, str) and name:
+                        known_providers.add(name)
+            dangling = [
+                entry for entry in fallback_chain
+                if isinstance(entry, dict)
+                and entry.get("provider") not in known_providers
+            ]
+            if dangling:
+                names = sorted({
+                    str(d.get("provider"))
+                    for d in dangling
+                    if d.get("provider") is not None
+                })
+                print(
+                    f"⚠️  quickstart: fallback_chain 引用 {len(dangling)} 个未定义的 "
+                    f"provider: {names}\n"
+                    f"    这些 provider 在 providers 段 / custom_providers 段都没定义, "
+                    f"fallback 实际会 fail. 请在 config.yaml 补 provider 段或 custom_providers entry."
+                )
+                logger.warning(
+                    "CAND-083 Option C: dangling fallback references %s", names
+                )
+
         save_config(cfg)
 
         # 保存所有 API Key 到 .env
