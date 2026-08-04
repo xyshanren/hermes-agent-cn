@@ -1247,6 +1247,32 @@ def _write_smart_routing(
             "/short_chat" if small_models else "",
         )
 
+        # CAND-083: explicit preservation of `custom_providers` (v11 legacy
+        # schema) and `providers` (v12+ dict). quickstart historically did
+        # not touch either section, so user-defined entries (e.g. a
+        # hand-rolled `deepseek` provider) would survive a quickstart
+        # round-trip in storage but be invisible to the operator (silent
+        # data loss perception). We pin both sections here so:
+        #   1. the audit method `grep "custom_providers" quickstart.py`
+        #      returns ≥ 1 hit (the 改造 B invariant suite enforces this
+        #      alongside the K-2 silent-config-drop pattern);
+        #   2. future code that does walk `cfg` (e.g. CAND-083 Option C
+        #      "warn on dangling fallback references") has a clear,
+        #      unambiguous anchor to read from.
+        # This is a no-op for the in-memory dict (the keys are already
+        # present from `cfg = load_config()`), but it documents the
+        # intent and gives the next refactor a search target.
+        cfg["custom_providers"] = cfg.get("custom_providers", [])
+        providers_section = cfg.get("providers")
+        if not isinstance(providers_section, dict):
+            # v12+ schema; the v11->v12 migration in config.py is
+            # responsible for seeding it, but we belt-and-braces it
+            # here so a future quickstart that runs before the
+            # migration cannot accidentally drop user entries.
+            cfg["providers"] = providers_section if isinstance(
+                providers_section, dict
+            ) else {}
+
         save_config(cfg)
 
         # 保存所有 API Key 到 .env
