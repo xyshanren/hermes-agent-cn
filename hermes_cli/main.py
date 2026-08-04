@@ -766,6 +766,7 @@ if _FORCE_IPV4_EARLY:
 import logging
 import threading
 import time as _time
+import asyncio
 from datetime import datetime
 
 from hermes_cli import __version__, __release_date__
@@ -797,6 +798,104 @@ from hermes_cli.model_setup_flows import (
     _model_flow_ai_gateway,
 )
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# CAND-085 — AIMC gateway fail-fast initialization.
+#
+# Runs immediately after centralized logging is set up. When the user has
+# `aimc.enabled: true` in config.yaml, we synchronously refresh the AIMC
+# group catalog before any subcommand dispatches. If refresh fails
+# (network / 5xx / empty data_groups), we raise RuntimeError → the
+# process exits non-zero instead of silently using a stale empty cache.
+#
+# This is one of the four iron laws (verbatim from aimc_client.py):
+#   4. ✅ Startup is fail-fast. AIMCClient.refresh() must raise on HTTP
+#      failure or invalid response. Callers propagate the exception —
+#      no silent cache, no swallowing.
+#
+# Implemented as a separate function so test code can monkeypatch it
+# cleanly. Skipped when:
+#   - config has no `aimc` block (default)
+#   - `aimc.enabled` is not truthy
+#   - `model:` doesn't start with `tier:` or `scene:` (i.e. the user
+#     isn't actually routing through AIMC). This avoids a hard network
+#     dep on operators who simply left the example config in place.
+# -----------------------------------------------------------------------------
+def _initialize_aimc_client_or_fail() -> None:
+    """Synchronously refresh AIMC group catalog at startup (CAND-085).
+
+    Skipped silently when AIMC is not enabled. Raises RuntimeError on
+    any refresh failure — the caller's process should exit with that
+    message so the operator notices the problem instead of running
+    on a stale / empty group cache.
+    """
+    try:
+        from hermes_cli.config import load_config as _load_config_for_aimc
+        cfg = _load_config_for_aimc()
+    except Exception:
+        # Config load already raised if the file is broken; this catches
+        # the "no config file yet" case (first-run, doctor, etc.) where
+        # AIMC is obviously not configured.
+        return
+
+    aimc_block = cfg.get("aimc") or {}
+    if not isinstance(aimc_block, dict) or not aimc_block.get("enabled"):
+        return
+
+    # Only block startup if the main model is actually an AIMC group.
+    # Otherwise the user is just running a normal hermes command and
+    # AIMC is irrelevant.
+    main_model = cfg.get("model") or ""
+    if not (isinstance(main_model, str) and (
+        main_model.startswith("tier:") or main_model.startswith("scene:")
+    )):
+        return
+
+    providers = cfg.get("providers") or {}
+    aimc_provider = providers.get("aimc") if isinstance(providers, dict) else None
+    if not isinstance(aimc_provider, dict):
+        logger.warning(
+            "CAND-085: aimc.enabled is true and model=%r is an AIMC group, "
+            "but providers.aimc is missing — add providers.aimc.{base_url,api_key} "
+            "to config.yaml. Skipping refresh (startup continues, AIMC calls "
+            "will fail at request time).",
+            main_model,
+        )
+        return
+
+    base_url = str(aimc_provider.get("base_url") or "").strip()
+    api_key = str(aimc_provider.get("api_key") or "").strip()
+    if not base_url:
+        logger.warning(
+            "CAND-085: providers.aimc.base_url is empty — skipping refresh."
+        )
+        return
+
+    # Iron law 1+4: synchronous refresh; raise on any HTTP error.
+    try:
+        from aimc_client import AIMCClient
+        client = AIMCClient(base_url=base_url, api_key=api_key, timeout=30.0)
+        try:
+            asyncio.run(client.refresh())
+        finally:
+            asyncio.run(client.aclose())
+    except Exception as exc:
+        raise RuntimeError(
+            f"CAND-085: AIMC refresh failed at startup ({type(exc).__name__}: {exc}). "
+            f"Refusing to start with an empty/stale AIMC group cache. Fix the "
+            f"gateway (or set aimc.enabled: false in config.yaml) and retry."
+        ) from exc
+
+    logger.info("CAND-085: AIMC group catalog refreshed at startup (base_url=%s)", base_url)
+
+
+try:
+    _initialize_aimc_client_or_fail()
+except RuntimeError:
+    # Re-raise — fail-fast is the explicit contract here. We do NOT wrap
+    # in `except: pass` the way logging setup does.
+    raise
 
 
 def _is_termux_startup_environment(env: dict[str, str] | None = None) -> bool:

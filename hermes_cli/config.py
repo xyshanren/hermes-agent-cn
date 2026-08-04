@@ -1841,6 +1841,9 @@ def check_config_version() -> Tuple[int, int]:
 # set derived so new defaults (skills, security, browser, …) are accepted
 # automatically. A few optional/legacy roots are valid on disk but intentionally
 # absent from DEFAULT_CONFIG (omitted when unused / alternate schema forms).
+# (CAND-085: added "aimc" to _EXTRA_KNOWN_ROOT_KEYS for the AIMC gateway
+# integration top-level section. Validation rejects any other unknown root key
+# so a typo doesn't silently land in a place the runtime will never read.)
 _EXTRA_KNOWN_ROOT_KEYS = {
     "custom_providers",  # legacy list form; modern equivalent is providers: {}
     "fallback_model",    # optional single dict or chain list; omitted when disabled
@@ -1867,6 +1870,7 @@ _EXTRA_KNOWN_ROOT_KEYS = {
     "require_mention",       # top-level convenience form honored by the gateway (#3979)
     "unauthorized_dm_behavior",  # top-level form read by gateway/config.py
     "signal",            # Signal settings bridged to env vars by gateway/config.py
+    "aimc",              # CAND-085: AIMC gateway integration top-level section
 }
 _KNOWN_ROOT_KEYS = frozenset(DEFAULT_CONFIG.keys()) | _EXTRA_KNOWN_ROOT_KEYS
 
