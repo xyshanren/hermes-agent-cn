@@ -4394,6 +4394,49 @@ class BasePlatformAdapter(ABC):
         """Get and clear any pending message for a session."""
         return self._pending_messages.pop(session_key, None)
     
+    def resolve_multiplex_profile(self, chat_id: str) -> str:
+        """K-3: resolve the multiplex profile for a chat on this adapter.
+
+        Reads ``config.multiplex_profiles.routes[platform]`` (set at the
+        top level of ``~/.hermes/config.yaml``) and matches ``chat_id``
+        against the configured patterns. Returns the matched profile
+        name, or ``"default"`` if the multiplex system is disabled,
+        the platform has no routes map, or no pattern matches.
+
+        This is the helper adapters call from their message-arrival
+        hot path. The matching uses ``fnmatch.fnmatchcase`` so an
+        operator can write ``"channel-A-*"`` and have it match
+        ``"channel-A-12345"`` without substring surprises. Pre-K-3
+        behaviour is fully preserved: when the multiplex system is
+        off (the default), every chat resolves to ``"default"`` and
+        the session key shape is unchanged.
+        """
+        import fnmatch
+        try:
+            from hermes_cli.config import load_config as _load_config
+            cfg = _load_config()
+        except Exception:
+            return "default"
+        if not isinstance(cfg, dict):
+            return "default"
+        multiplex = cfg.get("multiplex_profiles") or {}
+        if not isinstance(multiplex, dict) or not multiplex.get("enabled"):
+            return "default"
+        routes = multiplex.get("routes") or {}
+        if not isinstance(routes, dict):
+            return "default"
+        platform_routes = routes.get(self.platform.value) or {}
+        if not isinstance(platform_routes, dict) or not chat_id:
+            return "default"
+        # First-match-wins. Operators can put longer (more specific)
+        # patterns ahead of catch-all ``"*"`` to override defaults.
+        for pattern, profile in platform_routes.items():
+            if not isinstance(pattern, str) or not isinstance(profile, str):
+                continue
+            if fnmatch.fnmatchcase(chat_id, pattern):
+                return profile
+        return "default"
+
     def build_source(
         self,
         chat_id: str,

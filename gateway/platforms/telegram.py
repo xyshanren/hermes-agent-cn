@@ -534,6 +534,12 @@ class TelegramAdapter(BasePlatformAdapter):
                 elif normalized_chat_type == "supergroup":
                     normalized_chat_type = "forum" if thread_id is not None else "group"
 
+                # K-3: stamp the multiplex profile from the operator's
+                # ``config.multiplex_profiles.routes.telegram`` map so
+                # the SessionDB key (built via build_source later)
+                # isolates different channels per profile. Pre-K-3
+                # operators (multiplex disabled or no entry) get
+                # ``profile="default"`` which is a no-op.
                 source = SessionSource(
                     platform=Platform.TELEGRAM,
                     chat_id=str(chat_id or normalized_user_id),
@@ -541,6 +547,9 @@ class TelegramAdapter(BasePlatformAdapter):
                     user_id=normalized_user_id,
                     user_name=str(user_name).strip() if user_name else None,
                     thread_id=str(thread_id) if thread_id is not None else None,
+                    profile=self.resolve_multiplex_profile(
+                        str(chat_id or normalized_user_id)
+                    ),
                 )
                 return bool(auth_fn(source))
             except Exception:

@@ -227,3 +227,107 @@ def test_k3_audit_invariant_base_build_source_contains_profile_wiring():
     assert "profile" in sig.parameters, (
         "build_source signature lost the profile parameter"
     )
+
+
+# ---------------------------------------------------------------------------
+# T4 (must) — resolve_multiplex_profile helper wires the routes map
+# ---------------------------------------------------------------------------
+
+def _make_adapter_with_config(platform_value: str, multiplex_section):
+    """Build a minimal BasePlatformAdapter stub with ``self.platform`` and
+    a mocked ``load_config`` returning the supplied multiplex section.
+    """
+    from gateway.platforms.base import BasePlatformAdapter
+    from gateway.config import Platform
+
+    class _StubAdapter(BasePlatformAdapter):
+        async def connect(self):
+            return None
+
+        async def disconnect(self):
+            return None
+
+        async def send(self, *args, **kwargs):
+            return None
+
+        async def get_chat_info(self, chat_id):
+            return {}
+
+    adapter = _StubAdapter.__new__(_StubAdapter)
+    adapter.platform = Platform(platform_value)
+    adapter.config = SimpleNamespace()
+    # Patch load_config at the import site used by the helper. The
+    # helper imports it lazily inside the function body, so we have
+    # to patch hermes_cli.config.load_config (the source) rather
+    # than any module attribute on the adapter.
+    from unittest.mock import patch as _patch
+    patcher = _patch(
+        "hermes_cli.config.load_config",
+        return_value={"multiplex_profiles": multiplex_section},
+    )
+    return adapter, patcher
+
+
+def test_resolve_multiplex_profile_default_when_disabled(tmp_path, monkeypatch):
+    """T4.a — when ``multiplex_profiles.enabled`` is false (the default),
+    every chat resolves to ``"default"`` regardless of the routes map.
+
+    This is the migration-safety guarantee: turning on K-3 is opt-in
+    per operator, never silent.
+    """
+    from unittest.mock import patch as _patch
+
+    adapter, _ = _make_adapter_with_config(
+        "telegram",
+        {"enabled": False, "routes": {"telegram": {"channel-A-*": "enterprise"}}},
+    )
+    with _patch("hermes_cli.config.load_config",
+                return_value={"multiplex_profiles": {"enabled": False, "routes": {}}}):
+        result = adapter.resolve_multiplex_profile("channel-A-12345")
+    assert result == "default", (
+        f"multiplex disabled but resolver returned {result!r}; "
+        f"pre-K-3 operators will see session-key changes they didn't ask for."
+    )
+
+
+def test_resolve_multiplex_profile_matches_fnmatch_pattern():
+    """T4.b — ``routes.telegram["channel-A-*"]`` matches chat ids that
+    start with ``channel-A-`` regardless of the trailing id. This is
+    the operator's primary use case (one profile per channel family).
+    """
+    from unittest.mock import patch as _patch
+
+    cfg = {
+        "multiplex_profiles": {
+            "enabled": True,
+            "routes": {
+                "telegram": {
+                    "channel-A-*": "enterprise",
+                    "channel-B-*": "staging",
+                },
+            },
+        },
+    }
+    with _patch("hermes_cli.config.load_config", return_value=cfg):
+        from gateway.platforms.base import BasePlatformAdapter
+        from gateway.config import Platform
+
+        class _StubAdapter(BasePlatformAdapter):
+            async def connect(self): return None
+            async def disconnect(self): return None
+            async def send(self, *a, **k): return None
+            async def get_chat_info(self, chat_id): return {}
+
+        adapter = _StubAdapter.__new__(_StubAdapter)
+        adapter.platform = Platform.TELEGRAM
+        adapter.config = SimpleNamespace()
+
+        assert adapter.resolve_multiplex_profile("channel-A-12345") == "enterprise"
+        assert adapter.resolve_multiplex_profile("channel-B-9999") == "staging"
+        assert adapter.resolve_multiplex_profile("channel-C-1") == "default", (
+            "unmatched chat should fall back to 'default'"
+        )
+        # First-match-wins: put the catch-all last so more specific
+        # patterns win.
+        cfg["multiplex_profiles"]["routes"]["telegram"]["*"] = "fallback"
+        assert adapter.resolve_multiplex_profile("channel-Z-1") == "fallback"
