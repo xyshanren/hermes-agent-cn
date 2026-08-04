@@ -87,6 +87,14 @@ class SessionSource:
     guild_id: Optional[str] = None  # Discord guild / Slack workspace / Matrix server scope
     parent_chat_id: Optional[str] = None  # Parent channel when chat_id refers to a thread
     message_id: Optional[str] = None  # ID of the triggering message (for pin/reply/react)
+    # K-3: multiplex profile name. The platform adapter stamps this from
+    # ``config.multiplex_profiles.routes[platform][chat_pattern]`` so
+    # different channels in the same adapter end up in independent
+    # session/batch keys (e.g. wecom channel-A-* → enterprise, channel-B-*
+    # → staging). Default "default" preserves pre-K-3 behaviour — every
+    # chat shares one session unless an operator explicitly wires a
+    # routes map.
+    profile: str = "default"
     
     @property
     def description(self) -> str:
@@ -130,6 +138,13 @@ class SessionSource:
             d["parent_chat_id"] = self.parent_chat_id
         if self.message_id:
             d["message_id"] = self.message_id
+        # K-3: include profile in the serialized payload. The default
+        # value "default" is preserved on the wire so pre-K-3 readers
+        # (if any survived) keep working. We don't include it
+        # unconditionally to keep the dict compact for the common
+        # single-profile case.
+        if self.profile and self.profile != "default":
+            d["profile"] = self.profile
         return d
 
     @classmethod
@@ -148,6 +163,10 @@ class SessionSource:
             guild_id=data.get("guild_id"),
             parent_chat_id=data.get("parent_chat_id"),
             message_id=data.get("message_id"),
+            # K-3: restore the multiplex profile. Missing key falls
+            # back to "default", which matches pre-K-3 single-profile
+            # behaviour so old persisted sessions load cleanly.
+            profile=data.get("profile", "default"),
         )
     
 
@@ -575,6 +594,7 @@ def build_session_key(
     source: SessionSource,
     group_sessions_per_user: bool = True,
     thread_sessions_per_user: bool = False,
+    profile: Optional[str] = None,
 ) -> str:
     """Build a deterministic session key from a message source.
 
@@ -600,6 +620,17 @@ def build_session_key(
       - Without identifiers, messages fall back to one session per platform/chat_type.
     """
     platform = source.platform.value
+    # K-3: multiplex profile prefix. When ``profile`` is supplied (or
+    # ``source.profile`` is non-default) we insert it as a top-level
+    # key segment so two channels of the same adapter with different
+    # profiles end up in independent session/batch keys. Default
+    # profile is the pre-K-3 behaviour and keeps the key shape
+    # unchanged for operators that don't wire the multiplex routes map.
+    effective_profile = profile or source.profile
+    if effective_profile and effective_profile != "default":
+        profile_segment = f"profile:{effective_profile}"
+    else:
+        profile_segment = ""
     if source.chat_type == "dm":
         dm_chat_id = source.chat_id
 
@@ -623,7 +654,15 @@ def build_session_key(
         return f"agent:main:{platform}:dm"
 
     participant_id = source.user_id_alt or source.user_id
-    key_parts = ["agent:main", platform, source.chat_type]
+    # K-3: insert the profile segment right after the platform so two
+    # channels of the same adapter land in independent SessionDB rows.
+    # Default profile yields an empty segment, which is a no-op for
+    # pre-K-3 operators (the conditional append below keeps the key
+    # shape stable: one colon, not two).
+    key_parts = ["agent:main", platform]
+    if profile_segment:
+        key_parts.append(profile_segment)
+    key_parts.append(source.chat_type)
 
     if source.chat_id:
         key_parts.append(source.chat_id)
