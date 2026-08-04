@@ -350,6 +350,7 @@
 - **触发条件**: user 反映 "想看 agent 学习历史"
 - **关联**: mem0 self-hosted (CAND-012) — 同 memory 范畴
 - **备注**: 类似 "chat history timeline", 但是基于 agent 的 learned nodes (memory graph). cn 用 mem0 的话可借鉴架构. Windows robustness follow-up (upstream `7e037e1a3` / `ce82b0c3c` / `428b9a0c4` / `ec319e4e3`) 暂不在 scope, 实施时再 cherry-pick. 详见 K-5 verification.
+- **K-5 (2026-08-04 phase 2 起, 1-line)**: Windows robustness 4 commits (`7e037e1a3` GNU-only %-d strftime / `ce82b0c3c` 同源 / `428b9a0c4` render /journey color 替 ANSI / `ec319e4e3` non-dict metadata guard) tracked but not in scope, 实施时按需 cherry-pick. 跟 upstream `/journey` (PR `e971dc1e9` 起点) 100% source match, 跟 CAND-080/081/082 互补不冲突 (per `phase3d-hermes-learn-journey-verification.md`).
 
 ---
 
@@ -922,6 +923,7 @@
   - **A/B test harness**: 50/50 traffic, 自动收集指标, 自动决定通过/不通过
   - **Decision**: 通过 → 发布新 routing 规则; 不通过 → 回滚 + 记录负反馈
   - **跟 CAND-078 共用**: 同样的历史数据, 既训 learned router (CAND-073), 又验证 rule changes (CAND-082), 闭环
+- **K-5 (2026-08-04 phase 2 起, 1-line)**: 跟 upstream `/learn` (主 `e32ebc6aa` feat(skills) PR #51506 + standards `e62afaca6` + parsing `d431dfc44` + TUI `a4fa1481e` + perf `cbe5c5689` + Windows `32087e4bc`) **4-surface 集成 (CLI/gateway/TUI/dashboard) 互补, 不是替代**. CAND-082 是 routing 改动 dynamic 验证 (CAND-080 patch 后 A/B 测), upstream `/learn` 是 skill-distillation 静态 standards 校验, 两层都需. 详见 `phase3d-hermes-learn-journey-verification.md` §"/learn → CAND-082" 段 + K-5 entry.
 - **3 路线验证组合**:
   - **rule-based** (CAND-080): A/B test 文本规则改动
   - **learned-based** (CAND-072/073): A/B test 训后的 router weights
