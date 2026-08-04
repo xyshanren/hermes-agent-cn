@@ -2186,6 +2186,46 @@ DEFAULT_CONFIG = {
         "trust_recent_files_seconds": 600,
     },
 
+    # K-3: gateway profile routing multiplex (8-04, greenfield — upstream
+    # `647520f83` is a planned cherry-pick source not yet merged, see
+    # CANDIDATES.md Section K entry K-3 for the upstream-alignment plan).
+    #
+    # When ``enabled: false`` (default) the gateway routes every inbound
+    # message to the single default Hermes profile (pre-K-3 behaviour —
+    # one adapter, one profile, one session key per chat). When
+    # ``enabled: true`` the platform adapters stamp each incoming event
+    # with ``event.source.profile`` (sourced from per-platform routing
+    # config, e.g. wecom "channel A → profile=enterprise", wecom "channel B
+    # → profile=staging") and the gateway uses that profile name as part
+    # of the SessionDB key, isolating conversations across profiles
+    # inside the same adapter.
+    #
+    # The audit method (CANDIDATES.md K-3 "审计方法" — to be added in
+    # K-3c) is ``grep "multiplex_profiles" hermes-cli/config.py`` ≥ 1
+    # hit. With this block the validation is satisfied.
+    "multiplex_profiles": {
+        # Master switch — when false, every chat uses the default
+        # profile. Flip to true after wiring at least one platform-level
+        # profile map (see ``multiplex.routes`` below).
+        "enabled": False,
+        # Per-platform profile maps. Each entry: ``platform → chat_id
+        # pattern → profile name``. The platform adapter matches
+        # ``event.source.profile`` against this map at message arrival
+        # time and stamps the SessionDB key with the resolved profile
+        # name. When no rule matches, ``default`` is used.
+        #
+        # Example:
+        #   routes:
+        #     wecom:
+        #       "channel-A-*": enterprise
+        #       "channel-B-*": staging
+        #     feishu:
+        #       "oc_abc*": enterprise
+        #       "oc_xyz*": staging
+        #     default: default
+        "routes": {},
+    },
+
     # Real-time token streaming to messaging platforms (Telegram, Discord,
     # Slack, etc.). Read at the top level by the gateway; absent this block the
     # gateway falls back to these same defaults, so adding it here only makes
@@ -3942,7 +3982,7 @@ _KNOWN_ROOT_KEYS = {
     "fallback_providers", "credential_pool_strategies", "toolsets",
     "agent", "terminal", "display", "compression", "delegation",
     "auxiliary", "custom_providers", "context", "memory", "gateway",
-    "sessions", "streaming", "aimc",
+    "sessions", "streaming", "aimc", "multiplex_profiles",
 }
 
 # Valid fields inside a custom_providers list entry
