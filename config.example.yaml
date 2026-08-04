@@ -1,0 +1,90 @@
+# =============================================================================
+# Hermes Agent — example config with AIMC gateway integration (CAND-085)
+# =============================================================================
+#
+# Copy this file to ~/.hermes/config.yaml and edit the values for your setup.
+# Sections marked with "(CAND-085)" are new for the AIMC integration;
+# everything else follows the standard hermes-agent-cn schema (v0.18.0+cn.1).
+#
+# Cross-refs:
+#   - CAND-085 entry:    hermes-agent-cn/CANDIDATES.md Section F
+#   - Kickoff doc:       cross-pollination/2026-07-23-upstream-borrow/notes/2026-08-04-phase1-cand085-kickoff.md
+#   - 4 iron laws:       aimc_client.py module docstring (verbatim, non-negotiable)
+#   - K-2 cherry-pick:   route all 4 hermes_cli direct-create aux callers
+#                        through call_llm(task=...). After CAND-085, the
+#                        resolved "model" field is an AIMC group name like
+#                        "tier:balanced" — the call_llm path picks up the
+#                        AIMC provider's base_url automatically.
+#
+# Schema notes (verified against hermes_cli/config.py DEFAULT_CONFIG
+# 2026-08-04):
+#   - `model:` is a STRING (the model name to send to the provider), not
+#     a dict. After CAND-085 the string is an AIMC group name.
+#   - `providers:` is a v12+ DICT (replaces the legacy `custom_providers`
+#     list). One entry per non-default provider.
+#   - `fallback_providers:` is a LIST of provider names tried in order
+#     when the main provider fails. This is the cross-provider path
+#     (model_routing.rules is provider-scoped; cross-provider only
+#     happens through fallback).
+#   - `auxiliary.*` are independent tasks (vision / compression / etc.)
+#     with their own provider:model. CAND-085 doesn't change this schema
+#     — it adds a new `aimc:` top-level section for gateway settings.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Main model — uses an AIMC group name so the OpenAI client (via call_llm)
+# routes through the gateway. The "auto" provider here means "use the
+# providers.aimc entry for base_url + api_key".
+# -----------------------------------------------------------------------------
+model: tier:balanced
+providers:
+  aimc:
+    name: aimc
+    base_url: ${AIMC_BASE_URL:-http://localhost:8080/v1}
+    api_key: ${AIMC_API_KEY}
+    api_mode: chat_completions
+
+# Cross-provider fallback (preserved from the user's "现状方案 C" baseline).
+# When AIMC's tier:balanced fails, the main agent swaps to the first
+# provider/model in this list, then the second, etc. This is the only
+# path that crosses providers — model_routing.rules is provider-scoped.
+fallback_providers:
+  - deepseek:deepseek-v4-flash
+  - openai:gpt-4o-mini
+
+# -----------------------------------------------------------------------------
+# AIMC gateway settings (CAND-085) — new top-level section.
+# -----------------------------------------------------------------------------
+aimc:
+  enabled: true
+  # Validate the configured profile (model + any auxiliary.<task> entries
+  # that reference AIMC groups) against the gateway's data_groups on every
+  # startup. Mismatch → RuntimeError → fail-fast (iron law 4).
+  validate_on_startup: true
+  # Daily refresh schedule — keeps the local cache of known groups in sync
+  # with AIMC's seed_model_groups.py changes. The hermes cron/scheduler
+  # runs this; the field is a cron expression compatible with our internal
+  # scheduler (NOT APScheduler — that lib is not in pyproject.toml).
+  refresh_cron: "0 3 * * *"
+
+# -----------------------------------------------------------------------------
+# Auxiliary tasks — independent of the main model. CAND-085 doesn't
+# rewrite the auxiliary schema; we just point the vision/infographic
+# tasks at sensenova via the existing `custom` provider, matching the
+# "现状方案 C" baseline the user proposed on 2026-08-03.
+# -----------------------------------------------------------------------------
+auxiliary:
+  vision:
+    provider: custom
+    model: sensenova-6.7-flash-lite
+    base_url: ${SENSENOVA_BASE_URL:-https://token.sensenova.cn/v1}
+    api_key: ${SENSENOVA_API_KEY}
+    timeout: 120
+  infographic:
+    provider: custom
+    model: sensenova-u1-fast
+    base_url: ${SENSENOVA_BASE_URL:-https://token.sensenova.cn/v1}
+    api_key: ${SENSENOVA_API_KEY}
+    timeout: 120
+  # All other auxiliary tasks (compression / goal_judge / kanban_*) keep
+  # their existing "auto" provider; the call_llm path picks them up.
