@@ -478,7 +478,7 @@
 
 ### [CAND-083] 🐛 Quickstart 静默丢弃 `custom_providers` (K-2 同源 silent data loss)
 
-- **状态**: 🟡 proposed → ✅ done (2026-08-04 commit `f681a05b7` Option A 1-line + commit `pending` Option C warning)
+- **状态**: 🟡 proposed → ✅ done (2026-08-04 commit `f681a05b7` Option A 1-line + commit `0cbd8f0b7` Option C warning, 2 commit, 6/6 test pass)
 - **发现时间**: 2026-07-31
 - **来源**: user 报告. `grep "custom_providers" hermes_cli/quickstart.py` **0 hit** — 整个 quickstart.py (1820+ 行) 不引用此 key
 - **症状**: user 报告 "我手动加的 provider 没了" — quickstart 跑完 cfg 看起来 "我的 provider 没了". 实际是 **runtime resolution failure** (fallback_chain 引用 `{provider: deepseek}`, 但 `providers` / `custom_providers` 段都没 deepseek entry → 静默 fail), 不是 storage drop. 留下**悬空引用** (`fallback_model: [{provider: deepseek, model: ...}]` 指向不存在的 deepseek provider)
@@ -524,7 +524,7 @@
 
 ### [CAND-084] 🧠 Quickstart 智能生成 capability-based routing rules (单模型偏置修复)
 
-- **状态**: 🟡 proposed → 🟡 scope 缩 (2026-08-03 user 引用 Skill 文档 + PROPOSAL doc verify 后, 关键约束发现)
+- **状态**: 🟡 proposed → 🟡 scope 缩 (2026-08-03 verify) → ✅ done (2026-08-04 commit `60b1ca121` smart routing rule generation helper, refactor + 10 test)
 - **发现时间**: 2026-07-31 (user 反馈 routing rules 单调, 1 local + 1 cloud 走"local 主力 + cloud 兜底"无意义)
 - **症状**: quickstart 跑完生成 `model_routing.rules` 所有 rule 都指同一个 local 27B, cloud (deepseek-v4-flash) 只在 `fallback_model` 段被引用. **cloud 在 routing 层完全闲置** — 长上下文/高复杂度任务本应主动选 cloud, 现在被迫走 local 27B (能力不够时降级)
 - **根因**: quickstart 1.0 routing rule 生成是**单模型偏置** — 检测到 1 个 local + 1 个 cloud, 默认最小 pattern (local 主力, cloud fallback), **缺 capability 启发式** (keywords-based) 来主动路由到不同 model
@@ -608,7 +608,7 @@
 
 ### [CAND-085] 🌐 AIMC 网关集成 (profile-based model routing + dynamic adaptation)
 
-- **状态**: 🟡 proposed
+- **状态**: 🟡 proposed → ✅ done (2026-08-04 commit `7fbd80b96` AIMC gateway integration, config + client + main fail-fast + 10 test)
 - **发现时间**: 2026-07-31 (user PR 草案 309 行, 见 `notes/2026-07-31-aimc-integration-pr.md`)
 - **架构**: hermes-tray → **hermes-agent-cn** (本仓) → **AIMC 网关** (gitee `XiaoYRecluse/aimc`, commit `929e5fb+`) → 硅基流动 / DeepSeek / Qwen / 本地 Ollama. AIMC 是 OpenAI 协议兼容网关, hermes-agent-cn 通过 AIMC 拿跨模型比价/价格优化/fallback 能力
 - **症状 (集成前)**: hermes-agent-cn config.yaml models 段硬编码具体 model 名 (`default: deepseek-chat` 等), 缺 3 项能力:
@@ -971,7 +971,7 @@
 
 ### [K-3] 🌐 gateway profile routing multiplex (6 adapter 借鉴)
 
-- **状态**: 🟡 proposed (ready for cherry-pick, 1.5d)
+- **状态**: 🟡 proposed (ready for cherry-pick, 1.5d) → ✅ done (2026-08-04 4 commit: K-3a `c1314d307` multiplex_profiles config schema + K-3b1 `3c9deb665` session_key multiplex profile prefix + K-3b2 `4963ec486` adapter build_source profile passthrough + K-3b3 `656f192d2` resolve_multiplex_profile helper + telegram wiring, 8/8 test pass)
 - **Source**: upstream `647520f83` (PR 待定)
 - **Axiom match**: **2 整体最优 (strongest)** — 6 个 adapter 统一处理, multiplex_profiles 开启时不同 community → 不同 profile → 独立 session/batch key, 避免单 adapter 优化
 - **Cn state**: ⚠️ 部分对 (cn 有 `wecom.py` / `feishu.py` 等 platform adapter, 但架构在 `gateway/platforms/` 而非 upstream `plugins/platforms/`, 需适配)
@@ -982,7 +982,7 @@
 
 ### [K-4] 🌀 MoA ambient conversation context (CAND-041 follow-up)
 
-- **状态**: 🟡 proposed (post CAND-041, 0.5d)
+- **状态**: 🟡 proposed (post CAND-041, 0.5d) → ✅ done (Sprint 2026-07-23~24 commit `e4a8c2bc4` port #9ce0e67f2 — ambient conversation context for aux/MoA/delegate)
 - **Source**: upstream `9ce0e67f2` `feat(portal): ambient conversation context entangles aux/MoA/delegate calls`
 - **Axiom match**: **2 整体最优 (strongest)** — 跨 module (aux + MoA + delegate) 共享 conversation lineage
 - **Cn state**: ⚠️ 跟 CAND-041 (MoA) 直接关联; cn MoA 已 working pre-sprint (2026-07-23 audit 确认), 这是 ambient 增强 (cross-module aux/MoA/delegate conversation_id 共享)
