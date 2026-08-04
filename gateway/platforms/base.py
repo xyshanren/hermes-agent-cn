@@ -4409,8 +4409,19 @@ class BasePlatformAdapter(ABC):
         guild_id: Optional[str] = None,
         parent_chat_id: Optional[str] = None,
         message_id: Optional[str] = None,
+        profile: str = "default",
     ) -> SessionSource:
-        """Helper to build a SessionSource for this platform."""
+        """Helper to build a SessionSource for this platform.
+
+        K-3: ``profile`` is the multiplex profile name (defaults to
+        ``"default"`` which preserves pre-K-3 behaviour). Adapters
+        that want the multiplex routing to actually fire must read
+        ``config.multiplex_profiles.routes[platform]`` and pass the
+        matched profile through here. The change is additive: every
+        existing 20+ call site that does not pass ``profile`` keeps
+        the pre-K-3 session-key shape because the helper substitutes
+        the default value.
+        """
         # Normalize empty topic to None
         if chat_topic is not None and not chat_topic.strip():
             chat_topic = None
@@ -4429,6 +4440,10 @@ class BasePlatformAdapter(ABC):
             guild_id=str(guild_id) if guild_id else None,
             parent_chat_id=str(parent_chat_id) if parent_chat_id else None,
             message_id=str(message_id) if message_id else None,
+            # K-3: multiplex profile (default "default" preserves pre-K-3
+            # session-key shape, see SessionSource docstring for the
+            # profile="default" → key shape unchanged invariant).
+            profile=profile,
         )
     
     @abstractmethod
