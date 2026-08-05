@@ -876,7 +876,7 @@
 
 ### [CAND-080] 🔄 Skills 自进化系统 (rule-based routing 自迭代)
 
-- **状态**: 🟡 partial done → 🔄 2/4 sub-layers implemented pre-sprint (2026-07-23 audit), 留 2 sub-layers 给 next sprint 跟 CAND-081/082 + K-5 upstream 参考一起做
+- **状态**: 🟡 partial done → 🔄 2/4 sub-layers implemented pre-sprint (2026-07-23 audit) → ✅ **done Phase 2 (2026-08-04~05, 3 commit + K-5 1-line)**: K-5 1-line CAND-080/082/044 cross-ref (commit `2068b80de`) + layer 2 KNOWN_RULES registry + set_rule_id params 升级 + 1 sample 升级 (commit `541a33cee`, 14 test) + layer 1 routing_rule_manage tool (list/get/patch) (commit `e6c56ef45`, 17 test). Phase 2 task 2+3 完整 close, 4 sub-layers 全部 done. Apply mechanism (CAND-080 layer 1.1) 留 future commit.
 - **来源**: 文章 (Datawhale, 2026-07-10) "Agent Skills 自进化" + cn 现有 routing 框架
 - **一句话**: rule-based routing 在真实反馈中持续更新, 三层结构渐进式加载
 - **估时**: 2-3 d → 1-1.5 d 剩余 (routing rule 自迭代 + rule 抽象 留给 next sprint)
@@ -899,7 +899,7 @@
 
 ### [CAND-081] 🗜️ Compaction 工具 (定期合并/下沉/删除冗余规则)
 
-- **状态**: 🟡 proposed
+- **状态**: 🟡 proposed → ✅ **done Phase 2 (2026-08-05, commit `2a6e9db72`)** — `routing_compaction_review` tool (read-only review of pending patch queue: duplicates / stale / clusters 3-section report), 借 `agent/curator.py:320+` UMBRELLA-BUILDING consolidation prompt pattern, 16 test, 0 auto-apply (跟 CAND-085 4 铁律 + mavis compaction audit 模式 1:1).
 - **来源**: 文章 "Skill Compaction" 段
 - **一句话**: 定期扫描规则, 发现重复/废弃/可合并, 人工 review 后应用
 - **估时**: 1-2 d
@@ -910,7 +910,7 @@
 
 ### [CAND-082] 🧪 Skills 验证 framework (A/B test + 指标)
 
-- **状态**: 🟡 proposed
+- **状态**: 🟡 proposed → ✅ **done Phase 2 (2026-08-05, commit `8f3c71606`)** — `routing_ab_test` tool (deterministic 5-metric A/B simulation engine: cost / latency / fallback_rate / success_rate / user_feedback, threshold check + per-metric pass + aggregate verdict + winning_variant recommendation), 借 upstream `e32ebc6aa` skill-authoring standards A/B harness shape, 20 test, 0 LLM call (synthetic baselines + deterministic perturbation), 0 persist (跟 4 铁律 1:1). CAND-078 historical LLM call data 集成是 future commit.
 - **来源**: 文章 "用验证决定新版本能否发布" 段
 - **一句话**: A/B test harness 验证 routing 改动, 决定发布/回滚
 - **估时**: 2-3 d
