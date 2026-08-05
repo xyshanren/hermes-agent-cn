@@ -782,7 +782,7 @@
 
 ### [CAND-072] 🧠 Lightweight router (小模型做预选路由)
 
-- **状态**: 🟡 proposed
+- **状态**: 🟡 proposed → ✅ **done Phase 3 Task 2 (commit `1c2efa104`, 14 test)**: heuristic-init 0 model 加载 (Jaccard keyword overlap + softmax, pure-Python), 4 actions (route/score/list_models/describe), `fallback_recommended` 3 trigger (no-overlap / low conf / low margin). 借 OpenFugu (trotsky1997, Apache-2.0) Qwen3-0.6B router 思路 0 vendor lock-in。CAND-073 (trained replacement) drop-in 兼容 (signature + scores 形状 1:1, model id 走 list_models), 留 next sprint kickoff doc。
 - **来源**: 外部项目 [trotsky1997/OpenFugu](https://github.com/trotsky1997/OpenFugu) (Apache-2.0 ✅, 393 stars)
 - **一句话**: 用小模型作为预选路由, rule-based fallback 兜底
 - **估时**: 1 d
@@ -876,7 +876,7 @@
 
 ### [CAND-080] 🔄 Skills 自进化系统 (rule-based routing 自迭代)
 
-- **状态**: 🟡 partial done → 🔄 2/4 sub-layers implemented pre-sprint (2026-07-23 audit) → ✅ **done Phase 2 (2026-08-04~05, 3 commit + K-5 1-line)**: K-5 1-line CAND-080/082/044 cross-ref (commit `2068b80de`) + layer 2 KNOWN_RULES registry + set_rule_id params 升级 + 1 sample 升级 (commit `541a33cee`, 14 test) + layer 1 routing_rule_manage tool (list/get/patch) (commit `e6c56ef45`, 17 test). Phase 2 task 2+3 完整 close, 4 sub-layers 全部 done. Apply mechanism (CAND-080 layer 1.1) 留 future commit.
+- **状态**: 🟡 partial done → 🔄 2/4 sub-layers implemented pre-sprint (2026-07-23 audit) → ✅ **done Phase 2 + Phase 3 (2026-08-04~05, 4 commit + K-5 1-line + 1 collateral fix)**: K-5 1-line CAND-080/082/044 cross-ref (commit `2068b80de`) + layer 2 KNOWN_RULES registry + set_rule_id params 升级 + 1 sample 升级 (commit `541a33cee`, 14 test) + layer 1 routing_rule_manage tool (list/get/patch) (commit `e6c56ef45`, 17 test). **Phase 3 Task 1 layer 1.1 apply mechanism** (commit `89ef02d06`, 11 test, 借 save_config atomic_yaml_write 0 新模式, confirmed=True 严格 1:1 跟 UX 倒退). **Phase 3 Task 3 CLI** `hermes routing patches list/show/apply/history` (commit `52d797649`, 14 test, 借 task 1 apply tool 0 新模式, 含 audit-trail stamp collateral fix). Phase 2 task 2+3 + Phase 3 task 1+3 完整 close, 4 sub-layers 全部 done, 闭环 1:1.
 - **来源**: 文章 (Datawhale, 2026-07-10) "Agent Skills 自进化" + cn 现有 routing 框架
 - **一句话**: rule-based routing 在真实反馈中持续更新, 三层结构渐进式加载
 - **估时**: 2-3 d → 1-1.5 d 剩余 (routing rule 自迭代 + rule 抽象 留给 next sprint)
