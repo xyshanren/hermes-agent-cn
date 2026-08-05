@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Routing Rule Manager Tool — Agent-Managed Routing Rule Inspection & Patches.
 
-CAND-080 layer 1: lets the agent inspect the routing-rule registry and
-queue *proposed* patches. The patches are written to a per-user pending
-directory (``~/.hermes/routing_patches/pending/``) using
-:func:`utils.atomic_json_write` so a crash mid-write can never corrupt
-the queue. **No** config.yaml or runtime routing state is mutated
-automatically — applying a pending patch is a user-confirmed step, the
-same way ``skill_manage(action=patch)`` leaves the skill file in a
-proposed state until the agent (or a downstream tool) actually loads
-it.
+CAND-080 layer 1 + layer 1.1: lets the agent inspect the routing-rule
+registry, queue *proposed* patches, and (with explicit user
+confirmation) apply a queued patch to ``config.yaml``.
+
+The pending queue (``~/.hermes/routing_patches/pending/``) is the
+default landing zone for any patch the agent wants to propose.
+``atomic_json_write`` (utils) makes the queue write crash-safe — a
+crash mid-write can never corrupt the queue. **No** config.yaml or
+runtime routing state is mutated automatically: applying a pending
+patch is a user-confirmed step, the same way ``skill_manage(action=patch)``
+leaves the skill file in a proposed state until the agent (or a
+downstream tool) actually loads it.
 
 Why this shape
 --------------
@@ -18,17 +21,20 @@ Why this shape
   ``config.yaml::model_routing.rules``; if this tool auto-applied,
   every agent feedback round would silently rewrite user config (the
   same silent-data-loss class as K-2 ``call_llm`` and CAND-083
-  ``custom_providers`` preservation). The pending-queue shape makes the
-  human-in-the-loop the **only** way a patch lands in ``config.yaml``.
+  ``custom_providers`` preservation). The pending-queue + explicit
+  ``confirmed=True`` shape makes the human-in-the-loop the **only**
+  way a patch lands in ``config.yaml``.
 - The registry itself (``agent.routing_decision.KNOWN_RULES``) was
   added in CAND-080 layer 2. Layer 1 doesn't redefine the schema — it
   just exposes the schema to the agent so a feedback loop can ask
   "what's the right shape for a ``fallback_chain`` patch?" before
-  queueing one. This matches how ``skill_manage`` reads
-  ``SKILL.md``-shaped skills but doesn't redefine the skill schema.
-- CAND-080 layer 1.1 (future) will add an apply step (``hermes routing
-  patches apply`` or an apply-on-restart hook) — out of scope for this
-  commit.
+  queueing one. Layer 1.1 re-uses the same ``params_schema`` on
+  apply so a rule that evolved between queue and apply fails-fast
+  instead of silently reshaping the patch.
+- Layer 1.1 re-validates at apply time (1:1 with layer 1's
+  pre-queue validation) so a stale patch (rule deleted from
+  ``KNOWN_RULES``) or a drifted schema surfaces as a clear error
+  before any ``config.yaml`` write.
 
 Actions
 -------
@@ -40,6 +46,15 @@ Actions
                pending patch record. Returns the patch id and the
                resolved target file path so the caller can show the
                user "queued patch #X at path Y".
+- ``apply``  — load a queued patch by ``patch_id``, re-validate it
+               against the *current* ``KNOWN_RULES`` + schema, and
+               atomically write
+               ``config.yaml::model_routing.rules[rule_id]``. Requires
+               ``confirmed=True`` (default ``False``). On success the
+               patch is moved from ``pending/`` to ``applied/`` (the
+               applied file carries ``applied_at_unix`` + the original
+               ``patch_id`` for traceability — read-only history).
+               Layer 1.1 of CAND-080.
 """
 
 from __future__ import annotations
@@ -82,6 +97,48 @@ def _pending_dir() -> Path:
     base = Path(get_hermes_home()) / "routing_patches" / "pending"
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def _applied_dir() -> Path:
+    """Return (and create) the per-user applied-patches directory.
+
+    Applied patches are *moved* (not copied) from
+    :func:`_pending_dir` to here on a successful apply, so the
+    queue-vs-history split is observable from the filesystem alone —
+    no DB needed. CAND-085 铁律 1 (可观测): every applied patch leaves
+    a permanent ``applied/<ts>-<uuid>.json`` trail carrying the
+    original ``patch_id`` and the ``applied_at_unix`` timestamp.
+    """
+    base = Path(get_hermes_home()) / "routing_patches" / "applied"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _find_pending_patch(patch_id: str) -> Optional[Path]:
+    """Return the path of the pending patch file carrying ``patch_id``,
+    or ``None`` when no pending patch matches.
+
+    Scans the pending dir linearly. The queue is small (one entry per
+    agent feedback round) so an O(n) scan is the right shape — adding
+    a manifest index would buy nothing and create a second write
+    surface (more places to drift). ``Path.name`` sorting keeps the
+    scan stable across calls so the result is deterministic.
+    """
+    if not patch_id:
+        return None
+    for path in sorted(_pending_dir().iterdir()):
+        if not path.name.endswith(".json") or path.name.startswith("."):
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # A half-written or corrupted pending file is not a
+            # match — skip it. The user can clean up with a manual
+            # ``rm`` if it sticks around.
+            continue
+        if isinstance(data, dict) and data.get("patch_id") == patch_id:
+            return path
+    return None
 
 
 def _validate_params_against_schema(
@@ -180,14 +237,24 @@ def routing_rule_manage(
     action: str,
     rule_id: Optional[str] = None,
     params: Optional[Dict[str, Any]] = None,
+    patch_id: Optional[str] = None,
+    confirmed: bool = False,
 ) -> str:
-    """Inspect the routing-rule registry and queue proposed patches.
+    """Inspect the routing-rule registry and queue / apply patches.
 
     Args:
-        action: one of ``"list"`` / ``"get"`` / ``"patch"``.
+        action: one of ``"list"`` / ``"get"`` / ``"patch"`` / ``"apply"``.
         rule_id: required for ``"get"`` and ``"patch"``.
         params: required for ``"patch"`` — must satisfy the rule's
             ``params_schema`` (see :data:`agent.routing_decision.KNOWN_RULES`).
+        patch_id: required for ``"apply"`` — the id returned by an
+            earlier ``"patch"`` call. Unknown / already-applied ids
+            fail-fast (no silent re-apply).
+        confirmed: required for ``"apply"`` — must be explicitly
+            ``True`` to land a patch in ``config.yaml``. Defaults to
+            ``False``; any value other than literal ``True`` is
+            rejected. CAND-085 铁律 2+4 (no implicit write / fail-fast)
+            + UX 倒退 1:1 with layer 1's explicit-write shape.
 
     Returns:
         JSON string. On success, the payload has ``{"success": True,
@@ -294,11 +361,214 @@ def routing_rule_manage(
             ensure_ascii=False,
         )
 
+    if action == "apply":
+        # Layer 1.1: apply a queued patch to config.yaml. Order of
+        # fail-fast checks matters — patch_id is checked before
+        # confirmed so a caller who forgot both gets the more
+        # specific "patch_id is required" error rather than the
+        # generic "set confirmed=True" one.
+        if not patch_id:
+            return json.dumps(
+                {"success": False, "error": "patch_id is required for 'apply'"},
+                ensure_ascii=False,
+            )
+        if confirmed is not True:
+            # UX 倒退 1:1 with layer 1 — the user must explicitly
+            # opt-in. ``is True`` (not ``not confirmed``) so a JSON
+            # string ``"true"`` / int ``1`` / list ``[True]`` from a
+            # front-end typo can't slip past the gate. The cost of a
+            # stricter check is one explicit ``True`` at every
+            # call site; the cost of a looser check is a config
+            # rewrite from a malformed payload.
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        "apply is a config-writing step; set "
+                        "confirmed=True to land this patch in config.yaml"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        # 1) Read the patch file from the pending queue.
+        pending_path = _find_pending_patch(patch_id)
+        if pending_path is None:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        f"no pending patch with patch_id={patch_id!r}; "
+                        "already applied or never queued"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        try:
+            record = json.loads(pending_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        f"pending patch {patch_id!r} at {pending_path} "
+                        f"is unreadable: {exc!s}"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        # 2) Re-validate the rule + params against the *current*
+        # KNOWN_RULES (defensive: the rule could have been removed
+        # in a newer commit, or its params_schema could have drifted
+        # since the patch was queued).
+        rec_rule_id = record.get("rule_id")
+        rec_params = record.get("params")
+        if not isinstance(rec_rule_id, str) or not isinstance(rec_params, dict):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        f"pending patch {patch_id!r} is malformed: "
+                        f"rule_id/params not a string/dict"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        spec = KNOWN_RULES.get(rec_rule_id)
+        if spec is None:
+            # Stale patch — the rule was removed from KNOWN_RULES
+            # (e.g. via a routing_compaction step). CAND-080
+            # compaction_review is the tool that surfaces such
+            # orphans; without it the agent has no way to learn the
+            # rule is gone.
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        f"stale patch: rule_id {rec_rule_id!r} is no "
+                        f"longer in KNOWN_RULES; run compaction_review "
+                        f"first to retire queued patches for retired rules"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        # Schema-drift guard: re-validate params against the *current*
+        # schema. If the schema evolved (e.g. a new required param
+        # was added) the patch would land in config.yaml with a
+        # shape that no longer matches the runtime, so fail-fast
+        # here. CAND-080 layer 1 queued with
+        # ``schema_at_queue_time`` precisely so this re-validation
+        # has a reference point — but the runtime check is the
+        # canonical one, not the snapshot.
+        validation_error = _validate_params_against_schema(
+            rec_rule_id, spec, rec_params
+        )
+        if validation_error is not None:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        f"re-validation failed (schema may have drifted "
+                        f"since queue): {validation_error}"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        # 3) Atomic write of model_routing.rules[rule_id] into
+        # config.yaml. We borrow :func:`hermes_cli.config.save_config`
+        # directly — it already wraps atomic_yaml_write +
+        # _CONFIG_LOCK + is_managed() check +
+        # _preserve_env_ref_templates, so 0 new atomic-write surface
+        # is introduced (CAND-085 铁律 4: 0 corrupt).
+        # Local import: the tool module is imported by
+        # ``agent/__init__.py`` early in the boot path, and pulling
+        # ``hermes_cli.config`` at module load time would surface a
+        # cyclic-init cost on every fresh process. The function is
+        # needed only on apply, so defer to call time.
+        from hermes_cli import config as _hermes_config
+
+        current = _hermes_config.read_raw_config() or {}
+        if not isinstance(current, dict):
+            # Defensive: a corrupted config.yaml that returned a
+            # non-dict at the top level. save_config would happily
+            # overwrite it, so guard explicitly.
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        f"config.yaml at {_hermes_config.get_config_path()} "
+                        f"is malformed (top-level {type(current).__name__}); "
+                        f"refusing to apply"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        model_routing = current.get("model_routing")
+        if not isinstance(model_routing, dict):
+            model_routing = {}
+        rules = model_routing.get("rules")
+        if not isinstance(rules, dict):
+            rules = {}
+        now = time.time()
+        rules[rec_rule_id] = {
+            "params": dict(rec_params),
+            "applied_at_unix": now,
+            "patch_id": patch_id,
+        }
+        model_routing["rules"] = rules
+        current["model_routing"] = model_routing
+        _hermes_config.save_config(current)
+        # 4) Move the patch from pending/ to applied/ *after* the
+        # config write succeeded. Doing it last means a failed
+        # apply leaves the patch in pending/ (re-tryable) and a
+        # successful apply leaves a single applied/ record carrying
+        # the patch_id + applied_at_unix (read-only history, 铁律 1
+        # 可观测). Path.replace is atomic on same-filesystem moves
+        # (both dirs share the same parent), so a crash mid-move
+        # can never leave the patch in both places.
+        applied_path = _applied_dir() / pending_path.name
+        if applied_path.exists():
+            # Same-uuid filename collision would mean two patches
+            # queued in the same millisecond with the same uuid4
+            # suffix — astronomically unlikely but guarded. Suffix
+            # the applied file with a counter so the apply still
+            # succeeds (the patch_id in config.yaml is the
+            # authoritative reference).
+            stem = pending_path.stem
+            counter = 2
+            while True:
+                candidate = _applied_dir() / f"{stem}-{counter}.json"
+                if not candidate.exists():
+                    applied_path = candidate
+                    break
+                counter += 1
+        pending_path.replace(applied_path)
+        logger.info(
+            "applied routing-rule patch %s for rule %r; "
+            "config section model_routing.rules.%s updated, "
+            "moved %s -> %s",
+            patch_id, rec_rule_id, rec_rule_id, pending_path, applied_path,
+        )
+        return json.dumps(
+            {
+                "success": True,
+                "patch_id": patch_id,
+                "rule_id": rec_rule_id,
+                "applied_path": str(applied_path),
+                "config_section": f"model_routing.rules.{rec_rule_id}",
+                "applied_at_unix": now,
+                "message": (
+                    f"Patch {patch_id} applied to "
+                    f"model_routing.rules.{rec_rule_id}"
+                ),
+            },
+            ensure_ascii=False,
+        )
+
     return json.dumps(
         {
             "success": False,
             "error": (
-                f"Unknown action {action!r}. Use: list, get, patch."
+                f"Unknown action {action!r}. Use: list, get, patch, apply."
             ),
         },
         ensure_ascii=False,
