@@ -4,7 +4,7 @@
 #
 # Copy this file to ~/.hermes/config.yaml and edit the values for your setup.
 # Sections marked with "(CAND-085)" are new for the AIMC integration;
-# everything else follows the standard hermes-agent-cn schema (v0.18.0+cn.2).
+# everything else follows the standard hermes-agent-cn schema (v0.18.0+cn.3).
 #
 # Cross-refs:
 #   - CAND-085 entry:    hermes-agent-cn/CANDIDATES.md Section F
