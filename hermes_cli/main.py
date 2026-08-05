@@ -10154,6 +10154,259 @@ def _is_electron_packaged_web_dist(path: str) -> bool:
     return "app.asar" in path.replace("\\", "/")
 
 
+def cmd_routing_patches(args):
+    """Routing-patch management — list / show / apply / history (CAND-080 layer 1.1 CLI).
+
+    Companion to ``tools.routing_rule_manager_tool.routing_rule_manage``. The
+    Python surface is the canonical entry; this CLI wrapper exists so an
+    operator can drive the apply path from the shell without importing
+    anything. **Every** config-writing step goes through the same
+    ``routing_rule_manage(action="apply", confirmed=True)`` gate the tool
+    enforces — there is no second code path that bypasses the
+    ``confirmed=True`` fail-fast. CAND-085 4 铁律 + UX 倒退 1:1
+    (跟 task 1 layer 1.1 apply 0 新模式).
+
+    Sub-actions:
+    - ``list``   — show pending + applied patches in two sections.
+    - ``show``   — show one patch by id (searches pending first, then applied).
+    - ``apply``  — apply a pending patch. **Requires** ``--confirmed``; the
+      flag must be present on the command line (跟 tool 的
+      ``confirmed is True`` 严格检查 1:1, 拒绝 "true" / 1 / [True] 等
+      truthy non-bool 防 front-end typo 静默 apply).
+    - ``history`` — show only the applied section (read-only, CAND-085 1:1).
+
+    0 写回 hermes profile outside the apply path: list / show / history
+    never touch config.yaml; apply 走 save_config atomic + is_managed() +
+    preserve_env_ref_templates (跟 task 1 借现成 0 新模式).
+    """
+    from tools.routing_rule_manager_tool import (
+        _applied_dir,
+        _find_pending_patch,
+        _pending_dir,
+        routing_rule_manage,
+    )
+
+    action = getattr(args, "patches_action", None)
+
+    if action is None:
+        # Bare ``hermes routing patches`` — show a one-line usage summary
+        # so an operator can see the sub-action set without ``--help``.
+        print("\nrouting patches — manage queued + applied routing-rule patches")
+        print("  list      show pending + applied sections")
+        print("  show ID   show one patch by id (pending first, then applied)")
+        print("  apply ID  apply a pending patch (REQUIRES --confirmed)")
+        print("  history   show only the applied section (read-only)")
+        print()
+        return
+
+    if action == "list":
+        pending_dir = _pending_dir()
+        applied_dir = _applied_dir()
+        pending = sorted(pending_dir.iterdir()) if pending_dir.exists() else []
+        applied = sorted(applied_dir.iterdir()) if applied_dir.exists() else []
+        if not pending and not applied:
+            print("No routing patches.")
+            return
+        if pending:
+            print(f"\nPENDING ({len(pending)}):")
+            print(
+                f"  {'patch_id':<14} {'rule_id':<28} "
+                f"{'queued_at':<20} params"
+            )
+            print(
+                f"  {'─' * 13}  {'─' * 27}  "
+                f"{'─' * 19}  {'─' * 30}"
+            )
+            for p in pending:
+                if not p.name.endswith(".json") or p.name.startswith("."):
+                    continue
+                try:
+                    rec = json.loads(p.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                queued_at = _fmt_unix(rec.get("queued_at_unix"))
+                params_str = json.dumps(
+                    rec.get("params", {}), ensure_ascii=False
+                )[:60]
+                print(
+                    f"  {rec.get('patch_id', '?'):<14} "
+                    f"{rec.get('rule_id', '?'):<28} "
+                    f"{queued_at:<20} {params_str}"
+                )
+        if applied:
+            print(f"\nAPPLIED ({len(applied)}):")
+            print(
+                f"  {'patch_id':<14} {'rule_id':<28} "
+                f"{'applied_at':<20} config_section"
+            )
+            print(
+                f"  {'─' * 13}  {'─' * 27}  "
+                f"{'─' * 19}  {'─' * 30}"
+            )
+            for p in applied:
+                if not p.name.endswith(".json") or p.name.startswith("."):
+                    continue
+                try:
+                    rec = json.loads(p.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                applied_at = _fmt_unix(rec.get("applied_at_unix"))
+                section = (
+                    f"model_routing.rules.{rec.get('rule_id', '?')}"
+                )
+                print(
+                    f"  {rec.get('patch_id', '?'):<14} "
+                    f"{rec.get('rule_id', '?'):<28} "
+                    f"{applied_at:<20} {section}"
+                )
+        print()
+        return
+
+    if action == "show":
+        patch_id = getattr(args, "patch_id", None)
+        if not patch_id:
+            print("usage: hermes routing patches show <patch_id>")
+            return
+        # Pending first (the live state), then applied (history).
+        path = _find_pending_patch(patch_id)
+        if path is not None:
+            rec = json.loads(path.read_text(encoding="utf-8"))
+            print(f"\npatch_id:          {rec.get('patch_id', '?')}")
+            print(f"status:            pending")
+            print(f"rule_id:           {rec.get('rule_id', '?')}")
+            print(f"description:       {rec.get('description', '?')}")
+            print(f"owner:             {rec.get('owner', '?')}")
+            print(
+                f"params:            {json.dumps(rec.get('params', {}), ensure_ascii=False)}"
+            )
+            print(
+                f"queued_at:         {_fmt_unix(rec.get('queued_at_unix'))}"
+            )
+            print(
+                f"queued_path:       {path}"
+            )
+            print()
+            return
+        # Try applied.
+        applied_path = _applied_dir() / f"{patch_id[:12]}-"  # prefix glob
+        for cand in sorted(_applied_dir().iterdir()):
+            try:
+                rec = json.loads(cand.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if rec.get("patch_id") == patch_id:
+                print(f"\npatch_id:          {rec.get('patch_id', '?')}")
+                print(f"status:            applied")
+                print(f"rule_id:           {rec.get('rule_id', '?')}")
+                print(
+                    f"params:            {json.dumps(rec.get('params', {}), ensure_ascii=False)}"
+                )
+                print(
+                    f"applied_at:        {_fmt_unix(rec.get('applied_at_unix'))}"
+                )
+                print(
+                    f"config_section:    model_routing.rules.{rec.get('rule_id', '?')}"
+                )
+                print(f"applied_path:      {cand}")
+                print()
+                return
+        print(f"no patch with id {patch_id!r} (pending or applied)")
+        return
+
+    if action == "apply":
+        patch_id = getattr(args, "patch_id", None)
+        if not patch_id:
+            print("usage: hermes routing patches apply <patch_id> --confirmed")
+            return
+        # UX 倒退 1:1 防护: --confirmed 必须在 argv, 默认值 False。
+        # 跟 tool 的 `confirmed is True` 严格检查 1:1 (拒绝 "true" / 1
+        # / [True] 等 truthy non-bool, 防 front-end typo 静默 apply)。
+        confirmed = bool(getattr(args, "confirmed", False))
+        if not confirmed:
+            print(
+                "Refusing to apply without --confirmed. "
+                "This is a config-writing step; pass --confirmed on the "
+                "command line to land the patch in config.yaml."
+            )
+            return
+        # Delegate to the tool. The tool is the canonical source of the
+        # 5-step fail-fast gate (confirmed → patch_id → read patch →
+        # re-validate → atomic write → move); the CLI is a thin wrapper
+        # so the gate logic lives in exactly one place.
+        result = json.loads(
+            routing_rule_manage(
+                action="apply",
+                patch_id=patch_id,
+                confirmed=True,
+            )
+        )
+        if not result.get("success"):
+            print(f"apply failed: {result.get('error', 'unknown error')}")
+            return
+        print(f"\nPatch {result['patch_id']} applied:")
+        print(f"  rule_id:        {result['rule_id']}")
+        print(f"  config_section: {result['config_section']}")
+        print(f"  applied_at:     {_fmt_unix(result['applied_at_unix'])}")
+        print(f"  applied_path:   {result['applied_path']}")
+        print()
+        return
+
+    if action == "history":
+        applied_dir = _applied_dir()
+        applied = sorted(applied_dir.iterdir()) if applied_dir.exists() else []
+        if not applied:
+            print("No applied routing patches (history empty).")
+            return
+        print(f"\nAPPLIED ({len(applied)}):")
+        print(
+            f"  {'patch_id':<14} {'rule_id':<28} "
+            f"{'applied_at':<20} config_section"
+        )
+        print(
+            f"  {'─' * 13}  {'─' * 27}  "
+            f"{'─' * 19}  {'─' * 30}"
+        )
+        for p in applied:
+            if not p.name.endswith(".json") or p.name.startswith("."):
+                continue
+            try:
+                rec = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            applied_at = _fmt_unix(rec.get("applied_at_unix"))
+            section = f"model_routing.rules.{rec.get('rule_id', '?')}"
+            print(
+                f"  {rec.get('patch_id', '?'):<14} "
+                f"{rec.get('rule_id', '?'):<28} "
+                f"{applied_at:<20} {section}"
+            )
+        print()
+        return
+
+    print(f"unknown patches action {action!r}; use list / show / apply / history.")
+
+
+def _fmt_unix(unix_ts):
+    """Format a unix timestamp as ``YYYY-MM-DD HH:MM`` (local time).
+
+    Returns ``"-"`` when the timestamp is missing or non-numeric so the
+    CLI output stays column-aligned when a record has a partial shape
+    (e.g. a half-written file in pending/ that we're listing for the
+    operator's benefit rather than crashing on).
+
+    Uses ``_time`` (the module-level ``import time as _time`` alias at
+    the top of :mod:`hermes_cli.main`) to dodge a name collision with a
+    number of local ``time`` loop variables in cmd_dashboard / cmd_*
+    earlier in this file.
+    """
+    if unix_ts is None:
+        return "-"
+    try:
+        return _time.strftime("%Y-%m-%d %H:%M", _time.localtime(float(unix_ts)))
+    except (TypeError, ValueError, OSError):
+        return "-"
+
+
 def cmd_dashboard(args):
     """Start the web UI server, or (with --stop/--status) manage running ones."""
     _token_file = getattr(args, "ssh_session_token_file", None)
@@ -12324,6 +12577,96 @@ def main():
     # profile command  (parser built in hermes_cli/subcommands/profile.py)
     # =========================================================================
     build_profile_parser(subparsers, cmd_profile=cmd_profile)
+
+    # =========================================================================
+    # routing command — routing-rule patch management (CAND-080 layer 1.1 CLI)
+    # =========================================================================
+    #
+    # Surfaces ``hermes routing patches <list|show|apply|history>`` as the
+    # shell-side companion to ``tools.routing_rule_manager_tool`` (Phase 3
+    # Task 1 layer 1.1 + Phase 3 Task 3 CLI). Every config-writing step
+    # delegates back to the tool so the ``confirmed=True`` fail-fast gate
+    # (跟 CAND-085 4 铁律 1:1) lives in exactly one place. UX 倒退 1:1
+    # 防护: ``apply`` requires ``--confirmed`` on the command line (no
+    # default; can't be set from a JSON-shaped truthy non-bool).
+    routing_parser = subparsers.add_parser(
+        "routing",
+        help="Manage routing-rule patches (CAND-080 layer 1.1)",
+        description=(
+            "Inspect and apply routing-rule patches queued by the agent. "
+            "The tool layer (tools.routing_rule_manager_tool) is the "
+            "canonical source of the apply gate; this CLI is a thin shell "
+            "wrapper. Patches land in config.yaml::model_routing.rules "
+            "only via ``hermes routing patches apply <patch_id> --confirmed``."
+        ),
+    )
+    routing_subparsers = routing_parser.add_subparsers(dest="routing_action")
+
+    # The actual patch sub-action group lives under ``hermes routing
+    # patches`` (跟 task 1 kickoff doc 1:1 命名). A bare ``hermes routing``
+    # prints the namespace summary and exits.
+    routing_patches_parser = routing_subparsers.add_parser(
+        "patches",
+        help="Manage the routing-rule patch queue (pending + applied)",
+        description=(
+            "Inspect and apply routing-rule patches. The patch queue "
+            "lives under ``$HERMES_HOME/routing_patches/{pending,applied}/``; "
+            "the apply step writes ``config.yaml::model_routing.rules`` "
+            "atomically via ``hermes_cli.config.save_config`` (跟 task 1 "
+            "借现成 0 新模式)."
+        ),
+    )
+    patches_subparsers = routing_patches_parser.add_subparsers(
+        dest="patches_action"
+    )
+
+    # list
+    patches_subparsers.add_parser(
+        "list",
+        help="List pending + applied routing-rule patches",
+    )
+
+    # show <patch_id>
+    patches_show = patches_subparsers.add_parser(
+        "show",
+        help="Show one routing-rule patch by id (pending first, then applied)",
+    )
+    patches_show.add_argument(
+        "patch_id",
+        help="12-char patch id returned by the layer-1 patch tool",
+    )
+
+    # apply <patch_id> [--confirmed]
+    patches_apply = patches_subparsers.add_parser(
+        "apply",
+        help=(
+            "Apply a pending routing-rule patch to config.yaml. "
+            "REQUIRES --confirmed (跟 tool confirmed=True 1:1, 0 隐式)."
+        ),
+    )
+    patches_apply.add_argument(
+        "patch_id",
+        help="12-char patch id of a queued (pending) patch",
+    )
+    patches_apply.add_argument(
+        "--confirmed",
+        action="store_true",
+        default=False,
+        help=(
+            "Explicit user confirmation. Required to land the patch in "
+            "config.yaml. CAND-085 4 铁律 1:1 (不写回 hermes profile): "
+            "without this flag the CLI refuses the apply."
+        ),
+    )
+
+    # history
+    patches_subparsers.add_parser(
+        "history",
+        help="List only applied patches (read-only, 跟 CAND-085 1:1)",
+    )
+
+    routing_patches_parser.set_defaults(func=cmd_routing_patches)
+    routing_parser.set_defaults(func=cmd_routing_patches)
 
     # =========================================================================
     # completion command

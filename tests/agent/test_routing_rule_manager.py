@@ -810,3 +810,58 @@ class TestApplyHappyPath:
         assert len(applied) == 2
         # Pending is empty.
         assert list(fake_hermes_home["pending"].iterdir()) == []
+
+    def test_applied_record_carries_audit_trail_stamps(
+        self, fake_hermes_home
+    ):
+        """The moved record in ``applied/`` must be self-contained for
+        audit (跟 task 3 CLI list/show/history 1:1, 不需要 cross-ref
+        config.yaml). The 3 stamps:
+
+        - ``applied_at_unix``: timestamp of the apply
+        - ``config_section``: ``"model_routing.rules.<rule_id>"``
+        - ``applied_path``: relative to HERMES_HOME (portable for tar)
+
+        Without these, an operator reading ``applied/`` after the
+        fact would see the original ``queued_at_unix`` and no
+        indication of *when* / *where* the rule landed — defeating
+        the "0 静默" part of CAND-085 铁律 1.
+        """
+        queued = _queue_patch(
+            "fallback_chain",
+            {"chain_index": 0, "provider": "kimi"},
+            fake_hermes_home["pending"],
+        )
+        apply_result = json.loads(
+            rrm.routing_rule_manage(
+                action="apply",
+                patch_id=queued["patch_id"],
+                confirmed=True,
+            )
+        )
+        assert apply_result["success"], apply_result
+        # Find the moved record.
+        applied_files = list(fake_hermes_home["applied"].iterdir())
+        assert len(applied_files) == 1
+        moved = json.loads(applied_files[0].read_text(encoding="utf-8"))
+        # The 3 audit-trail fields are present and consistent.
+        assert "applied_at_unix" in moved
+        assert isinstance(moved["applied_at_unix"], float)
+        # applied_at_unix >= queued_at_unix (apply happens after queue).
+        assert moved["applied_at_unix"] >= moved["queued_at_unix"]
+        assert moved["config_section"] == (
+            f"model_routing.rules.{moved['rule_id']}"
+        )
+        assert "applied_path" in moved
+        # The applied_path is a HERMES_HOME-relative POSIX-style
+        # path (the operator can ship applied/ across machines
+        # without breaking the audit ref).
+        assert moved["applied_path"].endswith(
+            f"routing_patches{os.sep}applied{os.sep}"
+            f"{applied_files[0].name}"
+        ) or "/" in moved["applied_path"]  # relative forward-slash form
+        # The original queued_at fields survive the move (the
+        # audit trail is a superset, not a replacement).
+        assert "queued_at_unix" in moved
+        assert moved["rule_id"] == "fallback_chain"
+        assert moved["params"] == {"chain_index": 0, "provider": "kimi"}

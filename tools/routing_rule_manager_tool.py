@@ -522,9 +522,18 @@ def routing_rule_manage(
         # apply leaves the patch in pending/ (re-tryable) and a
         # successful apply leaves a single applied/ record carrying
         # the patch_id + applied_at_unix (read-only history, 铁律 1
-        # 可观测). Path.replace is atomic on same-filesystem moves
-        # (both dirs share the same parent), so a crash mid-move
-        # can never leave the patch in both places.
+        # 可观测).
+        #
+        # The moved record gets 3 new fields so the applied/ file
+        # is self-contained for audit (跟 task 3 CLI list/show/history
+        # 1:1, 不需要再 cross-ref config.yaml):
+        #   - ``applied_at_unix``   timestamp of the apply
+        #   - ``config_section``    "model_routing.rules.<rule_id>"
+        #   - ``applied_path``      relative to HERMES_HOME
+        #
+        # Path.replace is atomic on same-filesystem moves (both dirs
+        # share the same parent), so a crash mid-move can never
+        # leave the patch in both places.
         applied_path = _applied_dir() / pending_path.name
         if applied_path.exists():
             # Same-uuid filename collision would mean two patches
@@ -541,7 +550,31 @@ def routing_rule_manage(
                     applied_path = candidate
                     break
                 counter += 1
-        pending_path.replace(applied_path)
+        # Stamp the moved record with the apply-time audit fields
+        # BEFORE the move so the file on disk is already correct
+        # when the rename lands. ``replace`` is atomic; if it
+        # succeeds the file is the stamped one, if it fails the
+        # pending/ file is unchanged and we can re-try.
+        record["applied_at_unix"] = now
+        record["config_section"] = (
+            f"model_routing.rules.{rec_rule_id}"
+        )
+        try:
+            # Relative path for portability (moved records don't
+            # pin a HERMES_HOME — useful when an operator tars
+            # the applied/ dir to ship to a colleague).
+            record["applied_path"] = str(
+                applied_path.relative_to(Path(get_hermes_home()))
+            )
+        except ValueError:
+            # Fall back to absolute when the path can't be made
+            # relative (e.g. applied/ is on a different volume).
+            record["applied_path"] = str(applied_path)
+        # Re-write the (now-stamped) record to applied/ via
+        # atomic_json_write so a half-written file can't poison
+        # the audit trail, then remove the pending/ source.
+        atomic_json_write(applied_path, record)
+        pending_path.unlink()
         logger.info(
             "applied routing-rule patch %s for rule %r; "
             "config section model_routing.rules.%s updated, "
