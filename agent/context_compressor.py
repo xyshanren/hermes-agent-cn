@@ -34,6 +34,16 @@ from agent.redact import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
+# Metadata keys for compressed summary messages.
+# Underscore-prefixed so wire sanitizers strip them before reaching
+# strict gateways (Fireworks / Mistral / Moonshot-Kimi / opencode-go
+# reject unknown message keys with "Extra inputs are not permitted",
+# which would poison the session — see test_compressed_summary_metadata).
+COMPRESSED_SUMMARY_METADATA_KEY = "_compressed_summary"
+COMPRESSED_SUMMARY_HAS_USER_TURN_KEY = "_compressed_summary_has_user_turn"
+MICRO_COMPACT_MARKER_KEY = "_micro_compact_marker"
+_DB_PERSISTED_MARKER = "_db_persisted"
+
 HISTORICAL_TASK_HEADING = "## Historical Task Snapshot"
 HISTORICAL_IN_PROGRESS_HEADING = "## Historical In-Progress State"
 HISTORICAL_PENDING_ASKS_HEADING = "## Historical Pending User Asks"
