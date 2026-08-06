@@ -1,0 +1,25 @@
+CAND-011: PTY sessions keep-alive (Sprint 7 Wave 2)
+
+跟 plan CAND-011 1:1 配对 (跟 CAND-005/007+054/014/017/052/044 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `41166bbe0` + `e5ac169c2` + `e10e4bca8` + `0ecfbc989` 1:1 配对, 4 commits 跨 4 days 1:1):
+- pty_session_registry (跟 c1 1:1, PtySessionRegistry with reap + capacity bound)
+- pty_session_drain_attach_detach (跟 c2 1:1, drain/attach/detach/eof_close 4 op)
+- pty_session_ringbuffer (跟 c3 1:1, RingBuffer for keep-alive output capture 跟 capacity bound)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对):
+- apply_pty_sessions(session_id, op, line, capacity) → 跑 3 件套, 返 dict 3 keys (registry / drain_attach_detach / ringbuffer)
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: PTY session 0 hit PtySessionRegistry (8-07 verify), 0 改 PTY 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 PTY 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 2.5h (跟 plan 4-6h 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 7 Wave 2 第 5 步 (估 4-6h, 实际 2.5h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 CAND-044 6 test baseline 1:1)
+mavis "fix collateral issues in-scope" 1:1 配对: 顺手补 test_cand_011_2 用 apply_pty_sessions 触发 register 路径, 跟 Sprint 2 K-7 修 K-8 _SLASH_COMMANDS dict 1:1 配对
+
+Wave 2 5 候选 done, 30 test 累计, 估时 ~5h 累计 (跟 plan 8-13h 1:1 配对 0.4-0.6x 缩)
