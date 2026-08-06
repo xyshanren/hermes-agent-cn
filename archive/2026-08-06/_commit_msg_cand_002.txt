@@ -1,0 +1,30 @@
+CAND-002: kanban worker crash 5 件套 (Sprint 6b)
+
+跟 plan CAND-002 1:1 配对 (跟 CAND-007+054 startup_hygiene 8 件套 + CAND-005
+webhook_filters 1:1 配对 0 改旧):
+
+5 件套 (跟 upstream 5 commits 1:1, 1 file 5 functions 跟 CAND-007+054 1 file
+8 functions 1:1 配对, plan "1 commit 1 hygiene fix" 1:1 配对):
+- _wants_tui_early_safe (跟 c1 1:1, TUI 抢 worker run 修复)
+- spawn_worker_headless_safe (跟 c2 1:1, headless spawn 防 hang)
+- requeue_bypass_safe (跟 c3 1:1, re-queue bypass 防 stuck)
+- crash_diagnostics_collect (跟 c4 1:1, crash 时 collect)
+- dispatcher_once_kwargs_safe (跟 c5 1:1, 跟 7th split bug 4c89dafff 1:1 配对)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 run_all_startup_hygiene 1:1):
+- apply_kanban_safety() → 跑 5 件套, 返 dict 5 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: kanban_tools.py 0 hit _wants_tui_early_safe / headless spawn
+  / re-queue / crash_diagnostics / dispatcher_once (8-06 verify), 0 改 kanban_tools
+  主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 5 functions, 跟 CAND-007+054
+  1 file 8 functions 1:1 配对 — plan "1 commit 1 hygiene fix" 1:1 配对, 5 commit 5 file
+  风险大, 1 file 5 functions 跟 Sprint 6b 1 候选 1 commit 1:1 配对)
+- UX 倒退审计: 0 改 kanban_tools.py 现有 dispatcher, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.5-1h (跟 plan 2-3h 1:1 配对 0.5-1x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 6b 第三步 (估 2-3h, 实际 0.5-1h, 1:1 配对)
+8 test pass, 0 回归 (跟 CAND-010 6 test baseline 1:1)
