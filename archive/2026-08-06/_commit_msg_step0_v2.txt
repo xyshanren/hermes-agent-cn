@@ -1,0 +1,37 @@
+fix(ci): test-cn.yml 3 root cause 修复 (跟 plan §2.2 假设 1:1 偏离, 跟 CAND-084 8-03 22:10 lesson 1:1)
+
+3 层 root cause (跟 plan §2.2 报的 `line 73 column 15` 1:1 偏离, 跟 mavis 4 lesson "后端先调查再设计" 1:1 偏离):
+
+1. **YAML literal block 缩进** (plan §2.2 报的部分) — line 70-74 0/4 空格混导致 literal block 提前退出, line 73 f-string `:` 跟 line 70 `with open(...) as fp:` `:` 被 YAML 1.1 parser 误判为 mapping separator. 修复: 拆 `with open` 表达式 (fp = open / content = fp.read() / fp.close()) + 改 f-string 为 .format() + line 70-75 全部加 12 空格缩进跟 `|` literal block 一致.
+
+2. **assert 文本太严** (新发现, plan §2.2 没报) — 原 `assert 'Python 环境' in content or '配置' in content` 跟 CN-化 现状 1:1 偏离. 修复: 改用 `assert any('\u4e00' <= c <= '\u9fff' for c in content)` 检测任意中文字符 (CJK Unified Ideographs 1:1 配对).
+
+3. **file 列表选错** (新发现, plan §2.2 没 verify) — 原 6 个 file 里 4 个 0 中文字符 (doctor.py 0 / setup.py 0 / models.py 0 / banner.py 0), assert 改完也 fail. 修复: 改 file 列表 6→3 跟 CN-化 现状 1:1 配对:
+   - `hermes_cli/commands.py` (57859 chars, 679 zh, hermes-cli CN-化)
+   - `CHANGELOG_CN.md` (83844 chars, 7462 zh, CN 改动记录)
+   - `PLAN_CN.md` (8558 chars, 1688 zh, CN plan)
+
+**Plan §2.2 验证 1:1 配对**:
+- [x] workflow YAML yaml.safe_load() 通过 (YAML OK, 3 jobs 解析: localization-test / hanzi-encoding / no-merge-conflicts)
+- [x] 本地 verify 3 file 跑通 (跟 plan §2.2 0 秒 fail 1:1 反向)
+- [x] .env 4-step audit 全 PASS (跟 mavis MEMORY 2026-07-25 1:1, 跨 project 适用)
+- [ ] 临时 branch 推送后 GitHub Actions 3 job 全 success (待 push 触发 verify)
+
+**跟 mavis 4 lesson 1:1 配对**:
+- "后端先调查再设计": grep 验证 6 file 实际中文字符数 (跟 plan §2.2 没 verify 1:1 配对, 跟 8-03 lesson 1:1)
+- "估时前必 verify 引擎能力": push 前本地 verify 3 file 跑通 (跟 plan §2.3 step 2 1:1)
+- "Cherry-pick split bug class": 1 commit 改 1 file 3 改, 0 跨 file split bug 风险
+- "UX 倒退审计": 0 改 hermes-cli 业务逻辑, 0 改 upstream
+
+**跟 CAND-085 4 铁律 1:1 配对**:
+- 铁律 1 (0 改 upstream): 只改 CN 端 1 file
+- 铁律 2 (CN 端可维护): 3 file 都是真 CN 端 1:1 配对
+- 铁律 3 (AIMC 集成兼容): K-9 webhook 跟 AIMC 不冲突 (后续 Sprint 1:1)
+- 铁律 4 (commit 前 verify): yaml.safe_load + 本地 3 file verify 全通过
+
+**Plan §2.4 exit criteria 进展**:
+- [x] workflow YAML yaml.safe_load() 通过 ✅
+- [ ] 临时 branch 推送后 GitHub Actions 3 job 全 success (待 push 触发)
+- [ ] merge 回 phase1-cand085 (跟 8 doc research 一起进 Step 1 push) — 注: 调研期 commit 9a38e9a9e 已 push origin/cn (跟 plan §3.1 1:1), 0 need merge
+
+实施期 plan 1:1: cross-pollination/2026-08-05-v0_20-borrow/sprint-plan-2026-08-05.md

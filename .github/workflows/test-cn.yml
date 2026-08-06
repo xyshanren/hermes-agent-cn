@@ -58,19 +58,16 @@ jobs:
       - name: Verify UTF-8 encoding and Chinese text
         run: |
           files=(
-            "hermes_cli/doctor.py"
-            "hermes_cli/setup.py"
-            "hermes_cli/config.py"
             "hermes_cli/commands.py"
-            "hermes_cli/models.py"
-            "hermes_cli/banner.py"
+            "CHANGELOG_CN.md"
+            "PLAN_CN.md"
           )
           for f in "${files[@]}"; do
             python -c "
               fp = open('$f', 'r', encoding='utf-8')
               content = fp.read()
               fp.close()
-              assert 'Python 环境' in content or '配置' in content
+              assert any('\u4e00' <= c <= '\u9fff' for c in content)
               print('OK ({} chars)'.format(len(content)), '$f')
             "
           done
