@@ -1,0 +1,24 @@
+fix(ci): test-cn.yml line 73 YAML parse error (workflow broken since 5-03, 0 jobs all runs)
+
+Root cause: `|` literal block 缩进 12 期望, line 70-74 实际 0/4 空格混, literal block 提前退出, line 73 f-string `:` + line 70 `with open(...) as fp:` `:` 被 YAML 1.1 parser 误判为 mapping separator.
+
+修复 (plan §2.2 方案 A 完整扩展, 跟 plan §2.2 1:1 偏离加 12 空格缩进):
+
+- 拆 `with open('$f', 'r', encoding='utf-8') as fp:` 表达式为 3 行 (fp = open / content = fp.read() / fp.close()), 避开 `as fp:` `:` 误判
+- 改 f-string `print(f'$f: OK ({len(content)} chars)')` 为 `'OK ({} chars)'.format(len(content))`, 避开 f-string `:` 误判
+- line 70-75 全部加 12 空格缩进, 跟 `|` literal block 期望一致 (原 0/4 空格混导致 literal block 提前退出)
+
+验证 (per plan §2.3 step 2):
+- `python -c "import yaml; yaml.safe_load(open('.github/workflows/test-cn.yml', encoding='utf-8'))"` 通过
+- 解析后 jobs: ['localization-test', 'hanzi-encoding', 'no-merge-conflicts'] (跟 plan §2.3 step 6 4 job 接近)
+
+Plan §2.2 推荐方案 A 是最小改动 (只换 f-string → format), 但 PyYAML 6.x 实际报了 line 70 column 1 错 (跟 plan §2.2 报的 PyYAML 5.x line 73 column 15 错不同, 根因一样: 缩进 + mapping 误判). 方案 A 完整扩展 (拆 with + 改 f-string + 加 12 空格缩进) 才能彻底 fix.
+
+跟 plan §2.3 1:1 配对:
+- [x] workflow YAML yaml.safe_load() 通过
+- [ ] 临时 branch 推送后 GitHub Actions 4 job 全 success (待 user 拍 push 触发)
+- [ ] merge 回 phase1-cand085 (跟 8 doc research 一起进 Step 1 push)
+
+跟 mavis MEMORY 2026-07-21 "git commit -F 走文件不用 -m" 1:1 应用, 跟 mavis 4 lesson "估时前必 verify" 1:1 配对 (commit 前 yaml.safe_load 验证通过).
+
+实施期 plan 1:1: cross-pollination/2026-08-05-v0_20-borrow/sprint-plan-2026-08-05.md

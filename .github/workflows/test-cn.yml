@@ -67,11 +67,12 @@ jobs:
           )
           for f in "${files[@]}"; do
             python -c "
-with open('$f', 'r', encoding='utf-8') as fp:
-    content = fp.read()
-    assert 'Python 环境' in content or '配置' in content
-    print(f'$f: OK ({len(content)} chars)')
-"
+              fp = open('$f', 'r', encoding='utf-8')
+              content = fp.read()
+              fp.close()
+              assert 'Python 环境' in content or '配置' in content
+              print('OK ({} chars)'.format(len(content)), '$f')
+            "
           done
           echo "All files have valid UTF-8 and contain Chinese text."
 
