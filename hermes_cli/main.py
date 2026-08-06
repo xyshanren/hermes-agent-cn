@@ -13511,6 +13511,16 @@ def _try_termux_fast_tui_launch() -> bool:
 
 def main():
     """Main entry point for hermes CLI."""
+    # K-6: `!` prefix shell bypass (跟 plan §6 1:1 配对, 0 走 LLM 解释)
+    # 跟 Bash/Zsh `!` history expansion spirit 1:1 配对
+    # 跟 mavis Cherry-pick split bug class 1:1 配对 (0 LLM 解释 = 0 silent fail 风险)
+    # 跟 mavis UX 倒退审计 1:1 配对 (现有 chat REPL happy path 不变, K-6 是独立 add-only path)
+    import sys as _k6_sys
+    from hermes_cli.shell_bypass import is_shell_bypass, extract_shell_command, handle_shell_bypass
+    if is_shell_bypass(_k6_sys.argv[1:]):
+        cmd = extract_shell_command(_k6_sys.argv[1:])
+        _k6_sys.exit(handle_shell_bypass(cmd))
+
     # Cosmetic: make the process show up as 'hermes' instead of 'python3.11'
     # in ps/top/htop.  Non-fatal — just a nicer UX.
     _set_process_title()
