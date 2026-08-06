@@ -21,6 +21,8 @@ TOOL_REQUEST_MIDDLEWARE = "tool_request"
 TOOL_EXECUTION_MIDDLEWARE = "tool_execution"
 LLM_REQUEST_MIDDLEWARE = "llm_request"
 LLM_EXECUTION_MIDDLEWARE = "llm_execution"
+WEBHOOK_REQUEST_MIDDLEWARE = "webhook_request"  # K-9 pre_webhook lifecycle hook
+WEBHOOK_DELIVERY_MIDDLEWARE = "webhook_delivery"  # K-9 post_webhook lifecycle hook
 
 # Back-compat aliases for older PoC branches that used API terminology.
 API_REQUEST_MIDDLEWARE = LLM_REQUEST_MIDDLEWARE
@@ -31,6 +33,8 @@ VALID_MIDDLEWARE: set[str] = {
     TOOL_EXECUTION_MIDDLEWARE,
     LLM_REQUEST_MIDDLEWARE,
     LLM_EXECUTION_MIDDLEWARE,
+    WEBHOOK_REQUEST_MIDDLEWARE,
+    WEBHOOK_DELIVERY_MIDDLEWARE,
 }
 
 
