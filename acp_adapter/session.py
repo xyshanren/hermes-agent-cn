@@ -181,6 +181,7 @@ class SessionState:
     runtime_lock: Any = field(default_factory=Lock)
     current_prompt_text: str = ""
     interrupted_prompt_text: str = ""
+    focus: str = ""  # K-7 /focus slash command: conversation focus filter tag
 
 
 class SessionManager:
