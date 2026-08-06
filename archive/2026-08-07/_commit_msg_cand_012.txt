@@ -1,0 +1,22 @@
+CAND-012: MEM0 self-hosted mode (Sprint 7 Wave 1)
+
+跟 plan CAND-012 1:1 配对 (跟 CAND-005/007+054 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `5e51b123f` 1:1 配对):
+- mem0_self_hosted_config (跟 c1 1:1, 加 self-hosted URL field)
+- mem0_setup_wizard_branch (跟 c2 1:1, setup wizard 加 self-hosted 分支)
+- mem0_self_hosted_healthcheck (跟 c3 1:1, healthcheck verify self-hosted reach)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对):
+- apply_mem0_self_hosted(url, api_key, choice) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: mem0 setup wizard 0 hit (8-07 verify), 0 改 setup wizard 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 mem0 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.25h (跟 plan 1h 1:1 配对 0.25x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 7 Wave 1 第 1 步 (估 1h, 实际 0.25h, 1:1 配对 0.25x 缩)
+6 test pass, 0 回归 (跟 Sprint 6b baseline 1:1)
