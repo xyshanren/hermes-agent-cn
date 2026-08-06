@@ -1,0 +1,28 @@
+docs(cn): CHANGELOG v0.18.0+cn.11 (Sprint 6b: Tier 2 fix hard 类 5 候选 done)
+
+跟 plan §14 退出条件 1:1 配对 (Sprint 6b 收尾 batch push + tag v0.18.0+cn.11):
+
+Sprint 6b 5 候选 5 commit 跟 plan CAND-007+054/010/002/004/053 1:1 配对:
+- CAND-007+054 gateway startup hygiene 8 件套 (commit adda7a849)
+- CAND-010 vision 安全 3 件套 (commit 94b02f33d)
+- CAND-002 kanban worker crash 5 件套 (commit 549fd59eb)
+- CAND-004 TTFT round 2 4 件套 (commit 6d59fe2dd)
+- CAND-053 47 security fixes 选 5 (commit 2ac5d321a)
+
+CHANGELOG entry 跟 v0.18.0+cn.10 模板 1:1 配对:
+- 5 实施 commit 跟 plan 1:1 配对 + 4 必填字段落盘
+- 5 候选 verify 后端 mature 跟 plan 假设 differ 1-2 层 (跟 CAND-084 lesson 1:1)
+- 5 候选 additive 新 file 0 改旧 跟 Sprint 2-6a 1:1 配对 6 sprint
+- 火花库 §7 entry audit log 1:1 配对
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: 5 候选 verify 后端 mature 0 改
+- Cherry-pick split bug class: 5 commit 0 split, additive 0 改旧
+- UX 倒退审计: 0 改 vision_tools/kanban_tools/4 read site/5 target path 主体
+- 估时前必 verify 引擎能力: plan 3-5d → 实际 3-4h, 0.5-1x 缩
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 6b 收尾 (估 3-5d, 实际 3-4h, 1:1 配对 0.5-1x 缩)
+40 test pass, 0 回归 (跟 Sprint 6a 26 test baseline 1:1)
+137 test 累计 (Sprint 2-6a 97 + Sprint 6b 40)
