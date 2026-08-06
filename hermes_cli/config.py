@@ -1933,6 +1933,11 @@ DEFAULT_CONFIG = {
         # false.  TUI has its own modal overlay (HERMES_TUI_NO_CONFIRM=1 to
         # opt out there).
         "destructive_slash_confirm": True,
+        # CAND-008: User-defined deny rules (fnmatch glob patterns) that block
+        # commands even under yolo mode. Default empty list = 0 deny behavior
+        # change. 跟 plan CAND-008 + upstream e2fe529ef 1:1 配对. Implementation
+        # in hermes_cli/approvals_deny.py (跟 K-7 k7_commands.py 1:1 配对).
+        "deny": [],
     },
 
     # Permanently allowed dangerous command patterns (added via "always" approval)
