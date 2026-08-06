@@ -1,0 +1,23 @@
+CAND-015: gpt-5.6 系列完整注册 (Sprint 7 Wave 1)
+
+跟 plan CAND-015 1:1 配对 (跟 CAND-005/007+054/012/013 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `4af484d3d` / `a3828a94d` / `bd767b574` 1:1 配对):
+- gpt_5_6_sol_register (跟 c1 1:1, gpt-5.6-sol)
+- gpt_5_6_terra_register (跟 c2 1:1, gpt-5.6-terra)
+- gpt_5_6_luna_register (跟 c3 1:1, gpt-5.6-luna)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054/012/013 1:1 配对):
+- apply_gpt_5_6_register() → 跑 3 件套, 返 list 3 models
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: OpenAI model list 0 hit gpt-5.6 系列 (8-07 verify), 0 改
+  OpenAI provider 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054/012/013 1:1)
+- UX 倒退审计: 0 改 OpenAI 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.25h (跟 plan 30min 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 7 Wave 1 第 3 步 (估 30min, 实际 0.25h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 CAND-013 6 test baseline 1:1)
