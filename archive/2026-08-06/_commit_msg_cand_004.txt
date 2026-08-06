@@ -1,0 +1,27 @@
+CAND-004: TTFT round 2 4 件套 (Sprint 6b)
+
+跟 plan CAND-004 1:1 配对 (跟 CAND-002 kanban_safety + CAND-007+054 startup_hygiene
+1:1 配对 0 改旧):
+
+4 件套 (跟 upstream `0800af0b8` + `a124d167` 1:1 配对, 4 read site 同步改 跟 plan 1:1):
+- patch_default_config_ttft (跟 c1 1:1, DEFAULT_CONFIG prompt-build cache)
+- patch_load_cli_config_ttft (跟 c2 1:1, load_cli_config live reasoning by default)
+- patch_tui_gateway_ttft (跟 c3 1:1, tui_gateway partial-line streaming)
+- patch_setup_status_line_ttft (跟 c4 1:1, hermes setup status line 同步 stale docs)
+
+1 combined entry (跟 CAND-005/007+054/002 1:1 配对):
+- apply_ttft_round2() → 跑 4 件套, 返 dict 4 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: 4 read site (DEFAULT_CONFIG / load_cli_config / tui_gateway /
+  setup status line) 0 hit prompt-build cache / live reasoning / partial-line
+  streaming (8-06 verify), 0 改 4 file 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 4 functions, 跟 CAND-002
+  1 file 5 functions 1:1 配对 — plan "1 commit 1 hygiene fix" 1:1 配对)
+- UX 倒退审计: 0 改 4 read site file 现有 read path, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.5h (跟 plan 1-2h 1:1 配对 0.5-1x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 6b 第四步 (估 1-2h, 实际 0.5h, 1:1 配对)
+7 test pass, 0 回归 (跟 CAND-002 8 test baseline 1:1)
