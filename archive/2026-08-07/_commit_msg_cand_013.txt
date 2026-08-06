@@ -1,0 +1,23 @@
+CAND-013: Sessions export trace/HF (Sprint 7 Wave 1)
+
+跟 plan CAND-013 1:1 配对 (跟 CAND-005/007+054/012 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `0e04d1420` 1:1 配对):
+- sessions_export_trace_format (跟 c1 1:1, trace export format)
+- sessions_export_hf_upload (跟 c2 1:1, HF upload 集成)
+- sessions_export_filter (跟 c3 1:1, date range filter)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054/012 1:1 配对):
+- apply_sessions_export(sessions, repo_id, date_from, date_to) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: sessions export 0 hit trace/HF format (8-07 verify), 0 改
+  sessions 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054/012 1:1)
+- UX 倒退审计: 0 改 sessions 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.25h (跟 plan 1-2h 1:1 配对 0.13-0.25x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 7 Wave 1 第 2 步 (估 1-2h, 实际 0.25h, 1:1 配对 0.13-0.25x 缩)
+6 test pass, 0 回归 (跟 CAND-012 6 test baseline 1:1)
