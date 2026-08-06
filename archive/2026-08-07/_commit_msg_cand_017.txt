@@ -1,0 +1,22 @@
+CAND-017: Yuanbao parallel download (Sprint 7 Wave 2)
+
+跟 plan CAND-017 1:1 配对 (跟 CAND-005/007+054/014 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `b848fcbf1` + `63c4100f` 1:1 配对):
+- yuanbao_parallel_downloader (跟 c1 1:1, parallel media download 跟 max_concurrency)
+- yuanbao_bounded_concurrency_resolve (跟 c2 1:1, bounded-concurrency inbound media resolve)
+- yuanbao_parallel_dispatch (跟 c3 1:1, dispatch + result aggregation)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054/014 1:1 配对):
+- apply_yuanbao_parallel(urls, items, max_concurrency) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: yuanbao adapter 0 hit parallel download (8-07 verify), 0 改 yuanbao adapter 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 yuanbao 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.5h (跟 plan 1h 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 7 Wave 2 第 2 步 (估 1h, 实际 0.5h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 CAND-014 6 test baseline 1:1)
