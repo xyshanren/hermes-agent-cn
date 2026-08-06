@@ -617,6 +617,10 @@ class HermesACPAgent(acp.Agent):
             "name": "version",
             "description": "Show Hermes version",
         },
+        {
+            "name": "init",
+            "description": "Generate AGENTS.md (K-8) from cwd scan (README + pyproject + structure). 现有 AGENTS.md 默认不覆盖",
+        },
     )
 
     _EDIT_APPROVAL_POLICY_CONFIG_ID = "edit_approval_policy"
@@ -2052,6 +2056,7 @@ class HermesACPAgent(acp.Agent):
             "steer": self._cmd_steer,
             "queue": self._cmd_queue,
             "version": self._cmd_version,
+            "init": self._cmd_init,
         }.get(cmd)
 
         if handler is None:
@@ -2331,6 +2336,29 @@ class HermesACPAgent(acp.Agent):
 
     def _cmd_version(self, args: str, state: SessionState) -> str:
         return f"Hermes Agent v{HERMES_VERSION}"
+
+    def _cmd_init(self, args: str, state: SessionState) -> str:
+        """K-8 (Phase 4 /init slash command): 生成 AGENTS.md 从 cwd 扫描.
+
+        跟 plan K-8 §6 1:1 配对 (跟 acp_adapter/init_command.py:init_agents_md 1:1 配对).
+        现有 AGENTS.md 默认不覆盖 (force=False, 跟 plan K-8 "additive 0 改" 1:1 配对).
+        """
+        from pathlib import Path as _k8_path
+
+        from acp_adapter.init_command import init_agents_md as _k8_init
+
+        cwd = state.cwd or _k8_path.cwd()
+        force = args.strip().lower() in ("--force", "-f")
+        try:
+            agents_path, created = _k8_init(cwd, force=force)
+        except OSError as exc:
+            return f"Error generating AGENTS.md: {exc}"
+
+        if created:
+            return f"AGENTS.md created at {agents_path}"
+        return (
+            f"AGENTS.md already exists at {agents_path} (use /init --force to overwrite)"
+        )
 
     # ---- Model switching (ACP protocol method) -------------------------------
 
