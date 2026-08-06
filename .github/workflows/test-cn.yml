@@ -57,19 +57,18 @@ jobs:
 
       - name: Verify UTF-8 encoding and Chinese text
         run: |
-          files=(
-            "hermes_cli/commands.py"
-            "CHANGELOG_CN.md"
-            "PLAN_CN.md"
-          )
-          for f in "${files[@]}"; do
-            python -c "
-              fp = open('$f', 'r', encoding='utf-8')
-              content = fp.read()
-              fp.close()
-              assert any('\u4e00' <= c <= '\u9fff' for c in content)
-              print('OK ({} chars)'.format(len(content)), '$f')
-            "
+          for f in hermes_cli/commands.py CHANGELOG_CN.md PLAN_CN.md; do
+            encoding=$(file --mime-encoding -b "$f")
+            if [ "$encoding" != "utf-8" ]; then
+              echo "ERROR: $f is not UTF-8 (got: $encoding)"
+              exit 1
+            fi
+            if ! python3 -c "import sys; t=open('$f',encoding='utf-8').read(); sys.exit(0 if any(0x4e00<=ord(c)<=0x9fff for c in t) else 1)"; then
+              echo "ERROR: $f has no CJK chars (U+4E00..U+9FFF)"
+              exit 1
+            fi
+            size=$(wc -c < "$f")
+            echo "OK ($size bytes, $encoding) $f"
           done
           echo "All files have valid UTF-8 and contain Chinese text."
 
@@ -84,10 +83,6 @@ jobs:
 
       - name: Check for unresolved merge conflict markers
         run: |
-          conflicts=$(grep -rn '<<<<<<<\|=======\|>>>>>>>' --include='*.py' --include='*.md' --include='*.yaml' --include='*.json' . || true)
-          if [ -n "$conflicts" ]; then
-            echo "❌ Unresolved merge conflicts found:"
-            echo "$conflicts"
-            exit 1
-          fi
-          echo "✅ No unresolved merge conflicts"
+          # Use state-machine Python check to avoid false positives
+          # (Python docstring separators / standalone `=======` lines)
+          python tests/check_no_merge_conflicts.py
