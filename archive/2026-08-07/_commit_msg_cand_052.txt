@@ -1,0 +1,22 @@
+CAND-052: API server per-client model routing (Sprint 7 Wave 2)
+
+跟 plan CAND-052 1:1 配对 (跟 CAND-005/007+054/014/017 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `2026-07-02 feat(api-server): per-client model routing` + `2026-07-02 feat(config): extra HTTP headers for LLM API calls` 1:1 配对):
+- api_client_model_routes_register (跟 c1 1:1, per-client model_routes 注册)
+- api_client_extra_http_headers (跟 c2 1:1, extra HTTP headers 集成)
+- api_client_route_resolve (跟 c3 1:1, per-client 路由 resolve)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054/014/017 1:1 配对):
+- apply_api_client_routing(client_id, model_routes, extra_headers, default_model) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: api server 0 hit per-client routing (8-07 verify), 0 改 api server 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 api server 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.75h (跟 plan 1-2h 1:1 配对 0.5-0.75x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 7 Wave 2 第 3 步 (估 1-2h, 实际 0.75h, 1:1 配对 0.5-0.75x 缩)
+6 test pass, 0 回归 (跟 CAND-017 6 test baseline 1:1)
