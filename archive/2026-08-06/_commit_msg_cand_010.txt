@@ -1,0 +1,24 @@
+CAND-010: vision 安全 3 件套 (Sprint 6b)
+
+跟 plan CAND-010 1:1 配对 (跟 CAND-005 webhook_filters + CAND-007+054 startup_hygiene
+1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `security(vision)` 系列 3 commits 1:1):
+- local_file_via_credential_read_guard (跟 c1 1:1, 跟 CAND-008 fnmatch glob 0 命 1:1)
+- rasterizer_stdin_devnull (跟 c2 1:1, subprocess 安全 pattern 跟 CAND-001 env-init 0 副作用 1:1)
+- bound_sandbox_exec_read_at_ingest_cap (跟 c3 1:1, bound 跟 K-10 max_turns 1:1)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 run_all_startup_hygiene 1:1):
+- apply_vision_security(path, cmd, cap) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: vision_tools.py 0 hit rasterizer/subprocess/local_file/credential
+  /exec/ingest (8-06 verify), 0 改 vision_tools.py 主体 25 functions
+- Cherry-pick split bug class: 0 cherry-pick (新 file, 跟 CAND-001 1:1 配对)
+- UX 倒退审计: 0 改 vision_tools.py 现有 25 functions, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.5h (跟 plan 1-2h 1:1 配对 0.5-1x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 6b 第二步 (估 1-2h, 实际 0.5h, 1:1 配对)
+6 test pass, 0 回归 (跟 CAND-007+054 11 test baseline 1:1)
