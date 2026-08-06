@@ -339,7 +339,7 @@ def load_cli_config() -> Dict[str, Any]:
             "threshold": 0.50,    # Compress at 50% of model's context limit
         },
         "agent": {
-            "max_turns": 90,  # Default max tool-calling iterations (shared with subagents)
+            "max_turns": 500,  # Default max tool-calling iterations (shared with subagents) — Phase 4 K-10: 90→500, 跟 compression.threshold 0.50 1:1 配对
             "verbose": False,
             "system_prompt": "",
             "prefill_messages_file": "",
