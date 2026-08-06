@@ -1,0 +1,22 @@
+CAND-046: 新模型注册 claude-sonnet-5/fugu-ultra (Sprint 7 Wave 1)
+
+跟 plan CAND-046 1:1 配对 (跟 CAND-005/007+054/012/013/015/045 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `76a468e51` 1:1 配对, claude-fable-5 因回滚跳过):
+- claude_sonnet_5_register (跟 c1 1:1, sonnet-5)
+- fugu_ultra_register (跟 c2 1:1, fugu-ultra)
+- claude_fable_5_skip (跟 c3 1:1, claude-fable-5 跳过因 upstream `bc060c7c1` 回滚)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对):
+- apply_new_models_register() → 跑 3 件套, 返 list 3 models
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: model registry 0 hit sonnet-5/fugu-ultra (8-07 verify), 0 改 registry 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 model list 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.25h (跟 plan 30min 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 7 Wave 1 第 5 步 (估 30min, 实际 0.25h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 CAND-045 6 test baseline 1:1)
