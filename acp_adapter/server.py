@@ -575,6 +575,9 @@ class HermesACPAgent(acp.Agent):
         "steer": "Inject guidance into the currently running agent turn",
         "queue": "Queue a prompt to run after the current turn finishes",
         "version": "Show Hermes version",
+        "init": "Generate AGENTS.md (K-8) from cwd scan",
+        "diff": "Show last conversation state diff (K-7)",
+        "focus": "Set or show conversation focus filter (K-7)",
     }
 
     _ADVERTISED_COMMANDS = (
@@ -620,6 +623,16 @@ class HermesACPAgent(acp.Agent):
         {
             "name": "init",
             "description": "Generate AGENTS.md (K-8) from cwd scan (README + pyproject + structure). 现有 AGENTS.md 默认不覆盖",
+        },
+        {
+            "name": "diff",
+            "description": "Show last conversation state diff (K-7). 比较最近两条消息 (content + tool calls) 的变化",
+            "input_hint": "no args — show last assistant turn vs previous",
+        },
+        {
+            "name": "focus",
+            "description": "Set or show conversation focus filter (K-7). 无 arg 显示当前, /focus clear 重置",
+            "input_hint": "focus tag (e.g. 'CAND-085 集成') 或 'clear' 重置",
         },
     )
 
@@ -2057,6 +2070,8 @@ class HermesACPAgent(acp.Agent):
             "queue": self._cmd_queue,
             "version": self._cmd_version,
             "init": self._cmd_init,
+            "diff": self._cmd_diff,
+            "focus": self._cmd_focus,
         }.get(cmd)
 
         if handler is None:
@@ -2233,6 +2248,11 @@ class HermesACPAgent(acp.Agent):
         else:
             lines.append("Tip: run /compress to compress manually before the threshold.")
 
+        # K-7 extend: current task + focus + last N messages preview
+        # 跟 acp_adapter/k7_commands.py:_extend_context 1:1 配对
+        from acp_adapter.k7_commands import _extend_context as _k7_extend_context
+        lines = _k7_extend_context(state, lines)
+
         return "\n".join(lines)
 
     def _cmd_reset(self, args: str, state: SessionState) -> str:
@@ -2359,6 +2379,20 @@ class HermesACPAgent(acp.Agent):
         return (
             f"AGENTS.md already exists at {agents_path} (use /init --force to overwrite)"
         )
+
+    # ---- K-7: /diff + /focus (context observability) -------------------------
+    # 跟 acp_adapter/k7_commands.py 1:1 配对 (跟 K-8 _cmd_init → init_command.py
+    # 1:1 配对), 0 依赖 acp 顶层 import. 现有 10 slash command 0 改.
+
+    def _cmd_diff(self, args: str, state: SessionState) -> str:
+        """K-7 (Phase 4 /diff slash command): thin wrapper → k7_commands._cmd_diff."""
+        from acp_adapter.k7_commands import _cmd_diff as _k7_cmd_diff
+        return _k7_cmd_diff(args, state)
+
+    def _cmd_focus(self, args: str, state: SessionState) -> str:
+        """K-7 (Phase 4 /focus slash command): thin wrapper → k7_commands._cmd_focus."""
+        from acp_adapter.k7_commands import _cmd_focus as _k7_cmd_focus
+        return _k7_cmd_focus(args, state)
 
     # ---- Model switching (ACP protocol method) -------------------------------
 
