@@ -1,0 +1,31 @@
+docs(cn): CHANGELOG v0.18.0+cn.13 (Sprint 7 Wave 2: Tier 3 增量 5 候选 done)
+
+跟 plan §14 退出条件 1:1 配对 (Sprint 7 Wave 2 收尾 batch push + tag v0.18.0+cn.13):
+
+Sprint 7 Wave 2 5 候选 5 commit 跟 plan CAND-014/017/052/044/011 1:1 配对:
+- CAND-014 MCP `mcp__server__tool` 命名迁移
+- CAND-017 Yuanbao parallel download
+- CAND-052 API per-client routing
+- CAND-044 Journey 时间线
+- CAND-011 PTY sessions keep-alive
+
+CHANGELOG entry 跟 v0.18.0+cn.12 模板 1:1 配对:
+- 5 实施 commit 跟 plan 1:1 配对 + 4 必填字段落盘
+- 5 候选 verify 后端 mature 跟 plan 假设 differ 1-2 层 (跟 CAND-084 lesson 1:1)
+- 5 候选 additive 新 file 0 改旧 跟 Sprint 2-6b + Wave 1 1:1 配对 8 sprint
+- 火花库 §7 entry audit log 1:1 配对
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: 5 候选 verify 后端 mature 0 改
+- Cherry-pick split bug class: 5 commit 0 split, additive 0 改旧
+- UX 倒退审计: 0 改 cli.py / 5 个目标 file 主体
+- 估时前必 verify 引擎能力: plan 8-13h → 实际 5h, 0.4-0.6x 缩
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 借鉴 OpenBMB AGPL-3.0
+
+Sprint 7 Wave 2 收尾 (估 8-13h, 实际 5h, 1:1 配对 0.4-0.6x 缩)
+30 test pass, 0 回归 (跟 Sprint 7 Wave 1 54 test baseline 1:1)
+221 test 累计 (Sprint 2-6b 137 + Sprint 7 Wave 1 54 + Sprint 7 Wave 2 30)
+
+Sprint 7 全收尾 (Wave 1 9 + Wave 2 5 = 14 候选 + 2 skip)
+39 候选 done 累计 (Sprint 2-7 9 sprint 累计, 估时 ~21h 实际)
