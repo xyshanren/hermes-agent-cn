@@ -1,0 +1,26 @@
+fix(cn): restore CN-化 commands.py + PLAN_CN.md 跟 v0.19.1 base 1:1 配对 (CI hanzi-encoding + localization-test 修复)
+
+跟 Sprint 10 sync 1:1 节奏 + mavis 4 件套 "后端先调查再设计" 1:1 配对:
+
+## CI fail 根因
+- hanzi-encoding 失败: PLAN_CN.md 不在 v0.19.1 base (跟 v0.18.0+cn.X 0 同步)
+- localization-test 失败: hermes_cli/commands.py 在 v0.19.1 base 有 0 CJK (跟 Sprint 8 CN-化 0 同步)
+- 跟 mavis MEMORY 2026-07-21 "git commit -F 走文件不用 -m" 1:1 应用, 跟 mavis 4 lesson "估时前必 verify" 1:1 配对
+
+## 修复 (跟 Sprint 8 CN-化 1:1 配对, additive 0 改旧)
+- PLAN_CN.md: 12.7KB / 1688 zh (跟 Sprint 8 1:1 配对 0 改)
+- hermes_cli/commands.py: 679 zh (跟 Sprint 8 1:1 配对 跟 upstream v0.19.1 commands.py 0 改)
+- 0 改 cli.py / 0 改 routing tools / 0 改 upstream v0.19.1 main file
+
+## 跟 Sprint 10 1:1 配对
+- 累计 50 cherry-pick + 7 manual port + 2 fix (PLAN_CN.md + commands.py) = 59 effective
+- 跟 v0.18.0+cn.16 base 100% 1:1 配对 (CN-化 + 47 候选)
+- 0 改 upstream v0.19.1 main file, 跟 UX 倒退审计 1:1
+
+## 4 铁律 ↔ mavis 4 件套 1:1
+- 后端先调查再设计: verify 后端 v0.19.1 缺 PLAN_CN.md + commands.py 0 CJK, 修复
+- Cherry-pick split bug class: 0 cherry-pick, additive 0 改旧, 1:1 配对
+- UX 倒退审计: 0 改 cli.py / 0 改 routing tools / 0 改 upstream main file
+- 估时前必 verify 引擎能力: CI fail 即时发现, 跟 plan 1:1 配对 0 估时错
+
+NO push default 跟 HANDOFF 1:1, 等 user 拍 push 节奏.
