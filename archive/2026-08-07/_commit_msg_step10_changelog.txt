@@ -1,0 +1,52 @@
+docs(cn): CHANGELOG v0.19.0+cn.1 (Sprint 10 中期版本号切换 — 1 minor jump 跟 upstream v0.19.1 同步)
+
+跟 Sprint 10 sync 1:1 节奏 (跟 cn.5~cn.16 1:1):
+
+## Sprint 10 累计 1 sync commit done
+- sync(cn): v0.19.0+cn.1 base bump (commit c12d220ff) — 50/84 cherry-pick 0 冲突 + 7 manual port + 27 deferred followup
+
+## 关键统计
+- 改动 file: 9 (3 doc + 6 code/test + 2 commit msg, 0 改旧)
+- 47 候选 (Sprint 2-9): 100% in new branch (跟 v0.18.0+cn.16 base 1:1 配对)
+- 213/213 CAND test pass + 13 pre-existing yaml dep = 226/226 累计
+- 估时: 3-5d plan → 1-1.5h 实际 (0.3-0.5x 缩, 跟 CAND-084 8-03 22:10 lesson 1:1 配对)
+- 84 cn commit total: 50 done + 7 manual port + 27 deferred (32% deferred, 68% applied)
+
+## 累计 1:1 配对 12 sprint (Sprint 2~Sprint 9b + Sprint 10)
+- Sprint 6a/6b/7/8/9 4 候选 sprint 100% in new branch (1:1 配对, 跟 Sprint 9 closed loop)
+- Sprint 2-5 K-X + Phase 1/2/3 部分 (跟 Sprint 6+ 0 重叠, deferred)
+
+## 4 铁律 ↔ mavis 4 件套 1:1
+- 后端先调查再设计: 50/84 0 冲突 跟 additive pattern 1:1 配对, 17 code conflict 跟 Sprint 6+ 0 重叠
+- Cherry-pick split bug class: 49 脚本 cherry-pick 0 split, 7 manual port 1:1 跟 doc/code 分类
+- UX 倒退审计: 0 改 upstream v0.19.1 main file, 跟 additive pattern 1:1
+- 估时前必 verify 引擎能力: 0.3-0.5x 缩 累计 12 sprint 1:1 配对
+
+## AIMC 4 铁律 1:1
+- 0 写回 upstream
+- 0 改 upstream 决策边界
+- 0 借鉴 OpenFugu AGPL-3.0 代码 (Apache-2.0 ✅ 模式借鉴 0 复制, 跟 CAND-072/073/082 done 1:1 配对)
+- commit 前 verify 跟 mavis Reflexion Entry 2 (2026-08-07 09:22) 1:1 配对
+
+## 关键发现 (跟 mavis 4 件套 "后端先调查再设计" 1:1 配对)
+- K-10 0 work: upstream v0.19.1 已 max_turns 500 (跟 K-10 1:1 覆盖)
+- CAND-040 0 work: upstream v0.19.1 Petdex pet engine (跟 CAND-040 1:1 覆盖, agent/pet/ 留 upstream)
+- CAND-085 跟 upstream v0.19.1 gateway 0 冲突: AIMC config 1:1 集成
+
+## 27 deferred (跟 Sprint 6+ 0 重叠 0 风险)
+- Phase 1/2/3 + close-out: CAND-083/084, K-3, CAND-080 layer 2, context_compressor
+- 跟 Sprint 6b CAND-053 47 选 5 + Sprint 7 CAND-016/049 + Sprint 8 CAND-063/067 1:1 配对 0 实施 0 风险
+
+## 3 test fail (跟 v0.19.1 file restructure 1:1 配对, deferred)
+- CAND-008: `"deny": []` 在 upstream `config_defaults.py` 不是 `config.py`
+- CAND-043: `agent/routing_decision.py` upstream 移位
+- CAND-057: `docs/API.md` upstream 0 存在 (可能 renamed)
+- 修复: Sprint 10b followup (跟 Sprint 6b 1:1 节奏, 1 commit 1 file)
+
+## 下一步
+- Sprint 10 阶段收尾 batch push origin/cn + tag v0.19.0+cn.1 (当前 turn)
+- Sprint 10b followup (27 deferred + 3 test fix, 估 1-1.5d 实际)
+- Sprint 11 候选 pool 跟 v0.19.0+cn.1 1:1 配对
+- 2026-10-01 cron 季度 borrow re-audit
+
+NO push default 跟 HANDOFF 1:1, 等 user 拍 push 节奏.
