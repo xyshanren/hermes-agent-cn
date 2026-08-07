@@ -38,17 +38,32 @@ def test_skill_docs_cherry_pick_source():
 
 
 def test_skill_docs_existing_files_unchanged():
-    """Live: 0 改 docs 现有 file (跟 CAND-001/003/008/056 0 改 1:1 配对 UX 倒退审计)."""
-    # 验证 3 个核心 docs file 0 改
-    for fname in ("API.md", "ARCHITECTURE.md", "DOCS-MAP.md"):
-        p = REPO / "docs" / fname
-        assert p.exists(), f"{p} missing (existing docs file)"
-        # docs 是 text 文件, 0 改 = 0 内容变化
-        # (新增 docs/hermes-agent-skill-v0.13-0.17.md 独立 file, 0 触碰现有 file)
+    """Live: 0 改 docs 现有 file (跟 CAND-001/003/008/056 0 改 1:1 配对 UX 倒退审计).
+
+    Sprint 10b note (跟 v0.19.1 base 1:1 配对): upstream v0.19.1's
+    docs/ tree no longer carries the 3 monolithic doc files our CAND-057
+    pre-sync invariant referenced (API.md / ARCHITECTURE.md / DOCS-MAP.md
+    were replaced by 7 focused contract docs like ``profile-routing.md``).
+    CAND-057's additive doc ``hermes-agent-skill-v0.13-0.17.md`` is
+    still 0-touch; we just verify the *current* v0.19.1 docs set is
+    still pristine (excluding our own additive file).
+    """
+    # Sprint 10b: 0 假设具体 fname, 取 v0.19.1 实际 docs/ 下所有 .md
+    docs_dir = REPO / "docs"
+    if not docs_dir.exists():
+        return  # v0.19.1 dropped the docs/ dir entirely; nothing to check
+    md_files = list(docs_dir.glob("*.md"))
+    # CAND-057 0 改 docs/ 现有 file (跟 mavis UX 倒退审计 1:1)
+    # 排除 CAND-057 自己的 additive file (the new doc itself, 0 触碰其他 file)
+    cand_057_additive = "hermes-agent-skill-v0.13-0.17"
+    for p in md_files:
+        # Skip CAND-057's own additive file (它当然 contains 自己的 name)
+        if cand_057_additive in p.name:
+            continue
         src = p.read_text(encoding="utf-8")
-        # 0 引用新 doc name (verify additive 0 改)
-        assert "hermes-agent-skill-v0.13-0.17" not in src, (
-            f"{fname} 0 改 0 失, CAND-057 不应 modify 现有 docs"
+        # 现有 docs 0 引用 CAND-057 新 doc (verify additive 0 改)
+        assert cand_057_additive not in src, (
+            f"{p.name} 0 改 0 失, CAND-057 不应 modify 现有 docs"
         )
 
 

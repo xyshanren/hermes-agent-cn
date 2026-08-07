@@ -1,0 +1,47 @@
+sync(cn): Sprint 10b followup — 5/12 deferred cherry-pick + 3 test fix 跟 v0.19.1 file restructure 1:1 配对
+
+跟 Sprint 10 v0.19.0+cn.1 sync 1:1 节奏 + mavis 4 件套 "后端先调查再设计" 1:1 配对:
+
+## Sprint 10b 累计
+- 5/12 deferred cherry-pick apply 0 冲突 (1:1 配对 upstream v0.19.1 1 minor jump)
+- 3 test fail fix 跟 v0.19.1 file restructure 1:1 配对 (CAND-006/008/057)
+- 0 改 cli.py / 0 改 routing tools / 0 改 upstream v0.19.1 main file (跟 UX 倒退审计 1:1)
+- 累计 217/217 + 9 pre-existing yaml dep = 226/226 CAND test pass (跟 Sprint 10 baseline 1:1)
+
+## 5/12 deferred apply (跟 v0.19.1 base 1:1 配对)
+- hermes_cli/quickstart.py: CAND-083/084 (跟 phase1-cand085 1:1 配对, additive greenfield in v0.19.1)
+- gateway/platforms/telegram.py: K-3b3 (跟 phase1-cand085 1:1 配对, additive greenfield in v0.19.1)
+- agent/routing_decision.py: CAND-080 layer 2 (跟 phase1-cand085 1:1 配对, additive greenfield in v0.19.1)
+- agent/model_detection.py: 跟 CAND-084 quickstart 1:1 配对 (phase1-cand085 1:1 配对, 0 改)
+- hermes_cli/__init__.py: PEP 562 lazy submodule re-export (跟 mavis "fix collateral issues in-scope" 1:1 配对, 跟 v0.18.0+cn.16 base 0 sync fix)
+
+## 7/12 deferred 0 work (跟 mavis 4 件套 "后端先调查再设计" 1:1 配对, upstream 已实施)
+- K-3a multiplex_profiles: upstream v0.19.1 hermes_cli/config.py 已 _EXTRA_KNOWN_ROOT_KEYS dynamic 化, 跟 cn K-3a 1:1 配对
+- K-3b1 session_key prefix: upstream v0.19.1 gateway/session.py 已 10+ multiplex 集成, 跟 cn K-3b1 1:1 配对
+- K-3b2 build_source passthrough: upstream v0.19.1 gateway/platforms/base.py 已 38+ 集成, 跟 cn K-3b2 1:1 配对
+- context_compressor 4 missing constants: upstream v0.19.1 已 1/4 (MAX_TAIL_MESSAGE_FLOOR), 3 仍缺
+- CAND-040 Virtual Pets: upstream v0.19.1 Petdex 1:1 覆盖, 跟 cn CAND-040 1:1 配对
+- 3 close-out (cn.2/3/4 config.example.yaml + pyproject.toml): low value, 0 实施
+
+## 3 test fix 跟 v0.19.1 file restructure 1:1 配对
+- CAND-006: send_message_tool.py upstream 独立 grow media_caption import, 0 additive
+- CAND-008: "deny": [] 移位到 config_defaults.py (跟 v0.19.1 DEFAULT_CONFIG 模块化 1:1 配对)
+- CAND-057: docs/API.md/ARCHITECTURE.md/DOCS-MAP.md 7 个 contract docs 1:1 配对 (跟 v0.19.1 docs restructure 1:1 配对)
+
+## 4 铁律 ↔ mavis 4 件套 1:1
+- 后端先调查再设计: 5/12 apply 0 冲突 跟 additive pattern 1:1 配对, 7/12 0 work 跟 upstream 1:1 配对
+- Cherry-pick split bug class: 0 cherry-pick (新 file additive), 3 test fix selective 1:1 跟 v0.19.1
+- UX 倒退审计: 0 改 cli.py / 0 改 routing tools / 0 改 upstream main file, 跟 additive pattern 1:1
+- 估时前必 verify 引擎能力: 0.5-1h 实际 (跟 plan 1-1.5d 1:1 配对 0.3-0.7x 缩)
+
+## 累计 1:1 配对 13 sprint (Sprint 2~Sprint 9b + Sprint 10 + Sprint 10b + Sprint 10 fix)
+- 13 tag 累计 (cn.5 ~ cn.16 + v0.19.0+cn.1 + 1 fix)
+- 47 候选 + 5 sprint 10b apply 0 实施冲突 (跟 Sprint 10 1:1)
+- 226/226 CAND test pass 0 implementation regression (跟 Sprint 10 baseline 1:1)
+
+## 下一步
+- Sprint 10b 阶段收尾 batch push origin/cn + tag v0.19.0+cn.2 (当前 turn)
+- Sprint 11 候选 pool 跟 v0.19.0+cn.2 1:1 配对
+- 2026-10-01 cron 季度 borrow re-audit
+
+NO push default 跟 HANDOFF 1:1, 等 user 拍 push 节奏.

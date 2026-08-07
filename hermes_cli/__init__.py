@@ -90,3 +90,40 @@ def _ensure_utf8():
 
 
 _ensure_utf8()
+
+
+# ---------------------------------------------------------------------------
+# Lazy submodule re-export (CAND-083/084 + mavis "fix collateral issues
+# in-scope" 1:1 配对, 跟 v0.18.0+cn.16 base 0 sync fix)
+#
+# Several submodules of hermes_cli (``config``, ``quickstart``, etc.) have
+# expensive import-time side effects: they require optional third-party
+# dependencies (PyYAML, secret-storage on macOS, …) and/or open files
+# during module load. Importing them eagerly here would break the many
+# test environments that don't have those optional deps installed and
+# would also make ``import hermes_cli`` slow for users who never touch
+# them.
+#
+# PEP 562 module-level ``__getattr__`` lets callers say
+# ``from hermes_cli import config`` or ``hermes_cli.config.load_config``
+# and only pay the import cost the first time. ``unittest.mock.patch``
+# also resolves attribute names through ``__getattr__`` so the existing
+# test patterns (``patch("hermes_cli.config.load_config", ...)``) keep
+# working unchanged.
+# ---------------------------------------------------------------------------
+_LAZY_SUBMODULES = frozenset({"config", "quickstart"})
+
+
+def __getattr__(name):
+    if name in _LAZY_SUBMODULES:
+        import importlib
+        module = importlib.import_module(f".{name}", __name__)
+        # Cache the resolved module so subsequent attribute access is
+        # cheap and ``hasattr(hermes_cli, "config")`` reports True.
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals().keys()) | _LAZY_SUBMODULES)
