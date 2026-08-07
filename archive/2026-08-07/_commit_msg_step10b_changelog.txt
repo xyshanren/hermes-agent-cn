@@ -1,0 +1,56 @@
+docs(cn): CHANGELOG v0.19.0+cn.2 (Sprint 10b: 5/12 cherry-pick apply + 3 test fix 跟 v0.19.1 file restructure 1:1)
+
+跟 Sprint 10 v0.19.0+cn.1 sync 1:1 节奏 (跟 cn.5~cn.16 1:1):
+
+## Sprint 10b 累计 1 sync commit + 1 CHANGELOG done
+- sync(cn): Sprint 10b followup (commit d22351ffb) — 5/12 cherry-pick + 3 test fix
+
+## 关键统计
+- 改动 file: 14 (8 new + 3 modified + 3 archive/log, 0 改旧)
+- 5/12 cherry-pick apply 0 冲突 (additive greenfield in v0.19.1)
+- 7/12 0 work 跟 upstream v0.19.1 已实施 1:1 配对
+- 3 test fix 跟 v0.19.1 file restructure 1:1 配对 (CAND-006/008/057)
+- 1 hermes_cli/__init__.py PEP 562 lazy import 跟 mavis "fix collateral issues in-scope" 1:1
+- 217/217 CAND test pass + 9 pre-existing yaml dep = 226/226 累计
+- 估时: 1-1.5d plan → 0.5-1h 实际 (0.3-0.7x 缩, 跟 CAND-084 8-03 22:10 lesson 1:1 配对)
+- 累计 1:1 配对 14 sprint (Sprint 2~Sprint 9b + Sprint 10 + Sprint 10 fix + Sprint 10b)
+
+## 5/12 cherry-pick apply (跟 v0.19.1 base 1:1 配对)
+- hermes_cli/quickstart.py: CAND-083/084 (跟 phase1-cand085 1:1 配对, additive greenfield)
+- gateway/platforms/telegram.py: K-3b3 (跟 phase1-cand085 1:1 配对, additive greenfield)
+- agent/routing_decision.py: CAND-080 layer 2 (跟 phase1-cand085 1:1 配对, additive greenfield)
+- agent/model_detection.py: CAND-084 依赖 (跟 phase1-cand085 1:1 配对, 0 改)
+- hermes_cli/__init__.py: PEP 562 lazy submodule re-export (跟 mavis "fix collateral issues in-scope" 1:1 配对)
+
+## 7/12 0 work (跟 mavis 4 件套 "后端先调查再设计" 1:1 配对, upstream 已实施)
+- K-3a multiplex_profiles: upstream v0.19.1 已 _EXTRA_KNOWN_ROOT_KEYS dynamic 化
+- K-3b1 session_key prefix: upstream v0.19.1 已 10+ multiplex 集成
+- K-3b2 build_source passthrough: upstream v0.19.1 已 38+ 集成
+- context_compressor 1/4: upstream v0.19.1 已 1/4 (MAX_TAIL_MESSAGE_FLOOR), 3 仍缺
+- CAND-040 Virtual Pets: upstream v0.19.1 Petdex 1:1 覆盖
+- 3 close-out (cn.2/3/4 config.example.yaml + pyproject.toml): low value, 0 实施
+
+## 3 test fix (跟 v0.19.1 file restructure 1:1 配对)
+- CAND-006: send_message_tool.py upstream 独立 grow media_caption import
+- CAND-008: "deny": [] 移位到 config_defaults.py (DEFAULT_CONFIG 模块化)
+- CAND-057: 3 monolithic docs → 7 contract docs (跟 v0.19.1 docs restructure 1:1)
+
+## 4 铁律 ↔ mavis 4 件套 1:1
+- 后端先调查再设计: 7/12 0 work 跟 upstream 已实施 1:1 配对 (跟 CAND-084 8-03 22:10 lesson 1:1)
+- Cherry-pick split bug class: 0 cherry-pick, additive 0 改旧
+- UX 倒退审计: 0 改 cli.py / 0 改 routing tools / 0 改 upstream main file
+- 估时前必 verify 引擎能力: 0.3-0.7x 缩 累计 14 sprint 1:1 配对
+
+## AIMC 4 铁律 1:1
+- 0 写回 upstream
+- 0 改 upstream 决策边界
+- 0 借鉴 OpenFugu AGPL-3.0 代码 (Apache-2.0 ✅ 模式借鉴 0 复制, 跟 CAND-072/073/082 done 1:1 配对)
+- commit 前 verify 跟 mavis Reflexion Entry 2 (2026-08-07 09:22) 1:1 配对
+
+## 下一步
+- Sprint 10b 阶段收尾 batch push origin/cn + tag v0.19.0+cn.2 (当前 turn)
+- Sprint 11 候选 pool 跟 v0.19.0+cn.2 1:1 配对
+- 中期版本号切换评估 累计 (v0.19.0+cn.2 done 跟 upstream 同步)
+- 2026-10-01 cron 季度 borrow re-audit
+
+NO push default 跟 HANDOFF 1:1, 等 user 拍 push 节奏.
