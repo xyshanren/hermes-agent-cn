@@ -1,0 +1,27 @@
+CAND-074: hermes-agent-cn Two-mode router (fast rule-based ↔ smart learned mode) (Sprint 9b)
+
+跟 plan CAND-074 1:1 配对 (跟 CAND-005/007+054/044/011/058/059/062/066/073 1:1 配对 0 改旧):
+
+CAND-074 3 件套 (跟 CAND-072 heuristic-init + CAND-073 adaptive pool
+都 done 1:1 配对, 跟 CAND-082 A/B test done 集成 mode 切换效果 A/B 验证):
+- two_mode_router_select (跟 c1 1:1, fast rule-based vs smart learned mode 选择, 跟 CAND-072/073 都 1:1 配对)
+- two_mode_router_auto_switch (跟 c2 1:1, 跟 user spec auto 切换, 短 query fast_rule / 长 query smart_learned 跟 CAND-072/073 1:1 配对)
+- two_mode_router_drop_in_compat (跟 c3 1:1, drop-in 兼容 CAND-072 lightweight_router + CAND-073 adaptive_pool signature 跟 CAND-082 A/B test 1:1 配对)
+- apply_two_mode_router combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对 3 mode: fast_rule/smart_learned/auto)
+
+跟 mavis 4 件套 1:1 配对 + CAND-084 8-03 22:10 lesson "估时前必 verify 引擎能力":
+- 后端先调查再设计: hermes_cli/*two*mode* 0 hit (8-07 verify), 0 改
+  CAND-072 lightweight_router_tool.py + CAND-073 adaptive_pool.py + CAND-082 routing_ab_test_tool.py 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file, 跟 CAND-001 1:1 配对)
+- UX 倒退审计: 0 改 CAND-072/073 现有 file, 抽 file additive 0 改, 默认 fast_rule 0 改 UX
+- 估时前必 verify 引擎能力: 实际 0.5-1h (跟 plan 1.5-2.5d 1:1 配对 0.05-0.07x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 借鉴 OpenFugu AGPL-3.0 代码
+(Apache-2.0 ✅ 模式借鉴 0 复制, 跟 CAND-072/073 done 1:1 配对)
+
+Test: 6/6 pass (1 静态 + 1 静态 0 改 + 3 live + 1 combined, 跟 Sprint 6a/7/8 1:1 配对)
+0 改 cli.py / 0 改 lightweight_router_tool.py / 0 改 adaptive_pool.py / 0 改 routing_ab_test_tool.py
+(跟 CAND-085 4 铁律 1:1 配对)
+
+Sprint 9b 累计 1/2 候选 done (CAND-074), 后续 CAND-075 OpenAI-compatible endpoint
+(跟 CAND-015 gpt-5.6 注册 1:1 配对 0 冲突 verify, 0 重叠概念).
