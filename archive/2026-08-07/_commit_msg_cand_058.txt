@@ -1,0 +1,22 @@
+CAND-058: TTFT round 2 UX bridge to hermes-tray (Sprint 8)
+
+跟 plan CAND-058 1:1 配对 (跟 CAND-005/007+054/044/011 1:1 配对 0 改旧):
+
+3 件套 (跟 upstream `0800af0b8` 衍生 + hermes-tray 同步 1:1 配对):
+- ttft_tray_bridge_endpoint (跟 c1 1:1, hermes-agent-cn 端 endpoint `/v1/tray/ttft_stream`)
+- ttft_tray_bridge_serialize (跟 c2 1:1, partial-line + reasoning serialize)
+- ttft_tray_bridge_dispatch (跟 c3 1:1, SSE 事件派发)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对):
+- apply_ttft_tray_bridge(line, partial) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: hermes_cli/ttft_cache.py 0 hit bridge (8-07 verify), 0 改 ttft_cache 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 ttft 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.25h (跟 plan 30min 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 8 第 1 步 (估 30min, 实际 0.25h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 Sprint 7 Wave 2 baseline 1:1)
