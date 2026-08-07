@@ -1,0 +1,25 @@
+CAND-066: hermes-agent-cn Smart model download (HF + ModelScope 双源) (Sprint 8)
+
+跟 plan CAND-066 1:1 配对 (跟 CAND-005/007+054/044/011/058/059/062 1:1 配对 0 改旧):
+
+3 件套 (跟 MiniCPM-Desk-Pet model download pattern 模式借鉴 0 复制, 跟
+mavis MEMORY 2026-08-02 "国内+个人用" 1:1 配对 0 conflict):
+- smart_model_download_select_source (跟 c1 1:1, cn user 优先 modelscope, intl user 优先 huggingface)
+- smart_model_download_fallback (跟 c2 1:1, primary failed → 走 fallback)
+- smart_model_download_track (跟 c3 1:1, 跟踪 model_id + source 成功/失败统计)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对):
+- apply_smart_model_download(model_id, prefer_cn, primary_failed) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: model download 0 hit smart source (8-07 verify), 0 改 download 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 model download 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.75h (跟 plan 1-2h 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 借鉴 OpenBMB AGPL-3.0 代码 (模式借鉴 0 复制)
+
+Sprint 8 第 4 步 (估 1-2h, 实际 0.75h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 CAND-062 6 test baseline 1:1)
+
+Sprint 8 4 候选全 done, 24 test 累计, 估时 ~2h 累计 (跟 plan 4-5h 1:1 配对 0.4-0.5x 缩)
