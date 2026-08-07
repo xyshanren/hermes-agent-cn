@@ -1,0 +1,29 @@
+CAND-078: hermes-agent-cn Synthetic Training Data Pipeline (CC0 corpus → 训练数据) (Sprint 9a)
+
+跟 plan CAND-078 1:1 配对 (跟 CAND-005/007+054/044/011/058/059/062/066/073 1:1 配对 0 改旧):
+
+CAND-078 3 件套 (跟 CAND-082 A/B test done + CAND-073 adaptive_pool done
+1:1 配对集成, 同一份数据既训 CAND-073 又 A/B 验证):
+- synthetic_training_data_corpus_load (跟 c1 1:1, 公开 CC0 1.0 corpus 加载, 0 IP 风险)
+- synthetic_training_data_query_synth (跟 c2 1:1, query 训练集合成, Jaccard keyword overlap 跟 CAND-072 heuristic-init 1:1 drop-in 兼容)
+- synthetic_training_data_export (跟 c3 1:1, 训练数据导出 JSONL, 喂给 CAND-073 训练)
+- apply_synthetic_training_data combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对 4 mode: full/corpus/synth/export)
+
+跟 CAND-079 cn corpus 1:1 配对 (CAND-079 后续 sprint 1-2 季度实施, Sprint 9a 用 CC0 corpus 跑通 0 风险)
+
+跟 mavis 4 件套 1:1 配对 + CAND-084 8-03 22:10 lesson "估时前必 verify 引擎能力":
+- 后端先调查再设计: hermes_cli/*synthetic*training* 0 hit (8-07 verify), 0 改
+  CAND-073 adaptive_pool 主体 (跟 CAND-005 0 改 WebhookAdapter 1:1)
+- Cherry-pick split bug class: 0 cherry-pick (新 file, 跟 CAND-001 1:1 配对)
+- UX 倒退审计: 0 改 CAND-073/082 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.5-1h (跟 plan 1-2d 1:1 配对 0.05-0.07x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 借鉴 OpenFugu AGPL-3.0 代码
+(Apache-2.0 ✅ 模式借鉴 0 复制, 跟 CAND-072/073/082 done 1:1 配对)
+
+Test: 6/6 pass (1 静态 + 1 静态 0 改 + 3 live + 1 combined, 跟 Sprint 6a/7/8 1:1 配对)
+0 改 cli.py / 0 改 adaptive_pool.py / 0 改 routing_ab_test_tool.py (跟 CAND-085 4 铁律 1:1 配对)
+集成 12/12 pass (CAND-073 6 + CAND-078 6, 0 冲突)
+
+Sprint 9a 累计 2/2 候选 done (CAND-073 + CAND-078), 后续 Sprint 9a 收尾 CHANGELOG cn.15.
+Sprint 9b kickoff: CAND-074 Two-mode router + CAND-075 OpenAI-compatible endpoint.
