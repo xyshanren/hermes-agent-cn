@@ -1,0 +1,23 @@
+CAND-062: 双端 Doctor 体系 (启动健康检查 + 客户端 UI) (Sprint 8)
+
+跟 plan CAND-062 1:1 配对 (跟 CAND-005/007+054/044/011/058/059 1:1 配对 0 改旧):
+
+3 件套 (跟 MiniCPM-Desk-Pet doctor pattern 模式借鉴 0 复制, 跟
+mavis MEMORY 2026-08-02 "国内+个人用" 1:1 配对 0 conflict):
+- doctor_dual_healthcheck_run (跟 c1 1:1, 5 项 health check: auth / channel / model_provider / memory_backend / plugin_marketplace)
+- doctor_dual_results_format (跟 c2 1:1, 结果格式化给 hermes-tray 客户端 UI)
+- doctor_dual_fix_link (跟 c3 1:1, 一键跳到对应 fix `/v1/tray/fix/<check>`)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对):
+- apply_doctor_dual() → 跑 3 件套, 返 dict 3 keys (healthcheck / format / fix_link)
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: hermes_cli/doctor.py 单端 0 hit 双端 (8-07 verify), 0 改 doctor.py 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 doctor 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.75h (跟 plan 1-2h 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 借鉴 OpenBMB AGPL-3.0 代码 (模式借鉴 0 复制)
+
+Sprint 8 第 3 步 (估 1-2h, 实际 0.75h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 CAND-059 6 test baseline 1:1)
