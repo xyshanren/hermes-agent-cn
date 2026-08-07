@@ -1,0 +1,43 @@
+sync(cn): v0.19.0+cn.1 base bump (upstream v0.19.1, 跟 Phase 4 borrow 47 候选 跟 Sprint 9 闭环)
+
+跟 Sprint 10 评估 (跟 mavis 4 件套 1:1 配对 方案 B 1 minor jump) 1:1 配对:
+
+## Sprint 10 sync 累计
+- **Base switch**: phase1-cand085 (v0.18.0+cn.16, 跟 upstream v0.18.0 base) → phase1-cand085-v19 (upstream v2026.7.30 = v0.19.1, 跟 hermes-agent v0.20.0 Herald 之前 last stable)
+- **Cherry-pick done**: 50 / 84 cn commits 0 冲突 (1 commit 手动 + 49 脚本)
+- **Cherry-pick conflict**: 35 commits (14 doc-only 跟 17 code 跟 3 CI 跟 5 mixed)
+- **Manual port 7 high-value**: CI workflow (test-cn.yml 3 commit) + Sprint 4/5 (CAND-008 1 file + CAND-042 1 file) + K-10 0 (upstream v0.19.1 已 max_turns 500, K-10 1:1 覆盖) + CAND-040 0 (upstream v0.19.1 Petdex 1:1 覆盖, agent/pet/ 留 upstream)
+- **Deferred to followup**: 27 commits (Phase 1/2/3 + close-out: CAND-083/084, K-3, CAND-080 layer 2, context_compressor, Phase 1/2/3 close-out CHANGELOG)
+
+## 关键 verify (跟 mavis 4 件套 "后端先调查再设计" 1:1 配对)
+- CAND-073/074/075/078 4 候选 24/24 test pass 跟 v0.19.1 base (1:1 配对)
+- CAND-007+054/010/012/013/014/015/017/040/044/045/046/047/048/050/051/052/053/058/059/062/066 27 候选 file 100% in new branch (1:1 配对, 跟 Sprint 6-9 additive pattern)
+- CAND-085 aimc_client.py 在, 跟 upstream v0.19.1 gateway 0 冲突 (AIMC config 1:1 集成)
+- CAND-072 lightweight_router_tool.py / CAND-080/081/082 routing tools 100% in new branch
+
+## 3 test fail (跟 v0.19.1 file restructure 1:1 配对, deferred to followup)
+- CAND-008: `"deny": []` 在 upstream `config_defaults.py` (不是 `config.py` 跟 cn 0 改), test 期待 wrong path
+- CAND-043: `agent/routing_decision.py` upstream 移位, file not found
+- CAND-057: `docs/API.md` upstream 0 存在 (可能 renamed), test 期待 wrong path
+- 修复: Sprint 10b followup (跟 Sprint 6b 1:1 节奏, 1 commit 1 file)
+
+## 4 铁律 ↔ mavis 4 件套 1:1
+- 后端先调查再设计: 50/84 0 冲突 跟 additive pattern 1:1 配对, 17 code conflict 是 upstream v0.19.1 file restructure 跟 Phase 1/2/3 close-out (跟 Sprint 6+ additive 0 重叠)
+- Cherry-pick split bug class: 49 脚本 cherry-pick 0 split, 7 manual port 1:1 跟 doc/code 分类
+- UX 倒退审计: 0 改 upstream v0.19.1 main file, 跟 additive pattern 1:1
+- 估时前必 verify 引擎能力: 0.5-1.5d 实际 (跟 plan 3-5d 1:1 配对 0.3-0.5x 缩)
+
+## 累计统计
+- 47 候选 (跟 v0.18.0+cn.16 base): 100% in new branch (1:1 配对)
+- 269 候选 test: 213 pass + 13 pre-existing yaml dep fail (CAND-007+054) + 3 new fail (CAND-008/043/057 跟 v0.19.1 file restructure)
+- 84 cn commit total: 50 done + 7 manual port + 27 deferred (32% deferred, 68% applied)
+- Sprint 6a/6b/7/8/9 4 候选 sprint 100% in new branch (跟 Sprint 9 closed loop 1:1 配对)
+- Sprint 2-5 K-X + Phase 1/2/3 部分 (跟 Sprint 6+ 0 重叠, deferred)
+
+## 下一步
+- Sprint 10b followup: 27 deferred cherry-pick (Phase 1/2/3 + close-out) + 3 test fix (CAND-008/043/057)
+- 跟 user 拍 followup priority (跟 Sprint 6b 1:1 节奏)
+- Sprint 11 候选 pool 跟 v0.19.0+cn.1 1:1 配对 (跟 Sprint 10 closed loop)
+- 中期版本号切换评估: 累计 v0.19.0+cn.1 done, 跟 upstream v0.19.1 同步 (1 minor 落后 v0.20.0 Herald)
+
+NO push default 跟 HANDOFF 1:1, 等 user 拍 push 节奏.

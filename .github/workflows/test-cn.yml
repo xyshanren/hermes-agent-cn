@@ -1,0 +1,88 @@
+name: CN Localization Tests
+
+on:
+  push:
+    branches: [cn]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  pull_request:
+    branches: [cn]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-cn-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  localization-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: cn
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install min deps
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install pytest
+
+      - name: Run simple CN tests (no deps needed)
+        run: |
+          source .venv/bin/activate
+          python tests/test_cn_simple.py
+
+  hanzi-encoding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: cn
+
+      - name: Verify UTF-8 encoding and Chinese text
+        run: |
+          for f in hermes_cli/commands.py CHANGELOG_CN.md PLAN_CN.md; do
+            encoding=$(file --mime-encoding -b "$f")
+            if [ "$encoding" != "utf-8" ]; then
+              echo "ERROR: $f is not UTF-8 (got: $encoding)"
+              exit 1
+            fi
+            if ! python3 -c "import sys; t=open('$f',encoding='utf-8').read(); sys.exit(0 if any(0x4e00<=ord(c)<=0x9fff for c in t) else 1)"; then
+              echo "ERROR: $f has no CJK chars (U+4E00..U+9FFF)"
+              exit 1
+            fi
+            size=$(wc -c < "$f")
+            echo "OK ($size bytes, $encoding) $f"
+          done
+          echo "All files have valid UTF-8 and contain Chinese text."
+
+  no-merge-conflicts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: cn
+
+      - name: Check for unresolved merge conflict markers
+        run: |
+          # Use state-machine Python check to avoid false positives
+          # (Python docstring separators / standalone `=======` lines)
+          python tests/check_no_merge_conflicts.py
