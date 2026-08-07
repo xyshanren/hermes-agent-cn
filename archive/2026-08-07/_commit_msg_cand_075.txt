@@ -1,0 +1,35 @@
+CAND-075: hermes-agent-cn OpenAI-compatible endpoint (worker pool → /v1/chat/completions protocol) (Sprint 9b)
+
+跟 plan CAND-075 1:1 配对 (跟 CAND-005/007+054/044/011/058/059/062/066/073/074 1:1 配对 0 改旧):
+
+CAND-075 3 件套 (跟 CAND-015 gpt-5.6 model 注册 1:1 配对 0 冲突 verify
+— model 注册 ≠ endpoint protocol 2 概念分层, 跟 CAND-072/073/074 routing
+都 done 集成, 跟 CAND-082 A/B test done 集成):
+- openai_compat_endpoint_register (跟 c1 1:1, model name → routing mode 映射注册)
+- openai_compat_endpoint_pool_hide (跟 c2 1:1, 内部 worker pool 隐藏, 只暴露 model name + /v1/* path)
+- openai_compat_endpoint_dispatch (跟 c3 1:1, dispatch /v1/chat/completions 请求到 CAND-072/073/074 集成)
+- apply_openai_compat_endpoint combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对 3 mode: register/pool_hide/dispatch)
+
+跟 CAND-015 gpt-5.6 注册 1:1 配对 0 冲突 (跟 mavis 4 件套 "后端先调查再设计" 1:1 配对 verify):
+- CAND-015 model 注册 (跟 OpenAI provider 集成, 在 hermes_cli/gpt_5_6_models.py)
+- CAND-075 endpoint protocol (跟 worker pool routing 集成, 新 hermes_cli/openai_compat_endpoint.py)
+- 0 重叠 0 隐式依赖, 0 改 CAND-015 主体 0 冲突
+
+跟 mavis 4 件套 1:1 配对 + CAND-084 8-03 22:10 lesson "估时前必 verify 引擎能力":
+- 后端先调查再设计: hermes_cli/*openai*compat* 0 hit (8-07 verify), 0 改
+  hermes_cli/models.py OpenAI provider 主体 + 0 改 CAND-015 gpt_5_6_models.py
+- Cherry-pick split bug class: 0 cherry-pick (新 file, 跟 CAND-001 1:1 配对)
+- UX 倒退审计: 0 改 CAND-015/072/073/074 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.5-1h (跟 plan 1.5-2.5d 1:1 配对 0.05-0.07x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 借鉴 OpenFugu AGPL-3.0 代码
+(Apache-2.0 ✅ 模式借鉴 0 复制, 跟 CAND-072/073/074 done 1:1 配对)
+
+Test: 6/6 pass (1 静态 + 1 静态 0 改 + 3 live + 1 combined, 跟 Sprint 6a/7/8 1:1 配对)
+集成 24/24 pass (Sprint 9 4 候选 6×4 = 24, 0 冲突)
+0 改 cli.py / 0 改 gpt_5_6_models.py / 0 改 lightweight_router_tool.py
+0 改 adaptive_pool.py / 0 改 two_mode_router.py / 0 改 routing_ab_test_tool.py
+(跟 CAND-085 4 铁律 1:1 配对)
+
+Sprint 9b 累计 2/2 候选 done (CAND-074 + CAND-075), 后续 Sprint 9b 收尾 CHANGELOG cn.16.
+Sprint 9 累计 4/4 候选 done (CAND-073/074/075/078), 跟 Sprint 8 1:1 节奏收尾.
