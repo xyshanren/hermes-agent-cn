@@ -1,0 +1,38 @@
+docs(cn): CHANGELOG v0.18.0+cn.15 (Sprint 9a: Agent Skills 自进化训练基础 2 候选 done)
+
+跟 Sprint 8 阶段收尾 1:1 节奏 (cn.5~cn.14 1:1):
+
+## Sprint 9a 累计 2 候选 done
+- CAND-073 Adaptive pool mode (commit 6cee79776) — 训练时随机 mask worker, 跟 CAND-072 heuristic-init 1:1 配对 drop-in 兼容
+- CAND-078 Synthetic Training Data Pipeline (commit 32e1e5014) — CC0 1.0 corpus → 训练数据, 跟 CAND-082 A/B test 1:1 配对集成
+
+## 关键统计
+- 改动 file: 6 (2 new + 2 test + 2 commit msg, 0 改旧)
+- 12/12 test pass (CAND-073 6 + CAND-078 6, 集成 0 冲突)
+- 257/257 累计 (Sprint 2-8 245 + Sprint 9a 12)
+- 估时: 2-4d plan → 1-1.5h 实际 (0.05-0.07x 缩, 跟 CAND-084 8-03 22:10 lesson 1:1 配对)
+
+## 4 铁律 ↔ mavis 4 件套 1:1
+- 后端先调查再设计: 2 候选 verify adaptive_pool / synthetic_training_data 0 改
+- Cherry-pick split bug class: 2 commit 0 split, 1 file additive per 候选
+- UX 倒退审计: 0 改 cli.py / 0 改 lightweight_router_tool.py / 0 改 adaptive_pool / 0 改 routing_ab_test_tool.py
+- 估时前必 verify 引擎能力: 0.05-0.07x 缩 累计 9 sprint 1:1 配对
+
+## AIMC 4 铁律 1:1
+- 0 写回 upstream
+- 0 改 upstream 决策边界
+- 0 借鉴 OpenFugu AGPL-3.0 代码 (Apache-2.0 ✅ 模式借鉴 0 复制, 跟 CAND-072/082 done 1:1 配对)
+- commit 前 verify 跟 mavis Reflexion Entry 2 (2026-08-07 09:22) 1:1 配对
+
+## 2 skip + 1 hold 候选
+- CAND-077 rejected (记录决策, 0 实施)
+- CAND-079 1-2 季度 scope (hold 跳过 Sprint 9a)
+- CAND-076 5-10d 偏大 (1-2 季度 scope, hold 跳过 Sprint 9)
+
+## 下一步
+- Sprint 9a 阶段收尾 batch push origin/cn + tag v0.18.0+cn.15 (当前 turn)
+- Sprint 9b kickoff (CAND-074 Two-mode router + CAND-075 OpenAI-compatible endpoint)
+- 中期版本号切换评估 (cn.16 累计时)
+- 2026-10-01 cron 季度 borrow re-audit
+
+NO push default 跟 HANDOFF 1:1, 等 user 拍 push 节奏.
