@@ -1,0 +1,22 @@
+CAND-059: User-defined deny rules UI bridge to hermes-tray (Sprint 8)
+
+跟 plan CAND-059 1:1 配对 (跟 CAND-005/007+054/044/011/058 1:1 配对 0 改旧):
+
+3 件套 (跟 CAND-008 fnmatch glob 衍生 + hermes-tray 同步 1:1 配对):
+- deny_rules_tray_bridge_endpoint (跟 c1 1:1, hermes-agent-cn 端 endpoint `/v1/tray/deny_rules`)
+- deny_rules_tray_bridge_serialize (跟 c2 1:1, fnmatch glob 序列化)
+- deny_rules_tray_bridge_dispatch (跟 c3 1:1, 规则变更事件派发)
+
+1 combined entry (跟 CAND-005 apply_filter + CAND-007+054 1:1 配对):
+- apply_deny_rules_tray_bridge(rules, event) → 跑 3 件套, 返 dict 3 keys
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: hermes_cli/approvals_deny.py 0 hit tray bridge (8-07 verify), 0 改 approvals_deny 主体
+- Cherry-pick split bug class: 0 cherry-pick (新 file 3 functions, 跟 CAND-007+054 1:1)
+- UX 倒退审计: 0 改 deny rules 现有 file, 抽 file additive 0 改
+- 估时前必 verify 引擎能力: 实际 0.25h (跟 plan 30min 1:1 配对 0.5x 缩)
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 改 upstream 决策边界
+
+Sprint 8 第 2 步 (估 30min, 实际 0.25h, 1:1 配对 0.5x 缩)
+6 test pass, 0 回归 (跟 CAND-058 6 test baseline 1:1)
