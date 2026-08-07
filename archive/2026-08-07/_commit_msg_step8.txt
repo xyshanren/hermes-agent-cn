@@ -1,0 +1,33 @@
+docs(cn): CHANGELOG v0.18.0+cn.14 (Sprint 8: Tier 2/3 候选池 4 候选 done)
+
+跟 plan §14 退出条件 1:1 配对 (Sprint 8 收尾 batch push + tag v0.18.0+cn.14):
+
+Sprint 8 4 候选 4 commit 跟 plan CAND-058/059/062/066 1:1 配对:
+- CAND-058 TTFT round 2 UX bridge to hermes-tray
+- CAND-059 User-defined deny rules UI bridge to hermes-tray
+- CAND-062 双端 Doctor 体系 (启动健康检查 + 客户端 UI)
+- CAND-066 Smart model download (HF + ModelScope 双源)
+
+2 skip 候选 (跟 verify 后端 mature 1:1 配对):
+- CAND-063 已迁 hermes-tray 候选池 TRAY-CAND-003
+- CAND-067 已迁 hermes-tray 候选池 TRAY-CAND-005
+
+CHANGELOG entry 跟 v0.18.0+cn.13 模板 1:1 配对:
+- 4 实施 commit 跟 plan 1:1 配对 + 4 必填字段落盘
+- 4 候选 verify 后端 mature 跟 plan 假设 differ 1-2 层 (跟 CAND-084 lesson 1:1)
+- 4 候选 additive 新 file 0 改旧 跟 Sprint 2-7 1:1 配对 8 sprint
+- 火花库 §7 entry audit log 1:1 配对
+
+跟 mavis 4 件套 1:1 配对:
+- 后端先调查再设计: 4 候选 verify 后端 mature 0 改
+- Cherry-pick split bug class: 4 commit 0 split, additive 0 改旧
+- UX 倒退审计: 0 改 cli.py / 4 个目标 file 主体
+- 估时前必 verify 引擎能力: plan 4-5h → 实际 2h, 0.4-0.5x 缩
+
+跟 AIMC 4 铁律 1:1: 0 改 upstream / CN 端可维护 / 0 借鉴 OpenBMB AGPL-3.0 (CAND-062/066 模式借鉴 0 复制)
+
+Sprint 8 收尾 (估 4-5h, 实际 2h, 1:1 配对 0.4-0.5x 缩)
+24 test pass, 0 回归 (跟 Sprint 7 Wave 2 baseline 1:1)
+245 test 累计 (Sprint 2-7 221 + Sprint 8 24)
+
+Sprint 9 预告: 跟 user 8-07 拍 "拆 2 sprint" 1:1 配对, Agent Skills 自进化 11 候选 (CAND-072~082), 需独立 kickoff doc
