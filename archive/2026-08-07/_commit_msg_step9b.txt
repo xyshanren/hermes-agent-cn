@@ -1,0 +1,48 @@
+docs(cn): CHANGELOG v0.18.0+cn.16 (Sprint 9b: Agent Skills 自进化 routing 模式 + 暴露面 2 候选 done)
+
+跟 Sprint 9a 阶段收尾 1:1 节奏 (cn.5~cn.15 1:1):
+
+## Sprint 9b 累计 2 候选 done
+- CAND-074 Two-mode router (commit 0ae409534) — fast_rule (跟 CAND-072 1:1) ↔ smart_learned (跟 CAND-073 1:1) + auto switch
+- CAND-075 OpenAI-compatible endpoint (commit 1da7e770c) — model 注册 (跟 CAND-015 0 冲突) + dispatch /v1/chat/completions 到 CAND-072/073/074
+
+## 关键统计
+- 改动 file: 6 (2 new + 2 test + 2 commit msg, 0 改旧)
+- 12/12 test pass (CAND-074 6 + CAND-075 6, 集成 0 冲突)
+- 269/269 累计 (Sprint 2-9a 257 + Sprint 9b 12)
+- 估时: 3-5d plan → 1-1.5h 实际 (0.05-0.07x 缩, 跟 CAND-084 8-03 22:10 lesson 1:1 配对)
+- 累计 1:1 配对 10 sprint (Sprint 2~Sprint 8 + Sprint 9a + Sprint 9b)
+
+## Sprint 9 累计闭环
+- Sprint 9a (2 候选) + Sprint 9b (2 候选) = Sprint 9 4 候选 done
+- 跟 Sprint 8 4 候选 1:1 配对, 累计 47 候选 done (Sprint 2-9b)
+
+## 4 铁律 ↔ mavis 4 件套 1:1
+- 后端先调查再设计: 2 候选 verify CAND-015 vs CAND-075 0 重叠 + verify 0 改 cli.py / 5 个 routing tools 主体
+- Cherry-pick split bug class: 2 commit 0 split, 1 file additive per 候选
+- UX 倒退审计: CAND-074 默认 fast_rule 0 改 UX (跟现有 CAND-072 调用路径 1:1)
+- 估时前必 verify 引擎能力: 0.05-0.07x 缩 累计 10 sprint 1:1 配对
+
+## AIMC 4 铁律 1:1
+- 0 写回 upstream
+- 0 改 upstream 决策边界
+- 0 借鉴 OpenFugu AGPL-3.0 代码 (Apache-2.0 ✅ 模式借鉴 0 复制, 跟 CAND-072/073/082 done 1:1 配对)
+- commit 前 verify 跟 mavis Reflexion Entry 2 (2026-08-07 09:22) 1:1 配对
+
+## 2 候选按 dependency 顺序
+- CAND-074 (routing mode 选择) → CAND-075 (endpoint 暴露面)
+- 跟 CAND-075 依赖 CAND-074 1:1 配对
+- 跟 Sprint 7 Wave 1 + Wave 2 节奏 1:1 配对, dependency 顺序实施 0 风险叠加
+
+## 2 skip + 1 hold 候选 (跟 Sprint 9a 1:1 配对)
+- CAND-077 rejected (记录决策, 0 实施)
+- CAND-079 1-2 季度 scope (hold 跳过 Sprint 9b)
+- CAND-076 5-10d 偏大 (1-2 季度 scope, hold 跳过 Sprint 9)
+
+## 下一步
+- Sprint 9b 阶段收尾 batch push origin/cn + tag v0.18.0+cn.16 (当前 turn)
+- Sprint 10 预告: Big bet 长尾 CAND-070/071/076 + hold 候选 1:1 配对
+- 中期版本号切换评估 (cn.17 累计时, 47 候选 done)
+- 2026-10-01 cron 季度 borrow re-audit
+
+NO push default 跟 HANDOFF 1:1, 等 user 拍 push 节奏.
