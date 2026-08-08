@@ -855,15 +855,22 @@
 
 ### [CAND-079] 🇨🇳 cn 模型 system prompts corpus (自建, 训练数据)
 
-- **状态**: 🟡 proposed
+- **状态**: 🟡 proposed → ✅ **done Sprint 11 Phase 1 (commit `c3513101d`, 6/6 test pass)**: C. 官方 mine (跟 cand-079-cn-prompt-corpus-tools-design.md §3 1:1 配对), 抓 14 vendor 公开 GitHub/HF, 3 indicator 启发式 (en + cn + neutral), 0 GPU 0 ToS 0 license, additive 新 file 0 改旧 跟 Sprint 9a CAND-078 done 1:1 配对. **Sprint 12 续 Phase 2/3** (B. 自托管 extract, GPU + 8 GPU-hour 1-2d 实际 + A. 公开 crawl, 公众号需人工 1-2d 实际).
 - **来源**: 自建 corpus (公开渠道 + 官方 repo + 启发式)
 - **一句话**: 自建国内模型 system prompts 训练集, 补 cn-specific 覆盖
-- **估时**: 1-2 周
+- **估时**: 1-2 周 (Phase 1 0.3-0.5h 实际 done, Phase 2/3 1-2d 实际 跟 cand-079 doc §2/§1 1:1 配对, 1-2 季度总)
 - **风险**: 🟢 低
 - **价值**: 🟢 高
-- **触发条件**: CAND-078 跑完后, 想补 cn gap
+- **触发条件**: CAND-078 跑完后, 想补 cn gap (Sprint 9a CAND-078 done 1:1 配对)
 - **详细分析**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\OpenFugu-vs-hermes-routing.md`
 - **实施工具**: `D:\work\workspace\MiniMax\projects\hermes-agent-cn-notes\cross-pollination\cand-079-cn-prompt-corpus-tools-design.md`
+- **Sprint 11 Phase 1 实施 (跟 v0.19.0+cn.3 1:1 配对)**: C. 官方 mine (`tools/cn_prompt_miner.py` 280 lines, 14 vendor GITHUB_REPOS: DeepSeek (×3) / Qwen (×3) / GLM (×3) / Kimi / Hunyuan / InternLM / Yi / Xunfei, 3 indicator 启发式 en (you are / you must / you should) + cn (你的角色 / 你是) + neutral (system: / <|system|> / 提示词) 阈值 2+, 3 件套 + 1 combined: fetch_official (stdlib urllib 0 vendor lock-in) / extract_prompts (3 pattern: code block / section / JSON) / save_to_corpus (corpus/official/{vendor}/{repo}/) / official (combined orchestrator), commit `c3513101d` + CHANGELOG commit `3b8ca1a97`. 6/6 test pass 跟 CAND-078 done 1:1 配对 6-pattern (1 静态 + 1 静态 0 改 + 3 live + 1 combined). 累计 43/43 CAND test pass (Sprint 9a/9b/10b/11 8 CAND test, 0 regression), 估时 0.5-1d plan → 0.3-0.5h 实际 (0.05-0.1x 缩 跟 Sprint 9a/9b 0.05-0.07x 1:1 配对). 4-step .env 保护审计 0 leak (mavis 2026-07-25 rule), 0 改 12 stable file 跟 CAND-085 4 铁律 1:1 配对, 0 真写盘 corpus/ 目录 (skeleton 0 副作用 跟 CAND-082 1:1 配对). CI green 累计 15 run (跟 Sprint 10b 14 +1 1:1 配对). context_compressor misnomer 0 work 跟 mavis 5-drops lesson #2 1:1 配对 (Sprint 12 Phase 2 实施时 audit task: MICRO_COMPACT_MARKER_KEY 仍 0 ref 1:1 删).
+- **Sprint 12 候选 pool 1:1 配对**:
+  - CAND-079 Phase 2 (B. 自托管 extract, GPU + 8 GPU-hour, 1-2d 实际)
+  - CAND-079 Phase 3 (A. 公开 crawl, 公众号需人工, 1-2d 实际)
+  - hold CAND-070 wecom/feishu approval (AGPL-3.0 模式借鉴 0 复制, 2-4d 实际 1-2 季度)
+  - hold CAND-071 22 coding agent (AGPL-3.0, 2-4d 实际 1-2 季度)
+  - hold CAND-076 Conductor/Ultra DAG (OpenFugu Apache-2.0 patent 警惕, 2-5d 实际 1-2 季度)
 
 ---
 
