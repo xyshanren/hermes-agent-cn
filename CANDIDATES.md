@@ -956,27 +956,27 @@
 
 ### [K-1] 📋 completion contracts for /goal (v0.18.0 "Judgment Release")
 
-- **状态**: 🟡 proposed (deferred per user 2026-07-23 决定, port plan ready)
+- **状态**: 🟡 proposed (deferred per user 2026-07-23 决定, port plan ready) → ✅ done Sprint 14 (跟 K-3/K-4 1:1 配对 format; 8-09 Sprint 13a v0.20.0 sync merge 落地, 5 commit 来自 upstream 2ba1cfeb2 7-29+ era: `2ba1cfeb2` `feat(goals): completion contracts for /goal — evidence-based judging (#50501)` + `5b5b5e8da` `fix(goals): decode quality-gate output` + `6e041d524` `feat(goals): quality gates` + `48fc1d780` `fix(goals): auto-pause goal loop` + 5th follow-up; `hermes_cli/goals.py` 97KB, 14+ hits on GoalContract/parse_contract/draft_contract, 跟 K-3/K-4 1:1 配对 v0.20.0 already done; 跟 mavis MEMORY 8-09 "估时前必 verify 引擎能力" 1:1 配对, 8-06 调研 0 命中 ≠ 实施时状态)
 - **Source**: upstream `2ba1cfeb2` (PR #50501, main) + `0b33bc539` (PR #38388, kanban judge gate) + `14c4a849b` + `b3c1b3b3f` (follow-up fixes)
 - **Axiom match**: **3 闭环反馈 (strongest)** — judge 严格按 verification + concrete evidence (command output / file excerpt / test result), agent 看 evidence 调 next step, WAIT verdict (避免 busy-loop), persistent across `/resume`
-- **Cn state**: ❌ `GoalContract` dataclass / `parse_contract` / `draft_contract` / `/goal show` / `/goal draft` 命令 / `kanban_complete` 工具层 judge gate — **全部缺失** (clean port, 0 dead code)
-- **Port plan**: 1-2d, 1-commit manual port. 4 文件改动: `hermes_cli/goals.py` (dataclass + parsers + 3 prompt templates) + `hermes_cli/cli_commands_mixin.py` + `gateway/slash_commands.py` (CLI + gateway 镜像) + `tools/kanban_tools.py` (judge gate, fail-open per upstream review)
-- **估时**: 1-2d | **风险**: 🟡 中 (judge prompt 改; goal_mode worker 行为变化)
+- **Cn state**: ✅ `GoalContract` dataclass / `parse_contract` / `draft_contract` / `/goal show` / `/goal draft` 命令 / `kanban_complete` 工具层 judge gate — **全部已在 v0.20.0** (8-09 Sprint 13a merge 落地, 跟 8-06 调研 0 命中 1:1 配对; 5 commit 验证 `git log --oneline -- hermes_cli/goals.py` 2ba1cfeb2 + 5b5b5e8da + 6e041d524 + 48fc1d780 + 7c954969b)
+- **Port plan**: 1-2d, 1-commit manual port. 4 文件改动: `hermes_cli/goals.py` (dataclass + parsers + 3 prompt templates) + `hermes_cli/cli_commands_mixin.py` + `gateway/slash_commands.py` (CLI + gateway 镜像) + `tools/kanban_tools.py` (judge gate, fail-open per upstream review) — **0 实施** (跟 K-9/K-10 1:1 配对 v0.20.0 already done pattern)
+- **估时**: 0d (Sprint 14 0 实施, 跟 user 8-09 拍 "选 A 0 实施 5 候选" 1:1 配对) | **风险**: 🟢 低 (1 commit CANDIDATES.md in-scope fix only)
 - **价值**: 🔴 极高 (S12 P3 闭环关键, 跟 CAND-042 unblock; CAND-041 已 done pre-sprint 2026-07-23)
 - **详细分析**: `phase3c-cand-046-deep-dive.md`
-- **备注**: ⚠️ 跟 K-2 交互 — `draft_contract` 走 `goal_judge` aux call, 当前 silent config drop (K-2 修了才能真吃 `auxiliary.goal_judge.extra_body`)
+- **备注**: ⚠️ 跟 K-2 交互 — `draft_contract` 走 `goal_judge` aux call, 跟 K-2 7c954969b 1:1 配对修完 silent config drop 后真吃 `auxiliary.goal_judge.extra_body`. 跟 Sprint 11 followup in-scope fix 1:1 配对 (mavis MEMORY 8-08 entry).
 
 ### [K-2] 🔧 auxiliary_client → call_llm (v0.19.0 #35566 fix)
 
-- **状态**: 🟡 proposed (deferred per user 2026-07-23 决定, port plan ready, **P0 bug**)
+- **状态**: 🟡 proposed (deferred per user 2026-07-23 决定, port plan ready, **P0 bug**) → ✅ done Sprint 14 (跟 K-3/K-4 1:1 配对 format; 8-09 Sprint 13a v0.20.0 sync merge 落地, upstream `7c954969b` 7-15 cherry-pick 已在 v0.20.0 base 3c27eb623 8-03 ancestry, refactor 5 callers `kanban_decompose` / `kanban_specify` / `profile_describer` / `goals.py judge` / `goals.py draft-contract` 走 `call_llm` 统一入口; 1 callsite 剩 `conversation_compression.py:1632` 是 warning detection (跟 P0 bug 无关); 跟 mavis MEMORY 8-09 "估时前必 verify 引擎能力" 1:1 配对, 8-06 调研 7 callsite 跟 v0.20.0 实际 1 callsite 1:1 配对)
 - **Source**: upstream `7c954969b` (PR #65029 / Fixes #35566)
 - **Axiom match**: **2 整体最优 (strongest)** — 5 个 direct-create aux caller 整合到 `call_llm` 统一入口, 避免局部最优 (单函数看 OK, 全局配置 `auxiliary.<task>.extra_body / reasoning_effort / retries` 丢失)
-- **Cn state**: ❌ **7 production call sites** 仍走 `get_text_auxiliary_client(task)` + `client.chat.completions.create()` 直连 (silent config drop). `call_llm` **已存在** (`agent/auxiliary_client.py:4989`, signature 是 upstream 超集, 多了 `routing_decision_out` / `tools` / `_get_task_extra_body`). 修只需 refactor call sites, 不用新加函数
-- **Port plan**: 0.5d, 1-commit manual port. 7 call sites refactor + `goal_judge` 加进 DEFAULT_CONFIG.auxiliary + 6 test 文件 mock 从 `get_text_auxiliary_client` 换到 `call_llm`
-- **估时**: 0.5d | **风险**: 🟡 中 (核心 runtime path, `run_agent.py` + `conversation_compression.py` 必须先 read 确认 `client` 没被 chat.completions.create 之外用)
+- **Cn state**: ✅ **5/6 callsite 已 refactor** 走 `call_llm` 统一入口 (跟 `7c954969b` cherry-pick 1:1 配对); 1 callsite 剩 `agent/conversation_compression.py:1632` 是 `replay_compression_warning` warning detection, 不是 silent config drop P0 bug, 0 关联. `call_llm` 跟 `async_call_llm` 都在 `agent/auxiliary_client.py:8738` + `:9586` (跟 8-06 doc 8-06 调研 `auxiliary_client.py:4989` 位置略后, line shift 跟 v0.20.0 累计 commit 1:1 配对)
+- **Port plan**: 0.5d, 1-commit manual port. 7 call sites refactor + `goal_judge` 加进 DEFAULT_CONFIG.auxiliary + 6 test 文件 mock 从 `get_text_auxiliary_client` 换到 `call_llm` — **0 实施** (跟 K-9/K-10 1:1 配对 v0.20.0 already done pattern, 7c954969b cherry-pick 替 cn 做完)
+- **估时**: 0d (Sprint 14 0 实施, 跟 user 8-09 拍 "选 A 0 实施 5 候选" 1:1 配对) | **风险**: 🟢 低 (1 commit CANDIDATES.md in-scope fix only)
 - **价值**: 🔴 **极高 P0** (S12 routing_decision accuracy, S14 vision aux path, S15 plugin kanban, hermes_cli 全 utility 任务 全栈 silent bug)
 - **详细分析**: `phase3b-cand-047-port-plan.md`
-- **备注**: borrow 调研**意外发现**的 P0 bug — 不在 cn 12 split bug 列表 (那些是 build/syntax 错, 这个是 silent config drop)
+- **备注**: borrow 调研**意外发现**的 P0 bug — 不在 cn 12 split bug 列表 (那些是 build/syntax 错, 这个是 silent config drop). 跟 `7c954969b` cherry-pick 1:1 配对, 7c954969b 在 v0.20.0 base 3c27eb623 8-03 ancestry (跟 K-10 2d0e96a2b NOT in v0.20.0 1:1 配对 opposite, 因为 7c954969b 7-15 在 3c27eb623 8-03 之前). 跟 Sprint 11 followup in-scope fix 1:1 配对.
 
 ### [K-3] 🌐 gateway profile routing multiplex (6 adapter 借鉴)
 
