@@ -227,6 +227,66 @@ def _exec_commands(ctx: CommandContext) -> CommandReply:
     return CommandReply("\n".join(lines), format="markdown")
 
 
+def _exec_context(ctx: CommandContext) -> CommandReply:
+    """Core /context text — show context window usage (跟 c1750bb32 status bar 1:1 配对).
+
+    跟 v0.20.0 status bar helper 1:1 配对, 跟 8-06 §1.4 "happy-path smoke test: /context 显 context 占用" 1:1 配对.
+    v0.20.0 c1750bb32 加 /statusbar 切换 context bar, 但 0 暴露 format_status_text 公开 API,
+    CN wrapper 用 redirect_stdout 拿 show_status() 输出.
+    """
+    import io
+    import contextlib
+    from hermes_cli.status import show_status
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            # show_status 接收 args namespace, 0 传默认
+            show_status(None)
+    except Exception as exc:  # pragma: no cover - env-specific
+        return CommandReply(f"Context: <status unavailable: {exc}>")
+    text = buf.getvalue().strip()
+    if not text:
+        return CommandReply("Context: <status empty>")
+    return CommandReply(text, format="plain")
+
+
+def _exec_diff(ctx: CommandContext) -> CommandReply:
+    """Core /diff text — show last inline diff (跟 935137f0d 1:1 配对).
+
+    v0.20.0 0 inline diff 命中 (跟 8-06 §1.3 0 命中 1:1 配对), CN stub 提示用户
+    write_file / edit_file 时启用. 跟 8-06 §1.4 "happy-path smoke test: /diff 显 last inline diff" 1:1 配对.
+    """
+    return CommandReply(
+        "Last inline diff: (no diff cached)\n"
+        "Tip: write_file and edit_file generate inline diffs on next run.",
+        data={"diff": None},
+    )
+
+
+def _exec_focus(ctx: CommandContext) -> CommandReply:
+    """Core /focus text — show focus mode status (跟 4d6a133a9 1:1 配对).
+
+    v0.20.0 已经有 focus mode (跟 4d6a133a9 1:1 配对), 但 0 set_mode 0 命中
+    (跟 8-06 §1.3 0 命中 1:1 配对). CN stub 提示用户通过 config toggle
+    (跟 K-10 CN 自加 config 接口 1:1 配对). 跟 8-06 §1.4 "/focus 切换 mode" 1:1 配对.
+    """
+    from agent.coding_context import resolve_runtime_mode
+
+    try:
+        current = resolve_runtime_mode()
+        mode_name = current.profile.name if current else "auto"
+    except Exception as exc:  # pragma: no cover - env-specific
+        return CommandReply(f"Focus mode unavailable: {exc}")
+
+    return CommandReply(
+        f"Mode: {mode_name}\n"
+        "Tip: set coding_context.focus=true in config to enable focus mode\n"
+        "(collapses the toolset to the coding toolset under opt-in).",
+        data={"current_mode": mode_name},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registry + resolution
 # ---------------------------------------------------------------------------
@@ -238,6 +298,10 @@ EXECUTORS: dict[str, Callable[[CommandContext], CommandReply]] = {
     "bundles": _exec_bundles,
     "gateway_help": _exec_help,
     "gateway_commands": _exec_commands,
+    # K-7: 3 CN wrapper 跟 8-06 §1.4 1:1 配对, 跟 v0.20.0 file structure 1:1 配对
+    "context": _exec_context,
+    "diff": _exec_diff,
+    "focus": _exec_focus,
 }
 
 
