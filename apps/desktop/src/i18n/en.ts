@@ -132,6 +132,7 @@ export const en: Translations = {
     errors: {
       elevenLabsNeedsKey: 'ElevenLabs STT needs ELEVENLABS_API_KEY.',
       elevenLabsRejectedKey: 'ElevenLabs rejected the API key (401).',
+      diskFull: 'Disk full — free some space, then try again.',
       gatewayAuthFailed: 'Gateway authentication failed — check your API_SERVER_KEY.',
       methodNotAllowed:
         'The desktop backend rejected that request (405 Method Not Allowed). Try restarting Hermes Desktop.',
@@ -201,7 +202,8 @@ export const en: Translations = {
     unmuteHaptics: 'Unmute haptics',
     openSettings: 'Open settings',
     openStarmap: 'Open memory graph',
-    openKeybinds: 'Keyboard shortcuts',
+    enterHud: 'HUD mode',
+    exitHud: 'Exit HUD mode',
     layoutEditor: 'Layout editor',
     layoutEditorTitle: 'Layout editor — ⌘-click resets the layout'
   },
@@ -260,6 +262,7 @@ export const en: Translations = {
       'view.toggleReview': 'Toggle review pane',
       'view.toggleStatusbar': 'Toggle status bar',
       'view.showFiles': 'Show file browser',
+      'view.toggleHud': 'Toggle HUD mode',
       'view.showTerminal': 'Toggle terminal',
       'view.newTerminal': 'New terminal',
       'view.nextTerminal': 'Next terminal',
@@ -362,7 +365,19 @@ export const en: Translations = {
       disable: 'Disable',
       failed: 'failed',
       empty: 'No desktop plugins installed yet.',
-      kinds: { bundled: 'bundled', disk: 'on disk', runtime: 'runtime' }
+      kinds: { bundled: 'bundled', disk: 'on disk', runtime: 'runtime' },
+      agent: {
+        title: 'Agent plugins',
+        blurb:
+          'Run in the Hermes backend — tools, skills, MCP servers, hooks, and slash commands. Portable ones are Agent Plugins packages (skills + MCP bundles that work in other agents too). Toggles apply to new sessions.',
+        empty: 'No agent plugins installed yet.',
+        loadFailed: 'Could not load agent plugins',
+        portable: 'portable',
+        search: 'Search plugins…',
+        noMatches: 'No plugins match your search.',
+        toggleFailed: (name: string) => `Could not toggle ${name}`,
+        sources: { bundled: 'bundled', user: 'user', git: 'git', project: 'project', entrypoint: 'pip' }
+      }
     },
     notifications: {
       title: 'Notifications',
@@ -394,6 +409,10 @@ export const en: Translations = {
         credits: {
           label: 'Credit alerts',
           description: 'Credit access is paused or restored.'
+        },
+        plugin: {
+          label: 'Plugin notifications',
+          description: 'A desktop plugin sent a notification while Hermes was in the background.'
         }
       },
       test: 'Send test notification',
@@ -438,6 +457,12 @@ export const en: Translations = {
       uiScaleTitle: 'UI Scale',
       uiScaleDesc: (percent: number) =>
         `Scales text and controls across the whole app. Cmd/Ctrl with +, - and 0 also works. Current: ${percent}%.`,
+      terminalFontTitle: 'Terminal Font',
+      terminalFontDesc:
+        'Choose an installed font for Desktop terminals. Nerd Fonts render Powerlevel10k and shell icons; leave blank to use bundled JetBrains Mono.',
+      terminalFontPlaceholder: 'MesloLGS NF or a CSS font stack',
+      terminalFontPreview: 'Glyph preview',
+      terminalFontReset: 'Use default',
       translucencyTitle: 'Window Translucency',
       translucencyDesc: 'See your desktop through the whole window. macOS and Windows only.',
       backdropTitle: 'Chat Backdrop',
@@ -712,6 +737,8 @@ export const en: Translations = {
       sshHermesPathTitle: 'Hermes path (optional)',
       sshHermesPathDesc: 'Full path to the remote hermes binary. Blank = auto-detect.',
       sshHermesPathPlaceholder: 'auto-detect',
+      sshRemoteProfileTitle: 'Remote profile (optional)',
+      sshRemoteProfileDesc: 'Profile name on the remote host. Blank = use the Desktop profile name.',
       sshTestConnection: 'Test SSH',
       sshConnect: 'Connect',
       sshButtonsHint: 'Save applies on the next launch. Connect reconnects now.',
@@ -1550,6 +1577,12 @@ export const en: Translations = {
     search: 'Search profiles...',
     loading: 'Loading profiles...',
     newProfile: 'New profile',
+    importProfile: 'Import profile…',
+    exportProfile: 'Export profile…',
+    imported: 'Profile imported',
+    exported: 'Profile exported',
+    failedImport: 'Failed to import profile',
+    failedExport: 'Failed to export profile',
     allProfiles: 'All profiles',
     showAllProfiles: 'Show all profiles',
     switchToProfile: name => `Switch to ${name}`,
@@ -1863,6 +1896,11 @@ export const en: Translations = {
       menuAddFolder: 'Add folder',
       menuSetActive: 'Set active',
       menuDelete: 'Delete',
+      moveToProject: 'Move to project',
+      movedTo: name => `Moved to ${name}`,
+      moveFailed: 'Could not move session',
+      moveNoFolder: 'That project has no folder to move into',
+      moveNoProjects: 'No other projects',
       reveal: 'Reveal in folder',
       copyPath: 'Copy path',
       removeFromSidebar: 'Hide from sidebar',
@@ -1878,6 +1916,9 @@ export const en: Translations = {
       baseBranchPlaceholder: 'Search branches…',
       baseBranchNone: 'No branches found',
       startWorkFailed: 'Could not create worktree',
+      worktreeProjectLabel: 'Project',
+      worktreeProjectPlaceholder: 'Search projects…',
+      worktreeProjectNone: 'No projects with a folder',
       convertBranch: 'Convert a branch…',
       convertBranchTitle: 'Convert a branch',
       convertBranchDesc: 'Open checked-out branches, or create a worktree for a free branch.',
@@ -1886,6 +1927,7 @@ export const en: Translations = {
       branchOpenExisting: 'open',
       branchSwitchHome: 'switch home',
       branchCreateWorktree: 'new worktree',
+      branchTrackRemote: 'track remote',
       branchesLoading: 'Loading branches…',
       noBranches: 'No branches found',
       removeWorktree: 'Remove worktree',
@@ -1971,6 +2013,7 @@ export const en: Translations = {
       'Adjust or continue'
     ],
     startVoice: 'Start voice conversation',
+    openDirective: 'Open',
     queueMessage: 'Queue message',
     steer: 'Steer the current run',
     stop: 'Stop',
@@ -2552,10 +2595,6 @@ export const en: Translations = {
 
   preview: {
     tab: 'Preview',
-    closeTab: label => `Close ${label}`,
-    closeOthers: 'Close others',
-    closeToRight: 'Close to the right',
-    closeAll: 'Close all',
     closePane: 'Close preview pane',
     loading: 'Loading preview',
     unavailable: 'Preview unavailable',
@@ -2653,6 +2692,7 @@ export const en: Translations = {
     closeRunningBody:
       'This chat is still working (or waiting on your input). Closing the tab hides it — the session keeps its progress and can be reopened from the sidebar.',
     closeRunningConfirm: 'Close tab',
+    reload: 'Reload',
     closeOthers: 'Close others',
     closeToRight: 'Close to the right',
     closeAll: 'Close all',
@@ -2682,7 +2722,8 @@ export const en: Translations = {
     layoutNamePlaceholder: fallback => `Layout name (${fallback})`,
     saveApply: 'Save & apply',
     notExpressible: 'this arrangement interlocks (pinwheel) — not expressible as nested splits yet',
-    zoneCount: count => `${count} zones`
+    zoneCount: count => `${count} zones`,
+    tabCount: count => `${count} tabs`
   },
 
   assistant: {
