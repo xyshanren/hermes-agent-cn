@@ -50,6 +50,39 @@ class CommandDef:
     cli_only: bool = False             # only available in CLI
     gateway_only: bool = False         # only available in gateway/messaging
     gateway_config_gate: str | None = None  # config dotpath; when truthy, overrides cli_only for gateway
+    # Mid-run (agent busy) gateway behavior.  Drives the Guard-2 dispatcher
+    # in gateway/run.py (_dispatch_busy_slash_command) instead of a
+    # hand-written per-command if-chain.  Values:
+    #   "dispatch"                — run the command while the agent is busy
+    #                               (via its normal handler, or the mid-run
+    #                               variant named by ``busy_handler``).
+    #   "reject"                  — refuse mid-run.  Without ``busy_handler``
+    #                               the generic "Agent is running — `/<cmd>`
+    #                               can't run mid-turn" catch-all is returned;
+    #                               with ``busy_handler`` a command-specific
+    #                               reject message is used.
+    #   "interrupt_then_dispatch" — interrupt/kill the running agent first,
+    #                               then dispatch (the /stop, /new, /reset
+    #                               class).  Guard 1 (platforms/base.py)
+    #                               routes these through the cancel-handoff
+    #                               path via is_interrupt_then_dispatch().
+    busy_policy: str = "reject"
+    # Optional key of a special mid-run handler in the Guard-2 handler table
+    # (gateway/run.py) for commands whose busy behavior differs from their
+    # normal handler (e.g. /goal's control-verb whitelist, /queue's FIFO
+    # enqueue, /model's custom busy-reject text).
+    busy_handler: str | None = None
+    # Registry-owned shared execution (thin slice, informational commands).
+    # Names a key in ``hermes_cli.slash_exec.EXECUTORS`` — a pure formatter
+    # producing the canonical, surface-independent core text.  Surfaces
+    # resolve it via ``hermes_cli.slash_exec.run_execute`` and apply only
+    # their own decoration (Rich markup, emoji/markdown, telegramize).  A
+    # string key (not a callable) keeps this module import-light: the
+    # gateway can import commands.py without prompt_toolkit and without
+    # pulling in executor dependencies.
+    # 跟 bcb352eea (7-29) 1:1 配对, 8-09 Sprint 13c 修 154425c14 (8-07 CN-化 revert) 误删的 3 field
+    # (跟 mavis "fix collateral issues in-scope" 1:1 配对)
+    execute: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +127,11 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("queue", "将提示词加入队列（不会打断当前对话）", "会话",
                aliases=("q",), args_hint="<提示词>"),
     CommandDef("status", "显示会话信息", "会话"),
-    CommandDef("profile", "显示当前配置名称和主目录", "信息"),
+    CommandDef("egress", "显示 Docker egress proxy 状态", "会话",
+               args_hint="[状态]", subcommands=("状态",),
+               busy_policy="dispatch", execute="egress"),
+    CommandDef("profile", "显示当前配置名称和主目录", "信息",
+               busy_policy="dispatch", execute="profile"),
     CommandDef("sethome", "将此聊天设为主频道", "会话",
                gateway_only=True, aliases=("set-home",)),
     CommandDef("resume", "恢复之前命名的会话", "会话",
@@ -142,11 +179,15 @@ COMMAND_REGISTRY: list[CommandDef] = [
                cli_only=True, args_hint="[connect|disconnect|status]",
                subcommands=("connect", "disconnect", "status")),
     CommandDef("plugins", "列出已安装插件及其状态", "工具与技能", cli_only=True),
+    CommandDef("bundles", "列出已安装的技能包（用 /<名称> 调用整个包）", "工具与技能",
+               execute="bundles"),
 
     # Info
     CommandDef("commands", "浏览所有命令和技能（分页）", "信息",
-               gateway_only=True, args_hint="[页码]"),
-    CommandDef("help", "显示可用命令", "信息"),
+               gateway_only=True, args_hint="[页码]",
+               busy_policy="dispatch", execute="gateway_commands"),
+    CommandDef("help", "显示可用命令", "信息",
+               busy_policy="dispatch", execute="gateway_help"),
     CommandDef("restart", "在现有任务结束后优雅重启网关", "会话",
                gateway_only=True),
     CommandDef("usage", "显示当前会话的 Token 用量和速率限制", "信息"),
@@ -160,6 +201,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                cli_only=True, args_hint="<路径>"),
     CommandDef("update", "更新 Hermes Agent 至最新版本", "信息",
                gateway_only=True),
+    CommandDef("version", "显示 Hermes Agent 版本", "信息", aliases=("v",),
+               busy_policy="dispatch", execute="version"),
     CommandDef("debug", "上传调试报告（系统信息 + 日志）并获取分享链接", "信息"),
 
     # Exit
