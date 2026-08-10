@@ -1069,10 +1069,17 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                 )
                 return
             except KeyboardInterrupt:
-                try:
-                    agent.interrupt("keyboard interrupt")
-                except Exception:
-                    pass
+                # Sprint 15 in-scope fix (跟 mavis 5-drops silent failure 1:1 配对):
+                # 区分 user 主动 Ctrl+C 跟 SIGTERM-from-subprocess.
+                # install.sh run_with_timeout (scripts/install.sh:2059-2144) 发 SIGTERM,
+                # hermes-cli signal handler (hermes_cli/proxy/server.py:277-282) raise KeyboardInterrupt.
+                # 仅当 user 主动 redirect (_pending_redirect set) 时 1:1 配对 set _interrupt_requested;
+                # 0 redirect (subprocess SIGTERM) → 1:1 配对 tool-level cancel, 1:1 配对 turn 1:1 配对.
+                if agent._has_pending_redirect():
+                    try:
+                        agent.interrupt("keyboard interrupt")
+                    except Exception:
+                        pass
                 result = _emit_cancelled_terminal_post_tool_call(
                     agent,
                     function_name=function_name,
@@ -2075,10 +2082,13 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     middleware_trace=list(middleware_trace),
                 )
                 _spinner_result = function_result
-                try:
-                    agent.interrupt("keyboard interrupt")
-                except Exception:
-                    pass
+                # Sprint 15 in-scope fix: 区分 user 主动 Ctrl+C 跟 SIGTERM-from-subprocess.
+                # 仅当 user 主动 redirect 时 set _interrupt_requested; 0 redirect → tool-level cancel.
+                if agent._has_pending_redirect():
+                    try:
+                        agent.interrupt("keyboard interrupt")
+                    except Exception:
+                        pass
                 # Emit a tool result for THIS call and every remaining call in
                 # the batch before re-raising, so the assistant tool-call turn
                 # is never left without matching tool results (alternation).
@@ -2152,10 +2162,13 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     start_time=tool_start_time,
                     middleware_trace=list(middleware_trace),
                 )
-                try:
-                    agent.interrupt("keyboard interrupt")
-                except Exception:
-                    pass
+                # Sprint 15 in-scope fix: 区分 user 主动 Ctrl+C 跟 SIGTERM-from-subprocess.
+                # 仅当 user 主动 redirect 时 set _interrupt_requested; 0 redirect → tool-level cancel.
+                if agent._has_pending_redirect():
+                    try:
+                        agent.interrupt("keyboard interrupt")
+                    except Exception:
+                        pass
                 # Emit a tool result for THIS call and every remaining call in
                 # the batch before re-raising (see interactive branch above).
                 _append_cancelled_tool_results(
