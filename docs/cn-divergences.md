@@ -78,7 +78,7 @@
 
 **形态**：config / .env / hardcoded 路径
 
-**决策**：override（统一抽到 cn_overrides/，待定）
+**决策**：override（暂不实施——等第一个真要落 override 时再拍，不强制先建空目录）
 
 **理由**：跟国内环境强相关，独立可追溯
 
