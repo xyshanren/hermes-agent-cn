@@ -27,6 +27,31 @@
 
 ---
 
+## 跟 `docs/cn-divergences.md` 6 category 框架的关系
+
+本文件跟 `docs/cn-divergences.md` **两套 framework 正交**, 互不替代:
+
+| 维度 | 视角 | 类别 | 用途 |
+|---|---|---|---|
+| **`CANDIDATES.md`** (本文件) | **待评估 inbox** | 11 类别 A-K (按"按什么分类": 上游 cherry-pick / 上游新功能 / 跨项目借鉴 / Upstream Borrow 等) | 候选在调研/评估/立项哪个阶段 |
+| **`docs/cn-divergences.md`** | **已落地 audit** | 6 category 1-6 (按"已落地怎么分类": 减法哲学 / CN 原创用户功能 / 本地化配置 / 借鉴+重写 / CN 端客户端策略 / CN 内生开发资产) | 实施后属于哪类差异 |
+
+**Cross-ref usage (双向 navigate 规则)**:
+- 候选 `accepted` → 实施时**在 CANDIDATES.md entry 标 `[cat=N]`** 记录落地类别 (1-6)
+- 拒绝的候选保留在本文件 (`rejected`), 不进 cn-divergences.md (没落地就不算差异)
+- 不回写 cn-divergences.md Known items: 6 category 按"功能/模块"组织, 跟 CAND-XXX 候选 ID 1:1 配对会破坏 6 category 的"按落地形态"语义 (详见下面"反向引用现状"段)
+
+**反向引用现状 (2026-08-12 audit)**:
+- `docs/cn-divergences.md` 全文只在 line 140 提到 CAND-XXX 编号系统, 举 CAND-079 / CAND-085 作为 example
+- 6 category `Known items` 按"功能/模块"组织 (SmartRouter / Semantic Firewall / hermes-tray 等), **不按 CAND-XXX 候选 ID 配对**
+- 这是有意为之: CAND-XXX 编号是 CANDIDATES.md 内部追踪用, 候选实施后**在 CANDIDATES.md entry 标 `[cat=N]`** 即可, 不必回写 cn-divergences.md Known items (那样会让 6 category 变按"按 sprint 时间"组织, 反而破坏 6 category 的"按落地形态"语义)
+
+**为什么不合并**: 11 类别 (按"分类来源") 跟 6 category (按"落地形态") 维度不同; 合并会让"上游 cherry-pick" 跟 "借鉴+重写" 这两个本来不同语义的概念混在一起, 反而增加维护成本。
+
+**维护责任**: 两份文件**任一更新时**, grep 另一边 CAND-XXX 引用 0 漏 (防 cherry-pick split bug class 思路扩展到 doc cross-ref)。
+
+---
+
 ## 元数据约定
 
 每条候选用统一格式:
