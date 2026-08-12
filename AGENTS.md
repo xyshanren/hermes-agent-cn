@@ -26,6 +26,51 @@ reviewing any change:
   high. Most new capability should arrive as a CLI command + skill, a
   service-gated tool, or a plugin — not as core surface.
 
+## CN Fork Strategy
+
+> hermes-agent-cn 是 upstream hermes-agent 的 CN 本地化分支。
+> 哲学："本地化 + 做减法"——边界清晰 > 功能完备，差异放 CN 端 > 污染 upstream。
+
+### 同步上游的核心原则（2026-06-11 立）
+
+1. **被裁剪的不合** —— 上游裁掉的（外国 platform / provider）我们也不合
+2. **应裁剪的不合** —— 上游没裁但按 CN 设计思想未来要裁的，也不合
+3. **真需要才合** —— 只有 (a) 修复 cn 分支已存在代码的 bug，(b) cn 分支需要的新功能
+
+### 减法哲学（4 元原则，演绎自同步原则）
+
+1. **用户群决定代码边界** —— 服务什么用户就保留什么代码
+2. **基础设施决定架构选择** —— 物理可达性先于功能完备性
+3. **可维护性比功能完备更重要** —— 拒绝是工程化动作不是态度
+4. **收敛边界，加速迭代** —— 边界固定后差异化才能跑起来
+
+### 工程化操作清单
+
+5. **Selective absorption** —— upstream 出新功能 ≠ 全盘接受
+   每次评估 4 选 1：adopt / reimplement / reject / defer
+   记录在 `docs/upstream-decisions.md`
+6. **Borrow approach, not copy** —— 直接 merge 冲突大时借鉴思路自己重写
+7. **0 改 upstream 是策略不是禁令** —— 能少改就少改，但真要改允许
+8. **每次偏离 upstream 都记录** —— what / why / when-to-delete 必填
+9. **Verify before adopt** —— upstream 新功能先隔离 branch 试
+10. **Sprint 收尾必 verify** —— 0 regression + .env 保护 + push + tag + cron（如适用）
+11. **跨 project 教训落 mavis agent memory** —— 不散在项目里
+
+### 配套文档（项目级，权威）
+
+- `docs/upstream-decisions.md` —— upstream 评估决策滚动 log
+- `docs/cn-divergences.md` —— CN 端差异类别 audit
+
+### 配套工作文档（开发期，notes dir，**不进版本控制**）
+
+- `~/projects/hermes-agent-cn-notes/UPSTREAM_CLASSIFICATION_REPORT.md` —— 2026-06-11 2125 commit 分类原始数据
+- `~/projects/hermes-agent-cn-notes/merge-plan-v*/` —— 各版本合入计划
+- `~/projects/hermes-agent-cn-notes/POSTMORTEM_*.md` —— postmortem
+- `~/projects/hermes-agent-cn-notes/ROADMAP.md` / `freeze/` / `research/` —— 阶段文档
+- `~/projects/hermes-agent-cn-notes/cross-pollination/` —— sprint retrospect / candidate pool / sparks
+
+任何时候觉得某份 working doc 应该"沉淀"成项目级 doc，promote 到 `docs/`。
+
 ## Contribution Rubric — What We Want / What We Don't
 
 This is the project's intent layer. Use it two ways:
