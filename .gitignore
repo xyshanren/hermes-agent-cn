@@ -197,3 +197,28 @@ native/fts5_cjk/*.so
 # interrupted; consumed by launch-time recovery. Never commit it (was tracked
 # by accident via 3a69e34702, removed in the #72002 salvage).
 .lazy-refresh-incomplete
+
+# ─── dev tool working dirs (2026-08-12) ───────────────
+# atomcode IDE agent working dir (含 graph.bin 14MB)
+.atomcode
+# agent scratchpad (含 cherry-pick toolchain v1-v7 .sh)
+.agent-teams
+
+# ─── temp files (2026-08-12) ─────────────────────────
+.tmp_push4
+.tmp_push5
+.tmp_*                     # 通用 temp 模式兜底 (.tmp_push4/5 已 explicit)
+
+# ─── intermediate scripts (2026-08-12) ──────────────
+# CN cherry-pick toolchain + sprint apply + verify 脚本
+# 全部 hardcode D:\work\workspace\Qoder\hermes-agent-cn 路径，user-machine-specific
+# 真工具链 v1-v7 已在 notes dir + .agent-teams/research/ 备份
+cherry_pick_v*.py
+cherry_pick_resolve.py
+sprint10b_apply.py
+verify_*.py
+
+# ─── archive of working artifacts (2026-08-12) ─────────
+# saved commit/tag message + smoke scripts + phase brief 等
+# 真永久 archive 在 ~/projects/hermes-agent-cn-notes/，本地 archive/ 是工作区垃圾桶
+archive/2026-08-*/
