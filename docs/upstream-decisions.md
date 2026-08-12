@@ -276,3 +276,29 @@ scout 标记 C3=2。**问题**：T3 本身就在 CN 仓库里（保留但不维�
 2. hermes `-z` 作为 fallback
 3. CSV 用 UTF-8，scout 跑完落 `/root/` 不污染仓库
 4. 30min cron 监控 + 进程死了报警
+
+---
+
+## 2026-08-12 重新审视 (时效性警告)
+
+> **2026-06-11** scout 数据已经 **2 个月过期**, 期间 upstream main 推了 v0.17 / v0.18 / v0.19 / v0.20 多个 release. **2026-08-09 Sprint 13a v0.20.0 sync** 已经 fast-forward merge upstream main 1785 commits (commit `90faf101c`), 本文件数据**仅作 v0.16 release sync 历史快照**, 不反映当前 upstream 状态.
+>
+> **5 C6 commits 当前状态 (2026-08-12 audit)**:
+>
+> | Commit | Subject | 当初建议 | 当前实际 (v0.20.0+cn.5) |
+> |---|---|---|---|
+> | `fd87c61` | feat(models): add qwen3.7-plus to nous+openrouter | cherry-pick qwen 部分 | **deferred** — 整体 merge 已含 commit, 但 openrouter 路径可能 dead (CN 已自研 SmartRouter), 需 v0.20.0+cn.5 实跑 verify |
+> | `0b46c41` | fix(vision): convert video_url blocks for MiniMax | cherry-pick minimax 部分 | **applied via merge** — minimax 路径已 1:1 配对, anthropic 路径 CN 已删 dead-end |
+> | `63e8248` | fix(desktop): order xAI Grok after MiniMax in OAuth | cherry-pick minimax 部分 | **rejected** — desktop 整条路径 CN 已删 (v0.17.0 减法, `apps/desktop/` 全砍), commit 随整体 merge 引入但 dead code |
+> | `a8526a4` | chore(models): bump minimax to minimax-m3 | cherry-pick minimax 部分 | **applied via merge** — minimax 命名 1:1 配对 |
+> | `cddb728` | fix(gateway): config.yaml path for WhatsApp/Weixin delays | cherry-pick weixin 部分 | **applied via merge** — weixin 路径 CN 保留, whatsapp 路径 CN 已删, 整体 merge 后 weixin 部分自然生效 |
+>
+> **整体策略调整**:
+> - 2026-06-11 时的"5 C6 必须逐个 cherry-pick"判断已经被 **整体 fast-forward merge** 替代 (Sprint 13a, commit `90faf101c`)
+> - 整体 merge 后, 5 C6 里的"CN 想要"部分自然合并, "CN 删"部分虽然引入但成 dead code (Python import 但 0 引用, grep 0 命中验证)
+> - 后续 sprint (16+) 重新 scout 时, 5 C6 应该作为"已应用"或"已 reject" 标记, 不再 defer
+>
+> **未来 scout 计划**:
+> - 2026-08 末 (v0.20.0+cn.5 → v0.21.0) — 重新跑 scout, 跟 v0.16 数据对比
+> - 触发条件: upstream new commits > 1000 OR upstream new tag (2026-10-01 cron `hermes-cn-quarterly-borrow-audit` 自动 fire)
+> - 模板: 复用本文件 §1-§10 结构, 增量更新"历史快照"section
