@@ -438,6 +438,33 @@
 - **价值**: 🟡 中 (setup UX 改善)
 - **关联**: hermes gateway 安装路径
 
+### [CAND-086] prompt_toolkit TUI 双 Ctrl+C 才中断 (multi-tap, Sprint 16+ deferred)
+
+- **状态**: ⏸ deferred (user 8-12 拍 "先记录需求, 不实施")
+- **来源**: user 痛点 (8-10/8-11 Ctrl+C 误触中断会话, 习惯 Ctrl+C = 复制)
+- **估时**: 1-2 h
+- **风险**: 🟡 中 (改 prompt_toolkit KeyBindings, 0 改 signal chain, 跟 Sprint 15 fix 1:1 配对)
+- **价值**: 🔴 高 (UX 改进, 解决 user 误触 + 跟用户 Ctrl+C 复制习惯 1:1 配对)
+- **触发条件**: Sprint 16+ 重新 scout 时 (跟 6 category skip list 1:1 配对 实践)
+- **关联**: Sprint 15 SIGTERM-vs-Ctrl+C 误判 fix (commit `4cf3d1e1f`, 8-10, agent/tool_executor.py:1071, 2079, 2156) — 这次是再深一层, 区分 "1 次 Ctrl+C" 跟 "2 次 Ctrl+C"
+- **设计 (A 方案, 推荐)**: 1 次 Ctrl+C = 取消当前 turn / 复制选中 (prompt_toolkit 原生), 2 次 Ctrl+C (≤ 3s) = 软中断 (停 turn), 3 次 Ctrl+C (≤ 5s) = 硬中断 (走 cli.py:17720 SIGTERM handler)
+- **实施要点** (CAND-085 4 铁律 1:1 配对):
+  - 0 改 upstream (跟 Sprint 15 累计 56 候选 1:1 配对)
+  - 在 prompt_toolkit KeyBindings 层加 1 段 multi-tap 处理, **不动 signal handler chain**
+  - **0 改** `cli.py:17807-17833` (Windows SIGINT absorb) / `cli.py:18355-18424` (Sprint 15 fix) / `cli.py:17582-17833` (SIGTERM chain)
+  - default ON (`safe_interrupt=True`), 加 `--no-safe-interrupt` flag
+- **verify 4 件套** (实施时, 跟 Sprint 15 1:1 配对):
+  - `pytest tests/cli/test_safe_interrupt.py` — 5 test (multi-tap 检测 / redirect guard / signal chain 0 破坏 / Windows absorb 0 破坏 / Sprint 15 改的 3 个 except KeyboardInterrupt 0 冲突)
+  - `git check-ignore` 0 untracked
+  - 4-step .env 审计 0 real key leak
+  - CI 触发 3 job (hanzi-encoding / no-merge-conflicts / localization-test) 全绿
+- **关键调研发现** (CAND-084 8-03 22:10 lesson "估时前必 verify 引擎能力" 1:1 配对):
+  - TUI 是 `prompt_toolkit==3.0.52` (cli.py:56 注释 "prompt_toolkit is used directly by cli.py")
+  - **不是** `tui_gateway/` (那是 web-based, 有 ws.py / transport.py, 跟 Ctrl+C 无关)
+  - WSL 端走 POSIX 路径 (cli.py:17821-17833 区分 Windows absorb / POSIX default)
+  - Sprint 15 改的 3 个 `except KeyboardInterrupt:` 跟这次增强 0 冲突
+- **cat 标记** (跟 mavis MEMORY "P3 拍 A: 6 category × 4 决策类型 skip list" 1:1 配对): `[cat=2]` CN 原创用户功能 (跟 SmartRouter / Semantic Firewall / hermes-tray 1:1 配对)
+
 ### [CAND-051] Persist per-session /model override across gateway restart
 
 - **状态**: 🟡 proposed
