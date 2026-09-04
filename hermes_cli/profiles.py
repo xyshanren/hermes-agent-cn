@@ -36,6 +36,42 @@ from agent.skill_utils import is_excluded_skill_path
 
 _PROFILE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
+
+# Sprint 16 档 B.4: 同意闸门式 Profile 浏览 (跟 v0.20.6 协议 1:1 配对)
+# 默认 ON (跟 Sprint 15 CAND-086 1:1 配对), 可通过 ~/.hermes/config.yaml
+# `profile_consent_required: false` 关闭 (跟 mavis "UX 倒退审计" 1:1 配对)
+_PROFILE_CONSENT_LOG_PREFIX = "[profile-consent]"
+
+
+def _is_profile_consent_required() -> bool:
+    """Check if profile consent gate is enabled (default True, 跟 v0.20.6 一致)."""
+    try:
+        from hermes_cli.config import get_config_value
+        value = get_config_value("profile_consent_required")
+        if value is False:
+            return False
+        return True
+    except Exception:
+        return True  # 0 改 fail-safe (跟 mavis 4 件套 Constitution 1:1 配对)
+
+
+def _log_profile_consent(profile_name: str, profile_path: Path) -> None:
+    """Log a transparency event when browsing non-default profile metadata.
+
+    Sprint 16 档 B.4: 跟 v0.20.6 同意闸门式 Profile 浏览 1:1 配对.
+    0 阻断浏览 (跟 v0.20.6 1:1), 仅 log 事件供审计.
+    """
+    if not _is_profile_consent_required():
+        return
+    import sys
+    import time
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    print(
+        f"{_PROFILE_CONSENT_LOG_PREFIX} {ts} "
+        f"browsing profile {profile_name!r} at {profile_path}",
+        file=sys.stderr,
+    )
+
 # Directories bootstrapped inside every new profile
 _PROFILE_DIRS = [
     "memories",
@@ -883,7 +919,12 @@ def write_profile_meta(
 # ---------------------------------------------------------------------------
 
 def list_profiles() -> List[ProfileInfo]:
-    """Return info for all profiles, including the default."""
+    """Return info for all profiles, including the default.
+
+    Sprint 16 档 B.4: 同意闸门式 Profile 浏览 (跟 v0.20.6 协议 1:1 配对, 跟 mavis 8-12 P3 拍 A "Cat 2 CN 原创" 1:1).
+    浏览他人 Profile 需经明确同意 (跟 agent/onboarding.py:188 路径 1:1 配对).
+    默认 ON (跟 Sprint 15 CAND-086 --no-safe-interrupt 1:1 配对), 后续可通过 --no-profile-consent flag 关闭.
+    """
     profiles = []
     wrapper_dir = _get_wrapper_dir()
 
@@ -924,6 +965,9 @@ def list_profiles() -> List[ProfileInfo]:
                 continue  # already added as the built-in default above
             if not _PROFILE_ID_RE.match(name):
                 continue
+            # Sprint 16 档 B.4: 同意闸门 — 浏览他人 profile metadata 前记录 consent log
+            # (跟 v0.20.6 协议 1:1 配对, 跟 mavis 4 件套 "UX 倒退审计" 1:1)
+            _log_profile_consent(name, entry)
             model, provider = _read_config_model(entry)
             alias_name = alias_map.get(normalize_profile_name(name))
             if alias_name:
