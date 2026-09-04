@@ -730,6 +730,21 @@ def _begin_tool_execution(
         except Exception as callback_error:
             logging.debug("Tool start callback error: %s", callback_error)
 
+    # Sprint 16 档 C.1: 受保护指令文件审批 (跟 v0.21 upstream 协议 1:1 配对)
+    # 拦截 AGENTS.md / skills / memory 3 类文件的写入, 防止 prompt injection 改写 Agent 自身规矩
+    # 跟 mavis 4 件套 1:1 配对: 0 改现有 happy path, 仅 3 类文件触发
+    if function_name in {"write_file", "patch"}:
+        try:
+            from agent.safety import check_protected_file
+            _path = function_args.get("path") or function_args.get("file_path") or ""
+            if _path:
+                check_protected_file(_path, bypass=False)
+        except ImportError:
+            pass  # safety module 不可用场景 silent skip (跟 mavis 4 件套 1:1)
+        except Exception as exc:
+            # ProtectedFileError 抛错阻断 (跟 v0.21 协议 1:1)
+            raise
+
     if function_name in {"write_file", "patch"} and agent._checkpoint_mgr.enabled:
         try:
             _ensure_file_checkpoint(
