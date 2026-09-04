@@ -5130,24 +5130,51 @@ def cmd_version(args):
 
 
 def cmd_uninstall(args):
-    """Uninstall Hermes Agent (or just the Chat GUI with --gui)."""
-    # Machine-readable install snapshot for the desktop app's uninstall UI.
-    # Must run before any TTY gate — it's called from a non-interactive child.
+    """Uninstall Hermes Agent (or just the Chat GUI with --gui).
+
+    Sprint 16 档 A.3 (CN 减法 stub, 跟 8-12 P3 拍 A "Cat 5 客户端" 1:1 配对):
+    - `--gui` 和 `--gui-summary` branch 改 stub (CN 端 0 Electron desktop, 0 实际卸载)
+    - 推荐 CN 替代: hermes-tray (轻量 Tauri 2 客户端)
+    - 0 改 agent 卸载逻辑 (`run_uninstall(args)` 保留)
+    - Sprint 16 档 A.4 跟 apps/desktop 1529 文件一起 `git rm -r apps/desktop/`
+    """
+    # Sprint 16 档 A.3: --gui-summary 改 stub (CN 0 desktop)
     if getattr(args, "gui_summary", False):
-        from hermes_cli.gui_uninstall import gui_install_summary
-
-        print(json.dumps(gui_install_summary()))
+        print(json.dumps({
+            "gui_installed": False,
+            "reason": "Sprint 16 档 A.3 CN 减法: Electron desktop 路径已停用",
+            "recommendation": "hermes-tray (轻量 Tauri 2 客户端, D:/work/workspace/Qoder/hermes-tray/)",
+            "docs": "docs/cn-divergences.md (Cat 5 客户端)",
+        }))
         return
 
-    # GUI-only uninstall. The desktop app shells out to this non-interactively
-    # with --yes, so only gate on a TTY when we actually need to prompt.
+    # Sprint 16 档 A.3: --gui 改 stub (CN 0 desktop)
     if getattr(args, "gui", False):
-        if not getattr(args, "yes", False):
-            _require_tty("uninstall --gui")
-        from hermes_cli.uninstall import run_gui_uninstall
-
-        run_gui_uninstall(args)
+        print()
+        print("⚠  Hermes Chat GUI (Electron) 不在 CN 分支支持范围")
+        print("=" * 55)
+        print()
+        print("CN 端策略: 跟 8-12 P3 拍 A 'Cat 5 客户端' 1:1 配对,")
+        print("上游 Electron desktop 路径在 CN 端已停用。")
+        print()
+        print("推荐 CN 替代客户端:")
+        print("  • hermes-tray (轻量 Tauri 2 客户端)")
+        print("    - 仓库: D:/work/workspace/Qoder/hermes-tray/")
+        print("    - 当前: v0.2.0 STABLE (8/8 manual MSI verification)")
+        print("    - Sprint 16 档 D v0.4.0 cycle 跟 CN 后端对接 (9-13 ~ 9-15)")
+        print()
+        print("0 实际卸载任何文件。0 影响 Hermes agent.")
+        print("如要卸载 agent, 跑 'hermes uninstall' (不传 --gui).")
         return
+
+    # Full/keep-data uninstall. ``--yes`` runs non-interactively (the desktop
+    # app's lite/full modes drive this from a detached cleanup script), so only
+    # gate on a TTY when we actually need to prompt for the option + confirm.
+    if not getattr(args, "yes", False):
+        _require_tty("uninstall")
+    from hermes_cli.uninstall import run_uninstall
+
+    run_uninstall(args)
 
     # Full/keep-data uninstall. ``--yes`` runs non-interactively (the desktop
     # app's lite/full modes drive this from a detached cleanup script), so only
@@ -7158,11 +7185,31 @@ def _register_linux_desktop_entry() -> None:
 
 
 def cmd_gui(args: argparse.Namespace):
-    """Build and launch the native Electron desktop GUI."""
-    desktop_dir = PROJECT_ROOT / "apps" / "desktop"
-    if not (desktop_dir / "package.json").exists():
-        print(f"Desktop GUI source not found at: {desktop_dir}")
-        sys.exit(1)
+    """Sprint 16 档 A.3 CN 减法 stub (Cat 5 客户端, 跟 8-12 P3 拍 A 1:1 配对).
+
+    原 cmd_gui 是 200+ 行 Electron 启动逻辑 (apps/desktop package.json + npm install +
+    electron . launch). 改 stub 保持 entry point 协议, 0 破坏 CLI dispatch.
+    Sprint 16 档 A.4 跟 apps/desktop 1529 文件一起 `git rm -r apps/desktop/`.
+    """
+    print()
+    print("⚠  Hermes Desktop (Electron) 不在 CN 分支支持范围")
+    print("=" * 55)
+    print()
+    print("CN 端策略: 跟 8-12 P3 拍 A 'Cat 5 客户端' 1:1 配对,")
+    print("上游 Electron desktop 路径在 CN 端已停用。")
+    print()
+    print("推荐 CN 替代客户端:")
+    print("  • hermes-tray (轻量 Tauri 2 客户端)")
+    print("    - 仓库: D:/work/workspace/Qoder/hermes-tray/")
+    print("    - 当前: v0.2.0 STABLE (commit d7ee96f, 8/8 manual MSI verification)")
+    print("    - v0.2.1 patch in flight + v0.3.0 cycle (4 phases ~6.5d planned)")
+    print("    - 13 .test.ts + 30 tests passing (vitest + happy-dom)")
+    print("    - Sprint 16 档 D v0.4.0 cycle 跟 CN 后端对接 (9-13 ~ 9-15)")
+    print()
+    print("详细 sprint 16 计划: cross-pollination/2026-09-03-sprint16-implementation-plan.md")
+    print("详细 hermes-tray v0.4.0 plan: hermes-tray-notes/cross-pollination/2026-09-03-hermes-tray-v0.4-cn-features.md")
+    print()
+    return 0
 
     try:
         from hermes_logging import setup_logging as _setup_logging_gui
