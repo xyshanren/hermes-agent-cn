@@ -8643,7 +8643,20 @@ def _ensure_whatsapp_bridge_dependencies(bridge_dir: Path) -> None:
 
 
 def _spawn_whatsapp_pairing_process(session_path: Path, mode: str) -> subprocess.Popen:
-    from gateway.platforms.whatsapp_common import resolve_whatsapp_bridge_dir
+    # Sprint 16 档 A.1 (CN 减法, 跟 8-12 P3 拍 A "Cat 1 减法" 1:1 配对):
+    # WhatsApp bridge 适配器在 CN 端已停用 (Sprint 16 档 A.2 `git rm` gateway/platforms/whatsapp_common.py).
+    # 这里 conditional import: 文件存在时走原逻辑, 文件已删时抛 HTTPException 503.
+    try:
+        from gateway.platforms.whatsapp_common import resolve_whatsapp_bridge_dir
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "WhatsApp integration is not supported in CN branch. "
+                "推荐 CN 替代: 微信 (Weixin) / 企业微信 (WeCom) / 飞书 (Feishu). "
+                "详见 docs/cn-divergences.md (Cat 1 减法) + cross-pollination/2026-09-03-sprint16-implementation-plan.md"
+            ),
+        )
     from hermes_constants import find_node_executable, with_hermes_node_path
 
     bridge_dir = resolve_whatsapp_bridge_dir()

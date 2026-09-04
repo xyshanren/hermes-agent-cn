@@ -2896,14 +2896,28 @@ def cmd_proxy(args):
 
 
 def cmd_whatsapp(args):
-    """Set up WhatsApp: choose mode, configure, install bridge, pair via QR."""
-    _require_tty("whatsapp")
-    from hermes_cli.config import get_env_value, save_env_value
-    from hermes_constants import find_node_executable, with_hermes_node_path
+    """Sprint 16 档 A.1 CN 减法 stub (Cat 1 减法, 跟 8-12 P3 拍 A 1:1 配对).
 
+    原 wizard (231 行 Baileys bridge + QR pair) 在 Sprint 16 档 A.2 跟 11 个海外平台
+    文件一起 `git rm`. 改 stub 保持 entry point 协议, 0 破坏 `hermes whatsapp` 调用.
+    """
+    _require_tty("whatsapp")
     print()
-    print("⚕ WhatsApp Setup")
-    print("=" * 50)
+    print("⚠  WhatsApp (Baileys bridge) 不在 CN 分支支持范围")
+    print("=" * 55)
+    print()
+    print("CN 减法决策: 跟 8-12 P3 拍 A 'Cat 1 减法' 1:1 配对,")
+    print("上游 WhatsApp Baileys 桥接适配器在 CN 端已停用。")
+    print()
+    print("推荐 CN 替代平台:")
+    print("  • 微信 (Weixin) iLink Bot  - C 端用户, 客服 + 消息收发")
+    print("  • 企业微信 (WeCom) API      - 内部协作, 审批 + 客户消息")
+    print("  • 飞书 (Feishu) Open API    - 跨平台 bot + 多维表格")
+    print("  • 元宝 (Yuanbao)            - 腾讯生态集成")
+    print()
+    print("详情: docs/cn-divergences.md (Cat 1 减法) + cross-pollination/2026-09-03-sprint16-implementation-plan.md")
+    print()
+    return 0
 
     # ── Step 1: Choose mode ──────────────────────────────────────────────
     current_mode = get_env_value("WHATSAPP_MODE") or ""

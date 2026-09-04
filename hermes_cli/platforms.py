@@ -5,10 +5,29 @@ Single source of truth for platform metadata consumed by both
 skills_config (label display) and tools_config (default toolset
 resolution).  Import ``PLATFORMS`` from here instead of maintaining
 duplicate dicts in each module.
+
+Sprint 16 档 A.1 (CN 减法, 跟 8-12 P3 拍 A "Cat 1 减法" 1:1 配对):
+- 5 个海外平台 (telegram / whatsapp / whatsapp_cloud / signal / bluebubbles) +
+  msgraph_webhook 适配器入口 在 CN 端已停用
+- get_all_platforms() 默认排除 CN_DISABLED_PLATFORMS (跟 mavis 4 件套 1:1 配对)
+- PLATFORMS dict entry 保留 (Sprint 16 档 A.2 之后 `git rm` 海外平台文件时 0 影响)
+- 7 个海外平台 entry 保留是过渡, 不是 dead code (等 Sprint 16 档 A.2 一起清)
 """
 
 from collections import OrderedDict
 from typing import NamedTuple
+
+
+# Sprint 16 档 A.1: CN 减法 — 海外平台默认从 get_all_platforms() 排除
+# Sprint 16 档 A.2 跟 11 个海外平台文件一起 `git rm`
+CN_DISABLED_PLATFORMS: frozenset[str] = frozenset({
+    "telegram",
+    "whatsapp",
+    "whatsapp_cloud",
+    "signal",
+    "bluebubbles",
+    "msgraph_webhook",
+})
 
 
 class PlatformInfo(NamedTuple):
@@ -69,12 +88,18 @@ def get_all_platforms() -> "OrderedDict[str, PlatformInfo]":
 
     Plugin platforms are appended after builtins.  This is the function
     that tools_config and skills_config should use for platform menus.
+
+    Sprint 16 档 A.1: 默认排除 CN_DISABLED_PLATFORMS (Cat 1 减法).
+    Sprint 16 档 A.2: 海外平台文件 `git rm` 之后,PLATFORMS 里的 entry
+    也会随之精简 (跟 8-12 P3 拍 A "Cat 1 减法" 1:1 配对).
     """
-    merged = OrderedDict(PLATFORMS)
+    merged: OrderedDict[str, PlatformInfo] = OrderedDict(
+        (k, v) for k, v in PLATFORMS.items() if k not in CN_DISABLED_PLATFORMS
+    )
     try:
         from gateway.platform_registry import platform_registry
         for entry in platform_registry.plugin_entries():
-            if entry.name not in merged:
+            if entry.name not in merged and entry.name not in CN_DISABLED_PLATFORMS:
                 merged[entry.name] = PlatformInfo(
                     label=f"{entry.emoji}  {entry.label}" if entry.emoji else entry.label,
                     default_toolset=f"hermes-{entry.name}",

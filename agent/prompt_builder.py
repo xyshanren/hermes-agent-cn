@@ -765,50 +765,13 @@ def hud_surface_note(valid_tool_names: "set[str] | None" = None) -> str:
 DEVELOPER_ROLE_MODELS = ("gpt-5", "codex")
 
 PLATFORM_HINTS = {
-    "whatsapp": (
-        "You are on a text messaging communication platform, WhatsApp. "
-        "Standard markdown (**bold**, *italic*, ~~strike~~, # headers, "
-        "`code`, ```code blocks```, [links](url)) is auto-converted to "
-        "WhatsApp's native syntax (*bold*, _italic_, ~strike~, monospace) — "
-        "feel free to write in markdown, and use bullet lists ('- item') "
-        "freely. Tables are NOT supported — prefer bullet lists or labeled "
-        "key:value pairs. "
-        "You can send media files natively: to deliver a file to the user, "
-        "include MEDIA:/absolute/path/to/file in your response. The file "
-        "will be sent as a native WhatsApp attachment — images (.jpg, .png, "
-        ".webp) appear as photos, videos (.mp4, .mov) play inline, and other "
-        "files arrive as downloadable documents. You can also include image "
-        "URLs in markdown format ![alt](url) and they will be sent as photos."
-    ),
-    "whatsapp_cloud": (
-        "You are on a text messaging communication platform, WhatsApp "
-        "(via Meta's official Business Cloud API). Standard markdown "
-        "(**bold**, ~~strike~~, # headers, [links](url)) is auto-converted "
-        "to WhatsApp's native syntax (*bold*, ~strike~, etc.) — feel free "
-        "to write in markdown. Tables are NOT supported — prefer bullet "
-        "lists or labeled key:value pairs. "
-        "You can send media files natively: include MEDIA:/absolute/path/to/file "
-        "in your response. Images (.jpg, .png) become photo attachments, "
-        "videos (.mp4) play inline, audio (.mp3, .ogg) sends as voice/audio "
-        "messages, other files arrive as documents. Image URLs in markdown "
-        "format ![alt](url) also work. "
-        "IMPORTANT: this platform has a 24-hour conversation window — if the "
-        "user hasn't messaged in 24h, free-form replies are refused by Meta "
-        "(error 131047). This rarely matters for live chat, but is worth "
-        "knowing if you're scheduling a delayed message."
-    ),
-    "telegram": (
-        "You are on a text messaging communication platform, Telegram. "
-        "Standard Markdown is automatically converted to Telegram formatting. "
-        "Supported: **bold**, *italic*, ~~strikethrough~~, ||spoiler||, "
-        "`inline code`, ```code blocks```, [links](url), and ## headers. "
-        "Prefer bullet lists and labeled key:value pairs for structured data. "
-        "You can send media files natively: to deliver a file to the user, "
-        "include MEDIA:/absolute/path/to/file in your response. Images "
-        "(.png, .jpg, .webp) appear as photos, audio (.ogg) sends as voice "
-        "bubbles, and videos (.mp4) play inline. You can also include image "
-        "URLs in markdown format ![alt](url) and they will be sent as native photos."
-    ),
+    # CN 减法: 5 个海外平台 hint 改空字符串 (跟 8-12 P3 拍 A "Cat 1 减法" 1:1 配对)
+    # 海外平台文件本身 (telegram / signal / whatsapp / whatsapp_cloud / bluebubbles)
+    # 在 Sprint 16 档 A.2 跟 apps/desktop 一起删,这里先 disable hint
+    # 推荐 CN 替代: weixin (微信) / qqbot (QQ) / feishu (飞书) / dingtalk (钉钉) / wecom (企业微信) / yuanbao (元宝)
+    "whatsapp": "",  # CN: 改用 weixin / feishu
+    "whatsapp_cloud": "",  # CN: 改用 feishu / dingtalk (官方 API 渠道)
+    "telegram": "",  # CN: 改用 weixin / qqbot
     "discord": (
         "You are in a Discord server or group chat communicating with your user. "
         "You can send media files natively: include MEDIA:/absolute/path/to/file "
@@ -823,19 +786,7 @@ PLATFORM_HINTS = {
         "attachments, audio as file attachments. You can also include image URLs "
         "in markdown format ![alt](url) and they will be uploaded as attachments."
     ),
-    "signal": (
-        "You are on a text messaging communication platform, Signal. "
-        "Standard markdown (**bold**, *italic*, ~~strike~~, # headers, "
-        "`code`, ```code blocks```) is auto-converted to Signal's native "
-        "rich formatting — feel free to write in markdown, and use bullet "
-        "lists ('- item') freely (they render as • bullets). Tables are NOT "
-        "supported — prefer bullet lists or labeled key:value pairs. "
-        "You can send media files natively: to deliver a file to the user, "
-        "include MEDIA:/absolute/path/to/file in your response. Images "
-        "(.png, .jpg, .webp) appear as photos, audio as attachments, and other "
-        "files arrive as downloadable documents. You can also include image "
-        "URLs in markdown format ![alt](url) and they will be sent as photos."
-    ),
+    "signal": "",  # CN: 改用 weixin (E2EE 仍支持)
     "email": (
         "You are communicating via email. Write clear, well-structured responses "
         "suitable for email. Use plain text formatting (no markdown). "
