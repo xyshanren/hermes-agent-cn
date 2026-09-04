@@ -821,6 +821,18 @@ def _parse_model_info(model_id: str, raw: Dict[str, Any], provider_id: str) -> M
         interleaved=raw.get("interleaved", False),
     )
 
+    # Sprint 16 档 B.2: user-level model_overrides (跟 v0.21 upstream 协议 1:1 配对)
+    # 应用 ~/.hermes/config.yaml `model_overrides:` 段到 ModelInfo 字段
+    # 0 改现有 catalog load 流程 (跟 mavis "fix collateral issues in-scope" 1:1)
+    try:
+        from hermes_cli.model_overrides import apply_override_to_model_info
+        apply_override_to_model_info(model_info, provider_id, model_id)
+    except ImportError:
+        # hermes_cli module not available (某些 test / 嵌入场景), silently skip
+        pass
+
+    return model_info
+
 
 def _parse_provider_info(provider_id: str, raw: Dict[str, Any]) -> ProviderInfo:
     """Convert a raw models.dev provider entry dict into a ProviderInfo."""

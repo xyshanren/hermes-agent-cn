@@ -2485,6 +2485,17 @@ DEFAULT_CONFIG = {
         "force_ipv4": False,
     },
 
+    # Sprint 16 档 B.2: user-level model_overrides (跟 v0.21 upstream 协议 1:1 配对)
+    # 让用户在 catalog 更新前手动 override 国产 model (DeepSeek / Qwen / MiniMax / Kimi 等)
+    # 4 字段: context_window / input_price_per_1m / output_price_per_1m / supports_vision
+    # Example:
+    #   model_overrides:
+    #     "deepseek/deepseek-v3":
+    #       context_window: 128000
+    #       input_price_per_1m: 0.27
+    #       output_price_per_1m: 1.10
+    "model_overrides": {},
+
     # Gateway monitoring — Service Health Monitoring plus redacted Operational
     # Diagnostics for the gateway daemon, exported over OTLP to an
     # operator-configured endpoint (OTEL Collector, DataDog, ...). Content-free
