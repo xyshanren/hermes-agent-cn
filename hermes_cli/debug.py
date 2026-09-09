@@ -208,6 +208,10 @@ upload, but the following personal data is NOT redacted and will be public:
 The resulting URL is public to anyone who has the link. Pastes auto-delete
 after 6 hours, but may be archived by third parties in the meantime.
 
+If paste.rs is unreachable, uploads fall back to dpaste.com: those pastes
+stay public for the --expire window (default: 1 day) and CANNOT be deleted
+with `hermes debug delete`.
+
 Use --local to view the report without uploading.
 """
 
@@ -216,8 +220,8 @@ _GATEWAY_PRIVACY_NOTICE = (
     "(may contain conversation fragments) to a public paste service. "
     "Full logs are NOT included from the gateway — use `hermes debug share` "
     "from the CLI for full log uploads.\n"
-    "Pastes auto-delete after 6 hours."
-)
+    "Pastes auto-delete after 6 hours (dpaste.com fallback pastes: kept for "
+    "1 day, cannot be deleted).")
 
 
 def _extract_paste_id(url: str) -> Optional[str]:
@@ -232,6 +236,11 @@ def _extract_paste_id(url: str) -> Optional[str]:
     return None
 
 
+def _is_dpaste_url(url: str) -> bool:
+    """Whether *url* is a dpaste.com paste (no unauthenticated delete exists for those)."""
+    return url.strip().startswith(("https://dpaste.com/", "http://dpaste.com/"))
+
+
 def delete_paste(url: str) -> bool:
     """Delete a paste from paste.rs.  Returns True on success.
 
@@ -240,6 +249,10 @@ def delete_paste(url: str) -> bool:
     """
     paste_id = _extract_paste_id(url)
     if not paste_id:
+        if _is_dpaste_url(url):
+            raise ValueError(
+                "Cannot delete: dpaste.com pastes cannot be deleted (anonymous "
+                "uploads have no owner token); they expire on their own.  Got: " + url)
         raise ValueError(
             f"Cannot delete: only paste.rs URLs are supported.  Got: {url}"
         )
@@ -249,6 +262,7 @@ def delete_paste(url: str) -> bool:
         target, method="DELETE",
         headers={"User-Agent": "hermes-agent/debug-share"},
     )
+
     with urllib.request.urlopen(req, timeout=30) as resp:
         return 200 <= resp.status < 300
 
@@ -290,7 +304,7 @@ def _upload_paste_rs(content: str) -> str:
     return url
 
 
-def _upload_dpaste_com(content: str, expiry_days: int = 7) -> str:
+def _upload_dpaste_com(content: str, expiry_days: int = 1) -> str:
     """Upload to dpaste.com.  Returns the paste URL.
 
     dpaste.com uses multipart form data.
@@ -326,10 +340,12 @@ def _upload_dpaste_com(content: str, expiry_days: int = 7) -> str:
     return url
 
 
-def upload_to_pastebin(content: str, expiry_days: int = 7) -> str:
+def upload_to_pastebin(content: str, expiry_days: int = 1) -> str:
     """Upload *content* to a paste service, trying paste.rs then dpaste.com.
 
-    Returns the paste URL on success, raises on total failure.
+    ``expiry_days`` applies only to the dpaste.com fallback (paste.rs pastes are
+    swept after 6h); dpaste.com's minimum is 1 day and anonymous pastes cannot
+    be deleted afterwards, so callers must not promise a shorter retention.
     """
     errors: list[str] = []
 
@@ -747,16 +763,21 @@ class DebugShareResult:
     urls: dict  # label -> paste URL (e.g. {"Report": "...", "agent.log": "..."})
     failures: list  # human-readable "label: error" strings for optional uploads
     redacted: bool  # whether force-mode redaction was applied before upload
-    auto_delete_seconds: int  # how long until the pastes auto-delete
+    auto_delete_seconds: int  # how long until the pastes auto-delete (paste.rs only;
+    # dpaste.com fallbacks outlive this and cannot be deleted)
     report: str = ""  # the summary report text (kept for local fallback)
 
 
 def build_debug_share(
+<<<<<<< HEAD
     *,
     log_lines: int = 200,
     expiry: int = 7,
     redact: bool = True,
 ) -> DebugShareResult:
+=======
+        *, log_lines: int = 200, expiry: int = 1, redact: bool = True) -> DebugShareResult:
+>>>>>>> 77ca949b90 (fix(cli): stop dpaste.com fallback from leaking debug logs for 7 days)
     """Collect the debug report + full logs, upload each, return the URLs.
 
     This is the shared core behind ``hermes debug share`` (CLI) and the
@@ -846,9 +867,13 @@ def _confirm_upload(args) -> bool:
 def run_debug_share(args):
     """Collect debug report + full logs, upload each, print URLs."""
     log_lines = getattr(args, "lines", 200)
+<<<<<<< HEAD
     expiry = getattr(args, "expire", 7)
     local_only = getattr(args, "local", False)
     nous = getattr(args, "nous", False)
+=======
+    expiry = getattr(args, "expire", 1)
+>>>>>>> 77ca949b90 (fix(cli): stop dpaste.com fallback from leaking debug logs for 7 days)
     redact = not getattr(args, "no_redact", False)
 
     if local_only:
@@ -902,6 +927,7 @@ def run_debug_share(args):
 
     if result.failures:
         print(f"\n  (failed to upload: {', '.join(result.failures)})")
+<<<<<<< HEAD
 
     hours = result.auto_delete_seconds // 3600
     print(f"\n⏱  Pastes will auto-delete in {hours} hours.")
@@ -910,6 +936,20 @@ def run_debug_share(args):
     print("To delete now:  hermes debug delete <url>")
 
     print("\nShare these links with the Hermes team for support.")
+=======
+    dpaste_urls = [u for u in result.urls.values() if _is_dpaste_url(u)]
+    if dpaste_urls:
+        print(f"\n⏱  paste.rs pastes will auto-delete in "
+              f"{result.auto_delete_seconds // 3600} hours.")
+        print(f"⚠️  {len(dpaste_urls)} of {len(result.urls)} upload(s) fell back to "
+              f"dpaste.com: those pastes stay public for {expiry} day(s) and CANNOT be "
+              "deleted with `hermes debug delete`.\n"
+              "\nShare these links with the Hermes team for support.")
+    else:
+        print(f"\n⏱  Pastes will auto-delete in {result.auto_delete_seconds // 3600} hours.\n"
+              "To delete now:  hermes debug delete <url>\n"
+              "\nShare these links with the Hermes team for support.")
+>>>>>>> 77ca949b90 (fix(cli): stop dpaste.com fallback from leaking debug logs for 7 days)
 
 
 _NOUS_PRIVACY_NOTICE = """\
@@ -1027,6 +1067,7 @@ def run_debug(args):
     elif subcmd == "delete":
         run_debug_delete(args)
     else:
+<<<<<<< HEAD
         # Default: show help
         print("Usage: hermes debug <command>")
         print()
@@ -1044,3 +1085,25 @@ def run_debug(args):
         print()
         print("Options (delete):")
         print("  <url> ...    One or more paste URLs to delete")
+=======
+        handler(args)
+
+
+_DEBUG_USAGE = """\
+Usage: hermes debug <command>
+
+Commands:
+  share    Upload debug report to a paste service and print URL
+  delete   Delete a previously uploaded paste
+
+Options (share):
+  --lines N    Number of log lines to include (default: 200)
+  --expire N   dpaste.com fallback retention in days (default: 1)
+  --local      Print report locally instead of uploading
+  --nous       Upload to Nous-internal storage (private, staff-only,
+               auto-deletes in 14 days) instead of a public paste
+  --no-redact  Disable upload-time secret redaction (default: redact)
+
+Options (delete):
+  <url> ...    One or more paste URLs to delete"""
+>>>>>>> 77ca949b90 (fix(cli): stop dpaste.com fallback from leaking debug logs for 7 days)
