@@ -1778,12 +1778,54 @@ class WeixinAdapter(BasePlatformAdapter):
         even when no user message has refreshed the session recently.
         """
         async with self._send_text_gate:
-            await self._send_text_chunk_locked(
-                chat_id=chat_id,
-                chunk=chunk,
-                context_token=context_token,
-                client_id=client_id,
-            )
+            last_error: Optional[Exception] = None
+            retried_without_token = False
+            attempt = 0  # counts real failures only — the tokenless re-send must not eat the retry budget
+            while True:
+                if self._rate_limit_cooldown_remaining() > 0:
+                    raise RuntimeError(f"iLink sendmessage rate limited; cooldown active for {self._rate_limit_cooldown_remaining():.1f}s")
+                try:
+                    resp = await _send_message(
+                        self._send_session, base_url=self._base_url, token=self._token, to=chat_id, text=chunk,
+                        context_token=context_token, client_id=client_id)
+                    ret, errcode = (resp.get("ret"), resp.get("errcode")) if resp and isinstance(resp, dict) else (None, None)
+                    if (ret is not None and ret != 0) or (errcode is not None and errcode != 0):
+                        if _is_session_expired(resp, ret, errcode) and not retried_without_token and context_token:
+                            retried_without_token, context_token = True, None
+                            self._token_store._cache.pop(self._token_store._key(self._account_id, chat_id), None)
+                            logger.warning("[%s] session expired for %s; retrying without context_token", self.name, _safe_id(chat_id))
+                            continue
+                        errmsg = resp.get("errmsg") or resp.get("msg")
+                        if ret != RATE_LIMIT_ERRCODE and errcode != RATE_LIMIT_ERRCODE:
+                            raise RuntimeError(f"iLink sendmessage error: ret={ret} errcode={errcode} errmsg={errmsg or 'unknown error'}")
+                        # Keep a descriptive error for when the loop exhausts while still limited.
+                        last_error = RuntimeError(f"iLink sendmessage rate limited: ret={ret} errcode={errcode} errmsg={errmsg or 'rate limited'}")
+                        if self._record_rate_limit_event():
+                            last_error = RuntimeError(
+                                f"iLink sendmessage rate limited; cooldown active for {self._rate_limit_cooldown_remaining():.1f}s")
+                            break
+                        if attempt >= self._send_chunk_retries:
+                            break
+                        attempt += 1
+                        wait = self._send_chunk_retry_delay_seconds * 3  # 3x backoff for rate limit
+                        logger.warning("[%s] rate limited for %s; backing off %.1fs before retry", self.name, _safe_id(chat_id), wait)
+                        await asyncio.sleep(wait)
+                        continue
+                    self._rate_limit_events.clear()
+                    self._rate_limit_circuit_until = 0.0
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= self._send_chunk_retries:
+                        break
+                    attempt += 1
+                    wait = self._send_chunk_retry_delay_seconds * attempt
+                    logger.warning("[%s] send chunk failed to=%s attempt=%d/%d, retrying in %.2fs: %s",
+                                   self.name, _safe_id(chat_id), attempt, self._send_chunk_retries + 1, wait, exc)
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+            assert last_error is not None
+            raise last_error
 
     async def _send_text_chunk_locked(
         self,
