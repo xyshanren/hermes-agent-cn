@@ -1209,6 +1209,7 @@ PROVIDER_GROUPS: dict[str, tuple[str, str, list[str]]] = {
     "qwen":     ("Qwen",            "Qwen Cloud / DashScope, Coding Plan & Qwen CLI OAuth", ["alibaba", "alibaba-coding-plan", "qwen-oauth"]),
     "opencode": ("OpenCode",        "Zen pay-as-you-go or Go subscription",            ["opencode-zen", "opencode-go"]),
     "copilot":  ("GitHub Copilot",  "GitHub token API or copilot --acp process",       ["copilot", "copilot-acp"]),
+    "siliconflow": ("SiliconFlow",  "Global API & mainland-China endpoints (硅基流动)", ["siliconflow", "siliconflow-cn"]),
 }
 
 # Reverse index: member slug -> group_id. Built once at import.

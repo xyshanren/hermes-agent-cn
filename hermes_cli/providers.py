@@ -222,6 +222,23 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         base_url_override="https://ollama.com/v1",
         base_url_env_var="OLLAMA_BASE_URL",
     ),
+    # SiliconFlow runs two fully independent platforms (global `.com` and
+    # mainland-China `.cn`) with separate accounts, keys and catalogs. The
+    # base_url_env_var override is load-bearing: a China-site key is commonly
+    # pasted into SILICONFLOW_BASE_URL, and without it that key would be sent to
+    # the global endpoint and 401.
+    "siliconflow": HermesOverlay(
+        transport="openai_chat",
+        extra_env_vars=("SILICONFLOW_API_KEY",),
+        base_url_override="https://api.siliconflow.com/v1",
+        base_url_env_var="SILICONFLOW_BASE_URL",
+    ),
+    "siliconflow-cn": HermesOverlay(
+        transport="openai_chat",
+        extra_env_vars=("SILICONFLOW_CN_API_KEY",),
+        base_url_override="https://api.siliconflow.cn/v1",
+        base_url_env_var="SILICONFLOW_CN_BASE_URL",
+    ),
     # Azure Foundry: supports both OpenAI-style and Anthropic-style endpoints.
     # The transport is determined at runtime from config.yaml model.api_mode.
     "azure-foundry": HermesOverlay(
