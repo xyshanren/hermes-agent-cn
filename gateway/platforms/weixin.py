@@ -132,12 +132,17 @@ MESSAGE_DEDUP_TTL_SECONDS = 300
 def _is_stale_session_ret(
     ret: "Optional[int]", errcode: "Optional[int]", errmsg: "Optional[str]",
 ) -> bool:
-    """True when iLink returns ret=-2 / errcode=-2 with 'unknown error',
-    which is a stale-session signal (same as errcode=-14) rather than
-    a genuine rate limit."""
-    if ret != RATE_LIMIT_ERRCODE and errcode != RATE_LIMIT_ERRCODE:
-        return False
-    return (errmsg or "").lower() == "unknown error"
+    """Recognize stale-session variants of iLink's ``-2`` response, not real
+    rate limits: both ``unknown error`` and a ``prepare failed`` that survives
+    recovery are session errors (#80125)."""
+    return (ret == RATE_LIMIT_ERRCODE or errcode == RATE_LIMIT_ERRCODE) and (errmsg or "").lower() in {
+        "unknown error",
+        "prepare failed",
+    }
+
+
+def _is_session_expired(resp: Dict[str, Any], ret: Any, errcode: Any) -> bool:
+    return SESSION_EXPIRED_ERRCODE in (ret, errcode) or _is_stale_session_ret(ret, errcode, resp.get("errmsg"))
 
 
 MEDIA_IMAGE = 1
