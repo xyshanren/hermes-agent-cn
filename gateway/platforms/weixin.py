@@ -484,6 +484,23 @@ async def _get_updates(
         return {"ret": 0, "msgs": [], "get_updates_buf": sync_buf}
 
 
+async def _send_items(
+    session: "aiohttp.ClientSession", *, base_url: str, token: str, to: str, item_list: List[Dict[str, Any]], context_token: Optional[str], client_id: str,
+) -> Dict[str, Any]:
+    """Send one item_list via the iLink sendmessage API.
+
+    Restored 2026-09-20: the v0.20.0 base bump carried the media-path call
+    sites without this helper (same half-landed refactor as
+    ``_extra_or_secret``). Mirrors the upstream definition.
+    """
+    message: Dict[str, Any] = {
+        "from_user_id": "", "to_user_id": to, "client_id": client_id, "message_type": MSG_TYPE_BOT, "message_state": MSG_STATE_FINISH,
+        "item_list": item_list}
+    if context_token:
+        message["context_token"] = context_token
+    return await _api_post(session, base_url=base_url, endpoint=EP_SEND_MESSAGE, payload={"msg": message}, token=token, timeout_ms=API_TIMEOUT_MS)
+
+
 async def _send_message(
     session: "aiohttp.ClientSession",
     *,
@@ -2247,43 +2264,29 @@ class WeixinAdapter(BasePlatformAdapter):
             "rawfilemd5": rawfilemd5,
         }
         if media_type == MEDIA_VOICE and path.endswith(".silk"):
-            item_kwargs["encode_type"] = 6
-            item_kwargs["sample_rate"] = 24000
-            item_kwargs["bits_per_sample"] = 16
-        media_item = item_builder(**item_kwargs)
-
-        last_message_id = None
+            item_kwargs.update(encode_type=6, sample_rate=24000, bits_per_sample=16)
+        item_lists: List[List[Dict[str, Any]]] = [[item_builder(**item_kwargs)]]
         if caption:
+            item_lists.insert(0, [{"type": ITEM_TEXT, "text_item": {"text": self.format_message(caption)}}])
+        last_message_id = ""
+        for item_list in item_lists:
             last_message_id = f"hermes-weixin-{uuid.uuid4().hex}"
-            await _send_message(
-                self._send_session,
-                base_url=self._base_url,
-                token=self._token,
-                to=chat_id,
-                text=self.format_message(caption),
-                context_token=context_token,
-                client_id=last_message_id,
-            )
-
-        last_message_id = f"hermes-weixin-{uuid.uuid4().hex}"
-        await _api_post(
-            self._send_session,
-            base_url=self._base_url,
-            endpoint=EP_SEND_MESSAGE,
-            payload={
-                "msg": {
-                    "from_user_id": "",
-                    "to_user_id": chat_id,
-                    "client_id": last_message_id,
-                    "message_type": MSG_TYPE_BOT,
-                    "message_state": MSG_STATE_FINISH,
-                    "item_list": [media_item],
-                    **({"context_token": context_token} if context_token else {}),
-                }
-            },
-            token=self._token,
-            timeout_ms=API_TIMEOUT_MS,
-        )
+            while True:
+                resp = await _send_items(
+                    self._send_session, base_url=self._base_url, token=self._token, to=chat_id, item_list=item_list,
+                    context_token=context_token, client_id=last_message_id)
+                ret, errcode = (resp.get("ret"), resp.get("errcode")) if resp and isinstance(resp, dict) else (None, None)
+                if (ret is None or ret == 0) and (errcode is None or errcode == 0):
+                    break
+                # Same stale-session fallback as _send_text_chunk: re-send once without context_token. Clearing the
+                # token also covers the remaining item lists (caption, then media) and bounds this loop.
+                if _is_session_expired(resp, ret, errcode) and context_token:
+                    context_token = None
+                    self._token_store._cache.pop(self._token_store._key(self._account_id, chat_id), None)
+                    logger.warning("[%s] session expired for %s; re-sending media without context_token", self.name, _safe_id(chat_id))
+                    continue
+                errmsg = resp.get("errmsg") or resp.get("msg")
+                raise RuntimeError(f"iLink sendmessage error: ret={ret} errcode={errcode} errmsg={errmsg or 'unknown error'}")
         return last_message_id
 
     def _outbound_media_builder(self, path: str, force_file_attachment: bool = False):
