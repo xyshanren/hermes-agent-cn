@@ -77,7 +77,8 @@ _REDACT_ENABLED = os.getenv("HERMES_REDACT_SECRETS", "true").lower() in {"1", "t
 
 # Known API key prefixes -- match the prefix + contiguous token chars
 _PREFIX_PATTERNS = [
-    r"sk-[A-Za-z0-9_-]{10,}",           # OpenAI / OpenRouter / Anthropic (sk-ant-*)
+    # Some provider-issued ``sk-`` keys contain dot-delimited body segments.
+    r"sk-(?=[A-Za-z0-9_.-]{10,}(?![A-Za-z0-9_.-]))[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*",
     r"ghp_[A-Za-z0-9]{10,}",            # GitHub PAT (classic)
     r"github_pat_[A-Za-z0-9_]{10,}",    # GitHub PAT (fine-grained)
     r"gho_[A-Za-z0-9]{10,}",            # GitHub OAuth access token
@@ -484,6 +485,14 @@ _PREFIX_RE = re.compile(
     r"(?<![A-Za-z0-9_-])(" + "|".join(_PREFIX_PATTERNS) + r")(?![A-Za-z0-9_-])"
 )
 
+# Zhipu API keys use an unprefixed ``id.secret`` form. Keep this deliberately
+# provider-shaped instead of applying a generic high-entropy dotted-token rule:
+# both opaque segments are alphanumeric, the ID is 32--40 characters, and the
+# credential suffix is at least six characters.
+_ZHIPU_API_KEY_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])([A-Za-z0-9]{32,40}\.[A-Za-z0-9]{6,})(?![A-Za-z0-9_.-])"
+)
+
 
 def _mask_control_split_tokens(text: str, mask_fn) -> str:
     """Mask tokens whose body is split by control/zero-width characters.
@@ -839,6 +848,10 @@ def redact_sensitive_text(
         # original are aligned 1:1 for non-control chars).
         text = _mask_control_split_tokens(text, _prefix_sub)
         text = _PREFIX_RE.sub(lambda m: _prefix_sub(m.group(1)), text)
+
+    if "." in text:
+        _zhipu_sub = _mask_token_nonreusable if file_read else _mask_token
+        text = _ZHIPU_API_KEY_RE.sub(lambda m: _zhipu_sub(m.group(1)), text)
 
     # ENV assignments: OPENAI_API_KEY=***  (skip for code files — false positives)
     if not code_file:
