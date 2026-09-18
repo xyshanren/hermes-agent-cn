@@ -29,6 +29,21 @@
 
 ---
 
+## 中文版 fork（hermes-agent-cn）说明
+
+本仓库是 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 的 CN 本地化分支，维护策略是「本地化 + 做减法」：服务国内个人与企业场景，差异放在 CN 端、不污染上游（完整策略见 [AGENTS.md](AGENTS.md) 「CN Fork Strategy」一节）。
+
+| 方面 | CN 端现状 |
+|---|---|
+| 消息渠道 | 网关核心保留 微信 / QQ 机器人 / 元宝（`gateway/platforms/`）；飞书、企业微信、钉钉等以插件形式提供（`plugins/platforms/`）；Telegram、WhatsApp、Signal 等海外平台在 CN 端默认停用（`CN_DISABLED_PLATFORMS` 门控） |
+| 模型接入 | 沿用上游 Provider 插件体系，国产 Provider 齐备：DeepSeek、智谱 GLM(z.ai)、Kimi/Moonshot、阿里云、小米 MiMo、MiniMax、阶跃星辰、通义千问 OAuth 等；本地模型通过 OpenAI 兼容端点接入（如 Ollama `localhost:11434`），另有 Ollama Cloud 插件 |
+| 减法 | `apps/desktop`（Electron 桌面端）已整体移除；桌面方案为独立的轻量 [hermes-tray](https://github.com/xyshanren/hermes-tray)（Tauri） |
+| CN 增强 | AIMC 网关集成（跨模型比价 / 价格联动 / 渠道故障转移，`aimc_client.py`）、MoA 多模型综合（自上游采纳）等，完整决策记录见下方差异审计文档 |
+
+**CN 文档导航**：[CHANGELOG_CN.md](CHANGELOG_CN.md)（变更记录）· [docs/cn-divergences.md](docs/cn-divergences.md)（CN 差异审计）· [docs/upstream-decisions.md](docs/upstream-decisions.md)（上游采纳决策 log）· [CANDIDATES.md](CANDIDATES.md)（候选池）· [PLAN_CN.md](PLAN_CN.md)（长期规划）
+
+---
+
 ## 快速安装
 
 ```bash
