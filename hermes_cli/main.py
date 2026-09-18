@@ -444,6 +444,7 @@ from hermes_cli.subcommands.gateway import build_gateway_parser
 from hermes_cli.subcommands.profile import build_profile_parser
 from hermes_cli.subcommands.model import build_model_parser
 from hermes_cli.subcommands.setup import build_setup_parser
+from hermes_cli.subcommands.quickstart import build_quickstart_parser
 
 from hermes_cli.subcommands.whatsapp import build_whatsapp_parser
 from hermes_cli.subcommands.slack import build_slack_parser
@@ -3166,6 +3167,18 @@ def cmd_setup(args):
     from hermes_cli.setup import run_setup_wizard
 
     run_setup_wizard(args)
+
+
+def cmd_quickstart(args):
+    """CN quickstart: detect local + cloud resources, configure layered routing.
+
+    Implementation lives in hermes_cli/quickstart.py:cmd_quickstart. Thin
+    wrapper defers the heavyweight detection import to invocation time
+    (mirrors cmd_setup).
+    """
+    from hermes_cli.quickstart import cmd_quickstart as _qs_impl
+
+    return _qs_impl(args)
 
 
 def cmd_model(args):
@@ -11898,6 +11911,13 @@ def main():
     # setup command  (parser built in hermes_cli/subcommands/setup.py)
     # =========================================================================
     build_setup_parser(subparsers, cmd_setup=cmd_setup)
+
+    # =========================================================================
+    # quickstart command (CN; parser built in hermes_cli/subcommands/quickstart.py)
+    # Detects Ollama / LM Studio / llama.cpp / cloud API keys / embedded
+    # fallback and configures a layered routing chain.
+    # =========================================================================
+    build_quickstart_parser(subparsers, cmd_quickstart=cmd_quickstart)
 
 
     # =========================================================================
