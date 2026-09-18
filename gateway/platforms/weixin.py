@@ -142,7 +142,7 @@ def _is_stale_session_ret(
 
 
 def _is_session_expired(resp: Dict[str, Any], ret: Any, errcode: Any) -> bool:
-    return SESSION_EXPIRED_ERRCODE in (ret, errcode) or _is_stale_session_ret(ret, errcode, resp.get("errmsg"))
+    return SESSION_EXPIRED_ERRCODE in (ret, errcode) or _is_stale_session_ret(ret, errcode, resp.get("errmsg") or resp.get("msg"))
 
 
 def _session_not_ready_error(ret: Any, errcode: Any, errmsg: Any) -> RuntimeError:
@@ -1793,8 +1793,7 @@ class WeixinAdapter(BasePlatformAdapter):
         """Send one text chunk with retry/backoff under the adapter-wide text gate. A stale-session response (``-14``,
         or ``-2`` with ``prepare failed``/``unknown error``) is re-sent once *without* ``context_token`` — iLink accepts
         tokenless sends as a degraded fallback, which keeps cron pushes working when no user message refreshed the
-        session. A ``-2`` stale-session answer that survives that (or arrives with no token to drop) fails fast with
-        ``_session_not_ready_error`` instead of entering the retry ladder or the rate-limit breaker (#80125)."""
+        session. A ``-2`` that survives that fails fast via ``_session_not_ready_error``."""
         async with self._send_text_gate:
             last_error: Optional[Exception] = None
             retried_without_token = False
@@ -1824,7 +1823,8 @@ class WeixinAdapter(BasePlatformAdapter):
                         last_error = RuntimeError(f"iLink sendmessage rate limited: ret={ret} errcode={errcode} errmsg={errmsg or 'rate limited'}")
                         if self._record_rate_limit_event():
                             last_error = RuntimeError(
-                                f"iLink sendmessage rate limited; cooldown active for {self._rate_limit_cooldown_remaining():.1f}s")
+                                f"iLink sendmessage rate limited (ret={ret} errcode={errcode} errmsg={errmsg or 'rate limited'}); "
+                                f"cooldown active for {self._rate_limit_cooldown_remaining():.1f}s")
                             break
                         if attempt >= self._send_chunk_retries:
                             break
@@ -2291,6 +2291,8 @@ class WeixinAdapter(BasePlatformAdapter):
                     logger.warning("[%s] session expired for %s; re-sending media without context_token", self.name, _safe_id(chat_id))
                     continue
                 errmsg = resp.get("errmsg") or resp.get("msg")
+                if _is_stale_session_ret(ret, errcode, errmsg):
+                    raise _session_not_ready_error(ret, errcode, errmsg)
                 raise RuntimeError(f"iLink sendmessage error: ret={ret} errcode={errcode} errmsg={errmsg or 'unknown error'}")
         return last_message_id
 
