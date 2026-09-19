@@ -650,6 +650,11 @@ def build_turn_context(
     # Copilot x-initiator: the first API call of this user turn is
     # user-initiated; tool-loop follow-ups revert to "agent" (#3040).
     agent._is_user_initiated_turn = True
+    # CN model_routing: re-evaluate routing rules on every user turn
+    # (the rules match this turn's message content — keywords, image
+    # presence, length). Cleared here so _apply_model_routing runs once
+    # per turn, not once per agent lifetime.
+    agent._routing_applied = False
 
     # Reset the streaming context scrubber at the top of each turn.
     scrubber = getattr(agent, "_stream_context_scrubber", None)

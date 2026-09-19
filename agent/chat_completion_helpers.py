@@ -47,6 +47,11 @@ from utils import base_url_host_matches, base_url_hostname, env_float, env_int
 logger = logging.getLogger(__name__)
 _OPENROUTER_PROVIDER_SORT_VALUES = {"throughput", "latency", "price"}
 
+# CN model_routing: SmartRouter instance cache, keyed by a config hash so the
+# router (and its backend probes) rebuild only when the routing-relevant
+# config actually changes. See _apply_model_routing below.
+_SMARTROUTER_CACHE: dict = {}
+
 # When the fallback chain is fully exhausted on a non-rate-limit failure
 # (e.g. every provider returns a non-retryable client error like HTTP 400),
 # arm a short cooldown so the NEXT turn's restore_primary_runtime stays gated
@@ -1335,8 +1340,166 @@ def interruptible_api_call(agent, api_kwargs: dict):
 
 
 
+def _apply_model_routing(agent, api_messages: list) -> None:
+    """CN model_routing: apply per-turn routing rules before the API call.
+
+    Restored from the v0.12-v0.17 SmartRouter integration (the module,
+    ``agent/zhineng_luyou.py``, was dropped in the v0.19.1/v0.20.0 base-bump
+    rewrite while the rule config surface — ``model_routing.rules`` written
+    by ``hermes quickstart`` and the CAND-080 patch queue — stayed live).
+
+    Supports two config formats — rule-based (new) and legacy (old):
+
+    1. Rule-based (model_routing.rules):
+         rules:
+           - name: vision
+             match: {has_image: true}
+             model: "qwen3-vl:8b"
+           - name: coding
+             match: {keywords: ["写代码", "函数"], threshold: 2}
+             model: "deepseek-coder"
+           - name: short_chat
+             match: {max_length: 80, exclude_keywords: ["bug"]}
+             model: "qwen3:4b"
+
+    2. Legacy (model_routing.vision / .reasoning / .default).
+
+    Rules are checked in list order; first match wins; a rule without match
+    conditions acts as the final default.  Delegates to
+    ``SmartRouter.route_with_rules()`` for the full pipeline:
+    rules → legacy → capability-aware local-first fallback.
+
+    Runs at most once per user turn (``agent._routing_applied`` is cleared
+    by ``agent.turn_context`` at each user-turn boundary).
+    """
+    if getattr(agent, "_routing_applied", False):
+        return
+    agent._routing_applied = True
+
+    # Skip routing when:
+    # 1. Disabled by caller (e.g. CLI fallback from Ollama to DeepSeek)
+    # 2. Runtime fallback is active (routing rules use primary provider
+    #    model names that may not be valid for the fallback provider).
+    if getattr(agent, "_disable_model_routing", False):
+        return
+    if getattr(agent, "_fallback_activated", False):
+        return
+
+    # ── Extract user message and image flag ──
+    user_text = ""
+    has_image = False
+    for msg in reversed(api_messages):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict) and "image_url" in part:
+                    has_image = True
+                elif isinstance(part, dict) and part.get("type") == "text":
+                    text_parts.append(part.get("text", ""))
+            user_text = " ".join(text_parts)
+        else:
+            user_text = content
+        break
+
+    # ── Delegate to SmartRouter route_with_rules() ──
+    try:
+        from agent.zhineng_luyou import SmartRouter, RoutingRule
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        route_config = cfg.get("model_routing", {}) or {}
+
+        rules_list: list = []
+        raw_rules = route_config.get("rules") if isinstance(route_config, dict) else None
+        if raw_rules and isinstance(raw_rules, list):
+            for r in raw_rules:
+                if isinstance(r, dict):
+                    rules_list.append(RoutingRule.from_dict(r))
+
+        legacy_cfg = route_config if isinstance(route_config, dict) else None
+
+        if not rules_list and not legacy_cfg:
+            # No routing config at all — skip
+            return
+
+        # Cache SmartRouter instance per config hash. Rebuild only when
+        # config changes (~100ms save per call).
+        _cache = _SMARTROUTER_CACHE
+        _cfg_key = hash(tuple(sorted(
+            (k, str(v)) for k, v in cfg.items()
+            if k in ("providers", "routing", "agent", "fallback_model", "fallback_providers")
+        )))
+        if _cache.get("_key") != _cfg_key:
+            _cache["_router"] = SmartRouter(cfg)
+            _cache["_key"] = _cfg_key
+        router = _cache["_router"]
+
+        # Unified routing
+        result = router.route_with_rules(
+            user_message=user_text,
+            rules=rules_list or None,
+            legacy_cfg=legacy_cfg,
+            has_image=has_image,
+            session_turn_count=getattr(agent, "_user_turn_count", 0),
+        )
+
+        if not result:
+            return
+
+        new_provider = result.provider
+        new_model = result.model
+        current_provider = getattr(agent, "provider", "auto") or "auto"
+
+        if new_provider and new_provider != current_provider:
+            # Provider changed — validate auth before switching.
+            from agent.auxiliary_client import resolve_provider_client
+
+            _api_key = getattr(agent, "api_key", None)
+            _resolved_client, _ = resolve_provider_client(
+                provider=new_provider,
+                explicit_api_key=_api_key,
+                model=new_model,
+            )
+            if _resolved_client is not None:
+                agent.provider = new_provider
+                agent.model = new_model
+                logger.debug(
+                    "model_routing: SmartRouter switched %s → %s:%s (%s)",
+                    current_provider, new_provider, new_model,
+                    result.tier.value,
+                )
+                return
+            logger.debug(
+                "model_routing: SmartRouter wanted %s:%s but auth unavailable; "
+                "keeping %s:%s",
+                new_provider, new_model,
+                current_provider, getattr(agent, "model", ""),
+            )
+        elif new_model:
+            # Same provider — only update model (safe within one provider).
+            agent.model = new_model
+            logger.debug(
+                "model_routing: SmartRouter → %s:%s (%s)",
+                new_provider or current_provider, new_model, result.reason,
+            )
+    except Exception as ex:
+        # Routing unavailable: keep existing model
+        logger.debug("model_routing: SmartRouter skipped: %s", ex)
+
+
 def build_api_kwargs(agent, api_messages: list, tools_for_api: list | None = None) -> dict:
     """Build the keyword arguments dict for the active API mode."""
+    # CN model_routing — pick this turn's provider/model from
+    # model_routing.rules + SmartRouter capability-aware fallback before
+    # the request is built.
+    try:
+        _apply_model_routing(agent, api_messages)
+    except Exception:  # pragma: no cover - defensive (routing never breaks the call)
+        logger.debug("model_routing: hook failed", exc_info=True)
+
     if tools_for_api is None:
         tools_for_api = agent.tools
 
