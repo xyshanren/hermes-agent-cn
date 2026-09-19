@@ -30,6 +30,18 @@ DEFAULT_CONFIG = {
     "max_live_sessions": 16,
     "agent": {
         "max_turns": 500,
+        # S12 P2: cost-aware fallback policy. Disabled by default to preserve
+        # pre-S12 behavior; when enabled, calls whose estimated cost exceeds
+        # per_request_max_usd (and sessions whose running total exceeds
+        # per_session_max_usd) are annotated on the SSE routing_decision.
+        # on_session_exceeded='fallback' additionally activates the next
+        # fallback_chain entry so later turns leave the budget-blown provider.
+        "cost_aware_fallback": {
+            "enabled": False,
+            "per_request_max_usd": 0.05,
+            "per_session_max_usd": 1.00,
+            "on_session_exceeded": "warn",  # 'warn' | 'fallback'
+        },
         # Inactivity timeout for gateway agent execution (seconds).
         # The agent can run indefinitely as long as it's actively calling
         # tools or receiving API responses.  Only fires when the agent has

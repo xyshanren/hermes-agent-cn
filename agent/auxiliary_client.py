@@ -115,9 +115,184 @@ from agent.credential_pool import load_pool
 from agent.model_metadata import MINIMUM_CONTEXT_LENGTH, get_model_context_length
 from hermes_cli.config import get_hermes_home
 from hermes_constants import OPENROUTER_BASE_URL
+from agent.routing_decision import (
+    increment_retries,
+    init_routing_decision,
+    record_fallback,
+    set_cost,
+    set_cost_threshold,
+    set_latency,
+    set_rule_id,
+)
 from utils import base_url_host_matches, base_url_hostname, env_float, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
+
+
+# ── S12: ambient routing-decision tracking (ContextVar) ─────────────────
+# ``call_llm`` / ``async_call_llm`` accept an optional ``routing_decision_out``
+# dict. Instead of threading that dict through every success/retry/fallback
+# exit point of the (very long) call implementations, the wrapper publishes a
+# fresh dict on this ContextVar; the few sites that *change* the routing story
+# (resolution, same-provider retries, cross-provider fallback) stamp it via
+# the ``_rd_*`` helpers below, and the wrapper copies the result out in its
+# ``finally``. When no wrapper is active (or the caller passed nothing) the
+# ContextVar is ``None`` and every helper is a no-op — zero overhead and zero
+# behavior change for all other call paths. Same ambient-tracking pattern as
+# ``agent.aux_accounting``.
+_AUX_ROUTING_DECISION: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = (
+    contextvars.ContextVar("aux_routing_decision", default=None)
+)
+
+
+def _rd_active() -> Optional[Dict[str, Any]]:
+    """Return the ambient routing dict, or None when no wrapper is active."""
+    out = _AUX_ROUTING_DECISION.get()
+    return out if isinstance(out, dict) else None
+
+
+def _rd_stamp_resolution(provider: Optional[str], model: Optional[str]) -> None:
+    """Stamp primary (once) + resolved provider/model after task resolution."""
+    out = _rd_active()
+    if out is None:
+        return
+    if out.get("primary_provider") is None:
+        out["primary_provider"] = (str(provider or "").strip() or None)
+    if out.get("primary_model") is None:
+        out["primary_model"] = (str(model or "").strip() or None)
+    out["resolved_provider"] = (str(provider or "").strip() or None)
+    out["resolved_model"] = (str(model or "").strip() or None)
+
+
+def _rd_record_fallback(
+    fallback_provider: Optional[str],
+    fallback_model: Optional[str],
+    fallback_reason: str,
+    rule_id: str = "fallback_chain",
+) -> None:
+    """Record that a cross-provider fallback candidate served the call.
+
+    The fallback target becomes the resolved provider/model — ``resolved_*``
+    means "what actually ran", not "what was first tried".
+    """
+    out = _rd_active()
+    if out is None:
+        return
+    record_fallback(
+        out,
+        fallback_provider=fallback_provider,
+        fallback_model=fallback_model,
+        fallback_reason=fallback_reason,
+    )
+    fb_provider = (str(fallback_provider or "").strip() or None)
+    fb_model = (str(fallback_model or "").strip() or None)
+    if fb_provider:
+        out["resolved_provider"] = fb_provider
+    if fb_model:
+        out["resolved_model"] = fb_model
+    set_rule_id(out, rule_id=rule_id or None)
+
+
+def _rd_increment_retries() -> None:
+    """Bump the same-provider retry counter (no-op when not tracking)."""
+    out = _rd_active()
+    if out is None:
+        return
+    increment_retries(out)
+
+
+def _rd_begin(
+    task: Optional[str],
+    provider: Optional[str],
+    model: Optional[str],
+    routing_decision_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Open ambient routing tracking for one ``call_llm`` invocation.
+
+    Returns the tracked dict (also published on the ContextVar), or None
+    when the caller did not pass a ``routing_decision_out`` dict.
+    """
+    if not isinstance(routing_decision_out, dict):
+        return None
+    mode = "text"
+    if task == "vision":
+        mode = "vision"
+    elif task:
+        mode = str(task)
+    rd: Dict[str, Any] = {}
+    init_routing_decision(
+        rd,
+        mode=mode,
+        primary_provider=(str(provider or "").strip() or None),
+        primary_model=(str(model or "").strip() or None),
+    )
+    _AUX_ROUTING_DECISION.set(rd)
+    return rd
+
+
+def _rd_end(
+    rd: Optional[Dict[str, Any]],
+    routing_decision_out: Optional[Dict[str, Any]],
+    response: Any,
+    call_start_monotonic: Optional[float],
+    resolved_model_hint: Optional[str] = None,
+) -> None:
+    """Close ambient tracking: latency + cost + per-request threshold.
+
+    Always restores the ContextVar to ``None`` (tracking is per-call) and
+    copies the final dict into ``routing_decision_out`` when the caller
+    provided one. Never raises — metadata is best-effort.
+    """
+    if rd is None:
+        return
+    _AUX_ROUTING_DECISION.set(None)
+    try:
+        if call_start_monotonic:
+            set_latency(
+                rd,
+                latency_ms=int((time.monotonic() - call_start_monotonic) * 1000),
+            )
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            from agent.usage_pricing import estimate_usage_cost, normalize_usage
+
+            model_name = rd.get("resolved_model") or resolved_model_hint
+            canonical = normalize_usage(usage)
+            cost_result = estimate_usage_cost(
+                model_name or "",
+                canonical,
+                provider=rd.get("resolved_provider"),
+            )
+            cost = getattr(cost_result, "amount_usd", None)
+            if cost is not None:
+                set_cost(rd, cost_estimate_usd=float(cost))
+                # S12 P2: per-request threshold (annotate only — auxiliary
+                # calls are one-shot, provider swaps are the session path's job).
+                try:
+                    from agent.cost_aware_fallback import (
+                        CostAwareFallbackConfig,
+                        check_request_cost_threshold,
+                    )
+
+                    from hermes_cli.config import load_config
+
+                    raw_cfg = ((load_config() or {}).get("agent") or {}).get(
+                        "cost_aware_fallback"
+                    )
+                    cfg = CostAwareFallbackConfig.from_dict(raw_cfg)
+                    reason = check_request_cost_threshold(float(cost), cfg)
+                    if reason:
+                        set_cost_threshold(rd, reason=reason)
+                except Exception as cfg_exc:  # pragma: no cover - defensive
+                    logger.debug("S12 P2: per-request cost check skipped: %s", cfg_exc)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("S12: routing_decision finalize skipped: %s", exc)
+    try:
+        if isinstance(routing_decision_out, dict):
+            routing_decision_out.clear()
+            routing_decision_out.update(rd)
+    except Exception:  # pragma: no cover - defensive
+        pass
 
 
 # ── resolve_provider_client fall-through dedup ───────────────────────────
@@ -4395,6 +4570,8 @@ def _retry_same_provider_sync(
     reasoning_config: Optional[dict],
     extra_headers: Optional[Dict[str, str]] = None,
 ) -> Any:
+    # S12: same-provider recovery retries count as retries, not fallbacks.
+    _rd_increment_retries()
     if task == "vision":
         effective_provider, retry_client, retry_model = resolve_vision_provider_client(
             provider=resolved_provider,
@@ -4470,6 +4647,8 @@ async def _retry_same_provider_async(
     reasoning_config: Optional[dict],
     extra_headers: Optional[Dict[str, str]] = None,
 ) -> Any:
+    # S12: same-provider recovery retries count as retries, not fallbacks.
+    _rd_increment_retries()
     if task == "vision":
         effective_provider, retry_client, retry_model = resolve_vision_provider_client(
             provider=resolved_provider,
@@ -4836,7 +5015,7 @@ def _call_fallback_candidate_sync(
         extra_body=effective_extra_body, reasoning_config=reasoning_config,
         base_url=destination.base_url, task=task)
     try:
-        return _validate_llm_response(
+        fb_resp = _validate_llm_response(
             _relay_sync_completion(
                 fb_client,
                 fb_kwargs,
@@ -4845,6 +5024,11 @@ def _call_fallback_candidate_sync(
             ),
             task,
         )
+        # S12: the fallback candidate served the call — record the swap.
+        _rd_record_fallback(
+            destination.provider, destination.model, "primary_unavailable"
+        )
+        return fb_resp
     except Exception as fb_err:
         if not _is_auth_error(fb_err):
             raise
@@ -4881,7 +5065,7 @@ def _call_fallback_candidate_sync(
                     reasoning_config=reasoning_config,
                     base_url=retry_destination.base_url, task=task)
                 try:
-                    return _validate_llm_response(
+                    retry_resp = _validate_llm_response(
                         _relay_sync_completion(
                             retry_client,
                             retry_kwargs,
@@ -4890,6 +5074,12 @@ def _call_fallback_candidate_sync(
                         ),
                         task,
                     )
+                    # S12: refreshed credential served the call.
+                    _rd_record_fallback(
+                        retry_destination.provider, retry_destination.model,
+                        "primary_unavailable",
+                    )
+                    return retry_resp
                 except Exception as retry_err:
                     if not _is_auth_error(retry_err):
                         raise
@@ -4942,7 +5132,7 @@ async def _call_fallback_candidate_async(
         extra_body=effective_extra_body, reasoning_config=reasoning_config,
         base_url=destination.base_url, task=task)
     try:
-        return _validate_llm_response(
+        fb_resp = _validate_llm_response(
             await _relay_async_completion(
                 fb_client,
                 fb_kwargs,
@@ -4951,6 +5141,11 @@ async def _call_fallback_candidate_async(
             ),
             task,
         )
+        # S12: the fallback candidate served the call — record the swap.
+        _rd_record_fallback(
+            destination.provider, destination.model, "primary_unavailable"
+        )
+        return fb_resp
     except Exception as fb_err:
         if not _is_auth_error(fb_err):
             raise
@@ -4988,7 +5183,7 @@ async def _call_fallback_candidate_async(
                     reasoning_config=reasoning_config,
                     base_url=retry_destination.base_url, task=task)
                 try:
-                    return _validate_llm_response(
+                    retry_resp = _validate_llm_response(
                         await _relay_async_completion(
                             retry_client,
                             retry_kwargs,
@@ -4997,6 +5192,12 @@ async def _call_fallback_candidate_async(
                         ),
                         task,
                     )
+                    # S12: refreshed credential served the call.
+                    _rd_record_fallback(
+                        retry_destination.provider, retry_destination.model,
+                        "primary_unavailable",
+                    )
+                    return retry_resp
                 except Exception as retry_err:
                     if not _is_auth_error(retry_err):
                         raise
@@ -8754,11 +8955,20 @@ def call_llm(
     api_mode: str = None,
     stream: bool = False,
     stream_options: dict = None,
+    routing_decision_out: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """Run an auxiliary LLM request, applying the configured task limit."""
+    """Run an auxiliary LLM request, applying the configured task limit.
+
+    Pass ``routing_decision_out`` (a dict) to receive S12 routing metadata:
+    mode / primary / resolved provider+model / fallback trace / latency /
+    cost estimate / retries. The dict is populated in-place.
+    """
+    _rd = _rd_begin(task, provider, model, routing_decision_out)
+    _call_start = time.monotonic() if _rd is not None else None
     semaphore = _acquire_sync_aux_semaphore(task)
     if semaphore is not None:
         semaphore.acquire()
+    response: Any = None
     try:
         response = _call_llm_impl(
             task=task,
@@ -8787,6 +8997,7 @@ def call_llm(
     finally:
         if semaphore is not None:
             semaphore.release()
+        _rd_end(_rd, routing_decision_out, response, _call_start)
 
 
 def _release_sync_semaphore_after_stream(
@@ -8869,6 +9080,8 @@ def _call_llm_impl(
     main_runtime = _normalize_main_runtime(main_runtime)
     resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         task, provider, model, base_url, api_key)
+    # S12: stamp the resolved primary onto the ambient routing decision.
+    _rd_stamp_resolution(resolved_provider, resolved_model)
     if api_mode:
         resolved_api_mode = api_mode
     effective_extra_body = _get_task_extra_body(task)
@@ -8929,6 +9142,7 @@ def _call_llm_impl(
                     client, final_model = fb_client, fb_model
                     resolved_provider = fb_label or resolved_provider
                     effective_provider = resolved_provider
+                    _rd_record_fallback(resolved_provider, final_model, "primary_unavailable")
                 else:
                     raise RuntimeError(
                         f"Provider '{_explicit}' is set in config.yaml but no API key "
@@ -9081,6 +9295,7 @@ def _call_llm_impl(
                     _last_transient,
                 )
                 time.sleep(_backoff)
+                _rd_increment_retries()
                 try:
                     return _validate_llm_response(
                         _relay_sync_completion(
@@ -9113,6 +9328,7 @@ def _call_llm_impl(
                 "Auxiliary %s: provider rejected temperature; retrying once without it",
                 task or "call",
             )
+            _rd_increment_retries()
             try:
                 return _validate_llm_response(
                     _relay_sync_completion(
@@ -9156,6 +9372,7 @@ def _call_llm_impl(
         ):
             kwargs.pop("max_tokens", None)
             kwargs.pop("max_completion_tokens", None)
+            _rd_increment_retries()
             try:
                 return _validate_llm_response(
                     _relay_sync_completion(
@@ -9191,6 +9408,7 @@ def _call_llm_impl(
                     task or "call", kwargs.get("model"), healed_model,
                 )
                 kwargs["model"] = healed_model
+                _rd_increment_retries()
                 try:
                     return _validate_llm_response(
                         _relay_sync_completion(
@@ -9229,6 +9447,7 @@ def _call_llm_impl(
                 )
                 if refreshed_model and refreshed_model != kwargs.get("model"):
                     kwargs["model"] = refreshed_model
+                _rd_increment_retries()
                 try:
                     return _validate_llm_response(
                         _relay_sync_completion(
@@ -9317,6 +9536,7 @@ def _call_llm_impl(
             # Skip the extra retry for clear payment/quota errors — the endpoint
             # won't accept another request with the same exhausted key.
             if _is_rate_limit_error(first_err) and not _is_payment_error(first_err):
+                _rd_increment_retries()
                 try:
                     return _validate_llm_response(
                         _relay_sync_completion(
@@ -9598,13 +9818,21 @@ async def async_call_llm(
     timeout: float = None,
     extra_body: dict = None,
     reasoning_config: Optional[dict] = None,
+    routing_decision_out: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """Run an asynchronous auxiliary LLM request under the configured limit."""
+    """Run an asynchronous auxiliary LLM request under the configured limit.
+
+    Pass ``routing_decision_out`` (a dict) to receive S12 routing metadata
+    (same shape as ``call_llm``).
+    """
+    _rd = _rd_begin(task, provider, model, routing_decision_out)
+    _call_start = time.monotonic() if _rd is not None else None
     semaphore = _acquire_async_aux_semaphore(task)
     if semaphore is not None:
         await semaphore.acquire()
+    response: Any = None
     try:
-        return await _async_call_llm_impl(
+        response = await _async_call_llm_impl(
             task=task,
             provider=provider,
             model=model,
@@ -9619,9 +9847,11 @@ async def async_call_llm(
             extra_body=extra_body,
             reasoning_config=reasoning_config,
         )
+        return response
     finally:
         if semaphore is not None:
             semaphore.release()
+        _rd_end(_rd, routing_decision_out, response, _call_start)
 
 
 async def _async_call_llm_impl(
@@ -9649,6 +9879,8 @@ async def _async_call_llm_impl(
     main_runtime = _normalize_main_runtime(main_runtime)
     resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         task, provider, model, base_url, api_key)
+    # S12: stamp the resolved primary onto the ambient routing decision.
+    _rd_stamp_resolution(resolved_provider, resolved_model)
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
     effective_provider = resolved_provider
@@ -9705,6 +9937,7 @@ async def _async_call_llm_impl(
                     )
                     resolved_provider = fb_label or resolved_provider
                     effective_provider = resolved_provider
+                    _rd_record_fallback(resolved_provider, final_model, "primary_unavailable")
                 else:
                     raise RuntimeError(
                         f"Provider '{_explicit}' is set in config.yaml but no API key "
@@ -9800,6 +10033,7 @@ async def _async_call_llm_impl(
                 "once on the same provider before fallback: %s",
                 task or "call", transient_err,
             )
+            _rd_increment_retries()
             return _validate_llm_response(
                 await _relay_async_completion(
                     client,
@@ -9817,6 +10051,7 @@ async def _async_call_llm_impl(
                 "Auxiliary %s (async): provider rejected temperature; retrying once without it",
                 task or "call",
             )
+            _rd_increment_retries()
             try:
                 return _validate_llm_response(
                     await _relay_async_completion(
@@ -9856,6 +10091,7 @@ async def _async_call_llm_impl(
         ):
             kwargs.pop("max_tokens", None)
             kwargs.pop("max_completion_tokens", None)
+            _rd_increment_retries()
             try:
                 return _validate_llm_response(
                     await _relay_async_completion(
@@ -9890,6 +10126,7 @@ async def _async_call_llm_impl(
                     task or "call", kwargs.get("model"), healed_model,
                 )
                 kwargs["model"] = healed_model
+                _rd_increment_retries()
                 try:
                     return _validate_llm_response(
                         await _relay_async_completion(
@@ -9927,6 +10164,7 @@ async def _async_call_llm_impl(
                 )
                 if refreshed_model and refreshed_model != kwargs.get("model"):
                     kwargs["model"] = refreshed_model
+                _rd_increment_retries()
                 try:
                     return _validate_llm_response(
                         await _relay_async_completion(
@@ -9960,6 +10198,7 @@ async def _async_call_llm_impl(
                             task or "call")
                 if refreshed_model and refreshed_model != kwargs.get("model"):
                     kwargs["model"] = refreshed_model
+                _rd_increment_retries()
                 return _validate_llm_response(
                     await _relay_async_completion(
                         refreshed_client,

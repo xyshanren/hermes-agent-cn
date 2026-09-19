@@ -2696,6 +2696,11 @@ def init_agent(
     agent.session_estimated_cost_usd = 0.0
     agent.session_cost_status = "unknown"
     agent.session_cost_source = "none"
+    # S12: last routing decision metadata (main-agent path builds a fresh
+    # dict per turn; auxiliary_client.call_llm overwrites it for aux calls).
+    # Read by post-turn tooling (gateway, debug helpers, /insights).
+    agent._last_routing_decision = {}
+    agent._last_api_call_started = None
     
     # ── Ollama num_ctx injection ──
     # Ollama defaults to 2048 context regardless of the model's capabilities.
