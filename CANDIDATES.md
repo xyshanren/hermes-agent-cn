@@ -1071,6 +1071,91 @@
 - **附件 1 钱学森 3-layer 双向闭环** 跟 mavis 4 件套 + borrow plan 4 phase 完美同构, 是跨 project design pattern
 - **Section K 不冲掉 CAND-080 实施** — K-5 在 CAND-080 剩余 sub-layers (routing rule 自迭代 + 抽象) 实施时提供 upstream 参考 (4-surface 集成 pattern + 硬性 skill-authoring standards). CAND-080 已 partial done (curator + background_review 2/4 sub-layers, 2026-07-23 audit)
 
+## 窗口 2026-09-04 → 09-19（2026-09-20 轻跟进扫描，user 拍板"现在就做"）
+
+> 扫描方法与窗口参数：`notes cross-pollination/2026-09-20-upstream-scan/scan-2026-09-04-to-09-19.md`（私有）。
+> 窗口 5,992 upstream commits（v0.20.0 基线后，上游 0.21.3 / tag v2026.9.14）；2,894 涉 CN 保留路径；8 簇 27 commits 全部 hash 验证。
+> **10-01 季度审计窗口 = 9-04→10-01**（user 拍板）：本批候选自动纳入复核，增量 = 9-19→10-01 段。
+> 上次 K-6~K-10（Sprint 13/14 v0.20.0 sync）全部 0 work，编号顺延为 K-11 起。
+
+### [K-11] Weixin 发送韧性 6 件套
+
+- **状态**: 🟡 proposed
+- **Source**: upstream `bd39167c56` (ret=-2 prepare failed = session error 非 rate limit, #80125) + `5db9f02372` (media leg 同类) + `97066a0eb5` (iLink ret + 无 stale token 重发) + `2995063bcd` (tokenless 重发不吃 retry budget) + `46ab37ce35` (prepare 失败无 token 重试) + `33c872e52e` (split_multiline 在 multiplex profile 下生效)
+- **估时**: 2-3h (6 commits, ~14 files gateway/weixin/base)
+- **风险**: 🟢 低 (CN 主推平台路径, 上游原生持续维护)
+- **价值**: 🔴 极高 (微信是国内主推渠道)
+- **备注**: 上游 9 月对 weixin 发送链路连续修复 6 个 commit, 全部落在 CN 保留的 weixin.py/base.py
+
+### [K-12] Gateway multiplex profiles（K-3 的上游原生实现, adopt-instead）
+
+- **状态**: 🟡 proposed (⚠ 决策点: default-on 行为变更)
+- **Source**: upstream `a10bbf95bb` (gateway.multiplex_profiles defaults to on + boot-time serve guard) + `208bd0b65a` (per-profile 插件缓存 + Yuanbao active adapter) + `388b881b33` (per-profile Yuanbao home + env_passthrough allowlist)
+- **估时**: 0.5-1d (~34 files, 含新 gateway_multiplex_mode.py; config_defaults 与我们 cost_aware 块同文件需并排合)
+- **风险**: 🟡 中 (default-on 改变单 profile 网关行为; 触我们的 config_defaults 接缝)
+- **价值**: 🔴 极高 (per-profile 路由/插件隔离是企业线方向; 多 sender→profile 入站路由 d6f3285b81 同族)
+- **备注**: **K-3 (gateway profile routing multiplex) 标记 superseded-by-K-12** — 上游原生实现完成度高于原借鉴计划
+
+### [K-13] Ollama 本地路由 4 件套（SmartRouter 协同）
+
+- **状态**: 🟡 proposed
+- **Source**: upstream `3de7140bcd` (64K context floor 读 num_ctx 服务窗口而非 GGUF 元数据 — 修 local fallback 拒构造) + `b7e0d715be` (ollama/vllm explicit alias 走 aux custom branch) + `4de3bce8af`/`d6d6565d90`/`8294eff4ce` (native Ollama picker 缓存 TTL/headers-key/不 stale-serve 空 catalog)
+- **估时**: 1-2h (~9 files; agent_init 与我们 `_last_routing_decision` 初始化相隔 ~5 行, 需并排合)
+- **风险**: 🟢 低
+- **价值**: 🔴 极高 (本地优先支柱; 64K floor 场景与 SmartRouter 恢复直接协同)
+- **备注**: 与 2026-09-19 恢复的 SmartRouter/zhineng_luyou 形成完整本地路由栈
+
+### [K-14] DeepSeek flash 规范化 + Flash 1M 窗口 + thinking replay
+
+- **状态**: 🟡 proposed (⚠ 含 CN 配置漂移风险)
+- **Source**: upstream `8435a3ae00`/`aeecb110f8`/`696d078959`/`6964eebd35` (deepseek-flash 规范 id + 旧名折叠 + custom id 透传) + `759024bdff` (Flash 1M 窗口 leftovers + native vision) + `0543fa2f1b` (thinking replay contract for 第三方 proxy)
+- **估时**: 0.5d (~20 files incl. models.py — PROVIDER_GROUPS 接缝文件)
+- **风险**: 🟡 中
+- **价值**: 🔴 极高 (CN 第一 provider; **不合入则 WSL config 现写的 deepseek-v4-flash 在上游模型更名后会静默 404**)
+- **备注**: anthropic 兼容层的 DeepSeek thinking replay 对第三方中转场景有直接价值
+
+### [K-15] state 损坏韧性 5 件套
+
+- **状态**: 🟡 proposed
+- **Source**: upstream `496eb13bd7` (单条 corrupt timestamp 不杀 sessions list/export/insights) + `38adfe90a4` (FTS 损坏归类 fts_index 非整文件) + `754ecff466`/`16e4496d90`/`342967058c` (corrupt-session 恢复指引锚定 profile/session/backups dir)
+- **估时**: 0.5-1d (~25 files hermes_state*/cli)
+- **风险**: 🟢 低
+- **价值**: 🟡 中 (WSL state.db 133MB WAL, doctor 刚警告 WAL-reset 暴露)
+- **关联**: NEEDS_BACKLOG 历史 fts5 migration 修复 (v2→v11 链) 同族
+
+### [K-16] 安全 redaction 双修（Zhipu key 泄露面）
+
+- **状态**: 🟡 proposed
+- **Source**: upstream `7b57cda6d9` + `aebc71d78c` (Zhipu API key redaction + dotted sk- 二次掩码) + `77ca949b90` (dpaste.com fallback 泄露调试日志 7 天)
+- **估时**: 1h (~5 files agent/redact + cli)
+- **风险**: 🟢 低
+- **价值**: 🔴 高 (智谱是 CN 保留 provider, key 未脱敏是真实泄露面; 与"thorough"安全风格一致)
+- **备注**: 8 簇中估时最短, 建议最先实施
+
+### [K-17] qqbot approval dm session keys（Spark 5 前置）
+
+- **状态**: 🟡 proposed
+- **Source**: upstream `2ff990c13f` + `adc4fad919` + `e5382cd823` (approval 点击/按钮按 dm session key 鉴权 + 真实 dm key 测试)
+- **估时**: 0.5-1h (~4 files)
+- **风险**: 🟢 低
+- **价值**: 🔴 高 (CN 渠道上的 approval 链路 = 语义防火墙恢复 (Spark 5) 的前置件)
+- **关联**: Spark 5 deferred 项; CAND-008 (deny rules) 同方向
+
+### [K-18] 杂项 4 件
+
+- **状态**: 🟡 proposed
+- **Source**: upstream `996f7bc563` (credential-pool 编号兄弟 KEY_2/3… 种子轮换) + `5705b68f70` (memory-plugin/Qwen-CLI config JSON 存活 Windows BOM) + `f37336522b` (vision.embed_target_bytes 替代硬编码 256KB) + `bd70d7387a` (save_trajectory JSONL 并发加锁)
+- **估时**: 2-3h (~15 files)
+- **风险**: 🟢 低
+- **价值**: 🟡 中 (多 key 用户 / Windows 用户 / S14 vision 可调预算 / 轨迹完整性)
+- **备注**: Windows BOM 一件对 CN Windows 原生用户是小但真实的修复
+
+### K-11~K-18 窗口启示
+
+- **CN 主推平台上游反哺**: weixin/qqbot/yuanbao/wecom 在上游活跃维护（9 月 weixin 6 fix），上游不再是"国外平台"单一形象——CN 平台修复可以直接 cherry-pick
+- **K-3 式 defer 的红利**: 7 月 defer 的 K-3 等来了上游原生实现（K-12），比自行重写省 1.5d 且少维护一份
+- **配置漂移是新型风险**: K-14 说明 base bump 拖尾期 CN config（deepseek-v4-flash）会因上游模型更名静默失效——10 月 bump 前应把 K-14 先行或与 bump 捆绑
+
 ---
 
 ## 触发条件总表 (扩展)
