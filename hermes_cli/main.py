@@ -445,6 +445,7 @@ from hermes_cli.subcommands.profile import build_profile_parser
 from hermes_cli.subcommands.model import build_model_parser
 from hermes_cli.subcommands.setup import build_setup_parser
 from hermes_cli.subcommands.quickstart import build_quickstart_parser
+from hermes_cli.subcommands.local_models import build_local_models_parser
 
 from hermes_cli.subcommands.whatsapp import build_whatsapp_parser
 from hermes_cli.subcommands.slack import build_slack_parser
@@ -11918,6 +11919,12 @@ def main():
     # fallback and configures a layered routing chain.
     # =========================================================================
     build_quickstart_parser(subparsers, cmd_quickstart=cmd_quickstart)
+
+    # =========================================================================
+    # local-models command (CN; parser built in hermes_cli/subcommands/local_models.py)
+    # Offline model management (ModelScope mirror, embedded CPU inference).
+    # =========================================================================
+    build_local_models_parser(subparsers)
 
 
     # =========================================================================
