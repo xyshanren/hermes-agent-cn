@@ -66,10 +66,11 @@
 
 **Known items**：
 
-- **SmartRouter** — `agent/zhineng_luyou.py`（首次 commit `895f416fd`，v0.15.0 Phase 3）—— 上游 `model_router.py` 的完全重写。多后端能力感知 + 自动降级 + tier 流量分配
-- **Semantic Firewall** — `agent/semantic_firewall.py`（首次 commit `7923b5f76`，v0.15.0 Phase 1）—— 5 层语义防火墙（Content Sanitization / Skill Provenance / Pre-write Verification / Quarantine / Audit），防 prompt injection
+- **SmartRouter** — `agent/zhineng_luyou.py`（首次 commit `895f416fd`，v0.15.0 Phase 3；**2026-09-19 恢复** `dd10f97740`）—— 上游 `model_router.py` 的完全重写。多后端能力感知（BackendHub）+ 熔断（HealthTracker）+ CN 模型成本库 + `model_routing.rules` 规则引擎。v0.19.1/v0.20.0 base bump 时随旧 run_agent 丢失，2026-09-19 从 v0.17 终态逐字恢复并接回 `chat_completion_helpers.build_api_kwargs` 每轮路由接缝。配套 S12 元数据（routing_decision / cost_aware_fallback / usage_dict SSE 扩展）同日恢复（`4d874e1aa9`）
+- **Semantic Firewall** — `agent/semantic_firewall.py`（首次 commit `7923b5f76`，v0.15.0 Phase 1）—— 5 层语义防火墙（Content Sanitization / Skill Provenance / Pre-write Verification / Quarantine / Audit），防 prompt injection。**⏸ deferred（2026-09-19 拍板）**：base bump 后未恢复；消费场景（企业安全治理）未到窗口，等 Spark 5（wecom/feishu approval + deny rules）启动时与 approval 配对恢复。想法保留在死线 `cn` 分支，可随时 checkout
 - **hermes-tray** — 独立项目 github.com/xyshanren/hermes-tray，Tauri 2 + Vue/TS，原生渲染，单文件 <10MB。替代 upstream Electron desktop。v0.1.2 收尾 223 tests 全过
-- **本地化工具链** — `hermes quickstart`（一键检测 API Key/Ollama/本地模型）/ `hermes local-models setup --yes`（自动安装本地模型 ~1.58GB）/ `hermes setup`（交互式配置向导）
+- **本地化工具链** — `hermes quickstart`（一键检测 API Key/Ollama/本地模型；**2026-09-19 恢复接线** `a08bfd8463`）/ `hermes local-models`（离线模型管理 + `setup --yes` 一键安装；**2026-09-19 恢复** `10fa47f0ab`，含 model_manager.py + embedded.py + 正式子命令注册，旧分支从未注册过该命令）/ `hermes setup`（交互式配置向导，上游现役）
+- **Skill 三级分层** — `agent/skill_tier_manager.py` + `skill_matcher.py`（v0.12 原创）。**✅ superseded（2026-09-19 对码拍板，不恢复）**：上游 v0.20 已用另一套机制解决同一痛点 —— 技能索引只进名字+描述、`skill_view` 按需加载正文、focus mode 分类降级（`coding_compact_skill_categories`）、`[SKILL_PRUNED]` 压缩可修剪、curator 自动归档 agent 创建的 stale skills。恢复旧实现会与 curator 职责撞车；用法驱动的上下文裁剪这一*想法*由上游四件套承接。历史实现保留在死线 `cn` 分支
 - **MemPalace + graphify 集成指南** — `docs/Hermes集成指南_MemPalace与graphify.md`（首次 commit `47525075e`）—— 不重写 memory 后端，把第三方工具集成方法沉淀成文档
 
 ---
