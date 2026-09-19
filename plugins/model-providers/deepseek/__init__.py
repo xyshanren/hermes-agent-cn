@@ -29,21 +29,33 @@ from providers import register_provider
 from providers.base import ProviderProfile
 
 
+# Version-less canonical ids for thinking-capable DeepSeek models. The 2026-09 Flash
+# refresh dropped the ``v<N>`` marker from the public id: ``GET /v1/models`` reports
+# ``deepseek-flash`` and the API accepts it directly, so the generation check in
+# ``_model_supports_thinking`` cannot recognise it.
+_THINKING_CAPABLE_IDS: frozenset[str] = frozenset({"deepseek-flash"})
+
+
 def _model_supports_thinking(model: str | None) -> bool:
     """DeepSeek thinking-capable model families.
 
     Currently covers the V4 family (``deepseek-v4-pro``, ``deepseek-v4-flash``,
-    and any future ``deepseek-v4-*`` variants).  Retired aliases are remapped
-    before requests leave Hermes, so they are not listed here.
+    and any future ``deepseek-v4-*`` variants) plus version-less canonical ids
+    (``deepseek-flash``).  Retired aliases are remapped before requests leave
+    Hermes, so they are not listed here.
     """
     m = (model or "").strip().lower()
     if not m:
         return False
-    if m.startswith("deepseek-v") and not m.startswith("deepseek-v3"):
-        # deepseek-v4-*, deepseek-v5-*, etc. — every V4+ generation has
-        # thinking. v3 explicitly excluded.
-        return True
-    return False
+    # v4+ only; v3 excluded. Version-less canonicals (``deepseek-flash``) carry
+    # the same thinking-mode contract but no ``v<N>`` prefix, so consult the id
+    # set too — missing them makes Hermes omit ``thinking``, so the server
+    # defaults to on and the user's thinking toggle / effort setting is
+    # silently ignored.
+    versioned_v4_plus = m.startswith("deepseek-v") and not m.startswith("deepseek-v3")
+    if not versioned_v4_plus and m not in _THINKING_CAPABLE_IDS:
+        return False
+    return True
 
 
 class DeepSeekProfile(ProviderProfile):
@@ -93,10 +105,10 @@ deepseek = DeepSeekProfile(
     signup_url="https://platform.deepseek.com/",
     fallback_models=(
         "deepseek-v4-pro",
-        "deepseek-v4-flash",
+        "deepseek-flash",
     ),
     base_url="https://api.deepseek.com/v1",
-    default_aux_model="deepseek-v4-flash",
+    default_aux_model="deepseek-flash",
 )
 
 register_provider(deepseek)

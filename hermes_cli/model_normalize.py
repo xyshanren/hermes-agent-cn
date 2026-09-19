@@ -150,17 +150,24 @@ _DEEPSEEK_REASONER_KEYWORDS: frozenset[str] = frozenset({
     "cot",
 })
 
-# Retired on 2026-07-24 15:59 UTC. Official docs: both aliases mapped to
-# deepseek-v4-flash (chat = non-thinking, reasoner = thinking). Thinking
-# mode itself is controlled by extra_body.thinking on the DeepSeek profile.
+# Retired on 2026-07-24 15:59 UTC. Official docs: both aliases mapped to the
+# Flash id (chat = non-thinking, reasoner = thinking). Thinking mode itself is
+# controlled by extra_body.thinking on the DeepSeek profile. Since the
+# 2026-09-10 V4.1-Flash release the fold target is the version-less
+# ``deepseek-flash`` (the API's canonical id; ``deepseek-v4-flash`` is
+# server-side aliased onto it).
 _DEEPSEEK_RETIRED_ALIASES: frozenset[str] = frozenset({
     "deepseek-chat",
     "deepseek-reasoner",
 })
 
+# ``deepseek-flash`` carries no ``v<N>`` marker, so it needs an entry here or
+# the V-series regex below misses it and the id the user picked is rewritten
+# before it reaches the wire.
 _DEEPSEEK_CANONICAL_MODELS: frozenset[str] = frozenset({
+    "deepseek-flash",      # version-less canonical Flash id (2026-09-10 V4.1-Flash)
     "deepseek-v4-pro",     # V4 Pro — first-class model ID
-    "deepseek-v4-flash",   # V4 Flash — first-class model ID
+    "deepseek-v4-flash",   # V4 Flash — first-class model ID (aliased onto deepseek-flash server-side)
 })
 
 # First-class V-series IDs (``deepseek-v4-pro``, ``deepseek-v4-flash``,
@@ -177,14 +184,14 @@ def _normalize_for_deepseek(model_name: str) -> str:
 
     Rules:
     - Retired aliases ``deepseek-chat`` / ``deepseek-reasoner`` (cut off
-      2026-07-24) -> ``deepseek-v4-flash``.
-    - Already a known canonical (``deepseek-v4-pro``/``deepseek-v4-flash``)
-      -> pass through.
+      2026-07-24) -> ``deepseek-flash``.
+    - Already a known canonical (``deepseek-flash``/``deepseek-v4-pro``/
+      ``deepseek-v4-flash``) -> pass through.
     - Matches the V-series pattern ``deepseek-v<digit>...`` -> pass through
       (covers future ``deepseek-v5-*`` and dated variants without a release).
     - Contains a reasoner keyword (r1, think, reasoning, cot, reasoner)
-      -> ``deepseek-v4-flash``.
-    - Everything else -> ``deepseek-v4-flash``.
+      -> ``deepseek-flash``.
+    - Everything else -> ``deepseek-flash``.
 
     Args:
         model_name: The bare model name (vendor prefix already stripped).
@@ -197,7 +204,7 @@ def _normalize_for_deepseek(model_name: str) -> str:
     # Retired aliases must rewrite — DeepSeek returns HTTP 400 after the
     # 2026-07-24 cut-off if these IDs are sent on the wire.
     if bare in _DEEPSEEK_RETIRED_ALIASES:
-        return "deepseek-v4-flash"
+        return "deepseek-flash"
 
     if bare in _DEEPSEEK_CANONICAL_MODELS:
         return bare
@@ -209,9 +216,9 @@ def _normalize_for_deepseek(model_name: str) -> str:
     # Check for reasoner-like keywords anywhere in the name
     for keyword in _DEEPSEEK_REASONER_KEYWORDS:
         if keyword in bare:
-            return "deepseek-v4-flash"
+            return "deepseek-flash"
 
-    return "deepseek-v4-flash"
+    return "deepseek-flash"
 
 
 # ---------------------------------------------------------------------------

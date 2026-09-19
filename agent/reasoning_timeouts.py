@@ -71,6 +71,9 @@ _REASONING_STALE_TIMEOUT_FLOORS: tuple[tuple[str, int], ...] = (
     # final content, requiring the same extended stale timeout floor.
     ("deepseek-r1", 600),
     ("deepseek-reasoner", 600),
+    # ``deepseek-flash`` is the version-less canonical Flash id (2026-09 Flash
+    # refresh); ``deepseek-v4-flash`` still aliases onto it server-side.
+    ("deepseek-flash", 600),
     ("deepseek-v4-flash", 600),
     ("deepseek-v4-pro", 600),
     # Qwen — QwQ reasoning + Qwen3 thinking variants.  QwQ-32B

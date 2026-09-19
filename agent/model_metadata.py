@@ -463,8 +463,12 @@ DEFAULT_CONTEXT_LENGTHS = {
     # below remains as a 128K fallback for older / unknown DeepSeek model
     # ids (e.g. via custom endpoints).
     # https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+    # ``deepseek-flash`` (version-less canonical id, 2026-09 Flash refresh) needs a
+    # discrete entry or the longest-key-first scan falls through to the 128K
+    # ``deepseek`` catch-all below.
     "deepseek-v4-pro": 1_000_000,
     "deepseek-v4-flash": 1_000_000,
+    "deepseek-flash": 1_000_000,
     "deepseek-chat": 1_000_000,
     "deepseek-reasoner": 1_000_000,
     "deepseek": 128000,
