@@ -2564,9 +2564,68 @@ def init_agent(
         compression_idle_compact_after_seconds
     )
 
+    # ── Ollama num_ctx injection (before the 64K floor) ──
+    # Ollama defaults to 2048 context regardless of the model's capabilities.
+    # When running against an Ollama server, detect the model's max context
+    # and pass num_ctx on every chat request so the full window is used.
+    # User override: set model.ollama_num_ctx in config.yaml to cap VRAM use.
+    # If model.context_length is set, it caps num_ctx so the user's VRAM
+    # budget is respected even when GGUF metadata advertises a larger window.
+    # Ported 2026-09-20 (#100437): this block runs BEFORE the 64K context
+    # floor so the floor judges the window Ollama actually serves, not the
+    # GGUF metadata — a Modelfile/ollama_num_ctx at 64K+ is usable even when
+    # the metadata advertises 40K.
+    agent._ollama_num_ctx: int | None = None
+    _ollama_num_ctx_override = None
+    if isinstance(_model_cfg, dict):
+        _ollama_num_ctx_override = _model_cfg.get("ollama_num_ctx")
+    if _ollama_num_ctx_override is not None:
+        try:
+            agent._ollama_num_ctx = int(_ollama_num_ctx_override)
+        except (TypeError, ValueError):
+            _ra().logger.debug("Invalid ollama_num_ctx config value: %r", _ollama_num_ctx_override)
+    if agent._ollama_num_ctx is None and agent.base_url and is_local_endpoint(agent.base_url):
+        try:
+            # ``agent.api_key`` may be a callable (Entra token provider).
+            # Ollama detection makes a manual HTTP request and expects a
+            # string — Azure Foundry isn't a local endpoint so this branch
+            # never fires for Entra, but guard defensively.
+            _key_for_ollama = agent.api_key if isinstance(agent.api_key, str) else ""
+            _detected = query_ollama_num_ctx(agent.model, agent.base_url, api_key=_key_for_ollama or "")
+            if _detected and _detected > 0:
+                agent._ollama_num_ctx = _detected
+        except Exception as exc:
+            _ra().logger.debug("Ollama num_ctx detection failed: %s", exc)
+    # Cap auto-detected ollama_num_ctx to the user's explicit context_length.
+    # Without this, GGUF metadata can advertise 256K+ which Ollama honours
+    # by allocating that much VRAM — blowing up small GPUs even though the
+    # user explicitly set a smaller context_length in config.yaml.
+    if (
+        agent._ollama_num_ctx
+        and _config_context_length
+        and _ollama_num_ctx_override is None  # don't override explicit ollama_num_ctx
+        and agent._ollama_num_ctx > _config_context_length
+    ):
+        _ra().logger.info(
+            "Ollama num_ctx capped: %d -> %d (model.context_length override)",
+            agent._ollama_num_ctx, _config_context_length,
+        )
+        agent._ollama_num_ctx = _config_context_length
+    if agent._ollama_num_ctx and not agent.quiet_mode:
+        _ra().logger.info(
+            "Ollama num_ctx: will request %d tokens (model max from /api/show)",
+            agent._ollama_num_ctx,
+        )
+
     # Reject models whose context window is below the minimum required
     # for reliable tool-calling workflows (64K tokens).
     _ctx = getattr(agent.context_compressor, "context_length", 0)
+    # The floor judges the window Ollama *serves* (num_ctx), not the GGUF's
+    # advertised metadata: a Modelfile or model.ollama_num_ctx at 64K+ is a
+    # usable window even when the metadata says 40K (#100437).
+    _served = getattr(agent, "_ollama_num_ctx", None)
+    if isinstance(_served, int) and not isinstance(_served, bool) and _served > 0:
+        _ctx = max(_ctx or 0, _served)
     _allow_lmstudio_explicit_below_floor = (
         str(getattr(agent, "provider", "") or "").strip().lower() == "lmstudio"
         and isinstance(agent._config_context_length, int)
@@ -2701,55 +2760,6 @@ def init_agent(
     # Read by post-turn tooling (gateway, debug helpers, /insights).
     agent._last_routing_decision = {}
     agent._last_api_call_started = None
-    
-    # ── Ollama num_ctx injection ──
-    # Ollama defaults to 2048 context regardless of the model's capabilities.
-    # When running against an Ollama server, detect the model's max context
-    # and pass num_ctx on every chat request so the full window is used.
-    # User override: set model.ollama_num_ctx in config.yaml to cap VRAM use.
-    # If model.context_length is set, it caps num_ctx so the user's VRAM
-    # budget is respected even when GGUF metadata advertises a larger window.
-    agent._ollama_num_ctx: int | None = None
-    _ollama_num_ctx_override = None
-    if isinstance(_model_cfg, dict):
-        _ollama_num_ctx_override = _model_cfg.get("ollama_num_ctx")
-    if _ollama_num_ctx_override is not None:
-        try:
-            agent._ollama_num_ctx = int(_ollama_num_ctx_override)
-        except (TypeError, ValueError):
-            _ra().logger.debug("Invalid ollama_num_ctx config value: %r", _ollama_num_ctx_override)
-    if agent._ollama_num_ctx is None and agent.base_url and is_local_endpoint(agent.base_url):
-        try:
-            # ``agent.api_key`` may be a callable (Entra token provider).
-            # Ollama detection makes a manual HTTP request and expects a
-            # string — Azure Foundry isn't a local endpoint so this branch
-            # never fires for Entra, but guard defensively.
-            _key_for_ollama = agent.api_key if isinstance(agent.api_key, str) else ""
-            _detected = query_ollama_num_ctx(agent.model, agent.base_url, api_key=_key_for_ollama or "")
-            if _detected and _detected > 0:
-                agent._ollama_num_ctx = _detected
-        except Exception as exc:
-            _ra().logger.debug("Ollama num_ctx detection failed: %s", exc)
-    # Cap auto-detected ollama_num_ctx to the user's explicit context_length.
-    # Without this, GGUF metadata can advertise 256K+ which Ollama honours
-    # by allocating that much VRAM — blowing up small GPUs even though the
-    # user explicitly set a smaller context_length in config.yaml.
-    if (
-        agent._ollama_num_ctx
-        and _config_context_length
-        and _ollama_num_ctx_override is None  # don't override explicit ollama_num_ctx
-        and agent._ollama_num_ctx > _config_context_length
-    ):
-        _ra().logger.info(
-            "Ollama num_ctx capped: %d -> %d (model.context_length override)",
-            agent._ollama_num_ctx, _config_context_length,
-        )
-        agent._ollama_num_ctx = _config_context_length
-    if agent._ollama_num_ctx and not agent.quiet_mode:
-        _ra().logger.info(
-            "Ollama num_ctx: will request %d tokens (model max from /api/show)",
-            agent._ollama_num_ctx,
-        )
 
     # Codex gpt-5.x autoraise notice: show at most once per profile/config
     # state. Without the persisted marker the notice re-fires on every agent
