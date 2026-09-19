@@ -2971,3 +2971,43 @@ v0.19.0+cn.1 Sprint 10 sync done + 阶段收尾 8-07 后, Sprint 10b followup 12
 - ⏳ `hermes local-models setup --yes` 真机验证 (RTX 4090 / WSL2 下载链路)
 - ⏳ Spark 5 启动时恢复 semantic firewall (触发条件见 cn-divergences 类别 2)
 - ⏳ 2026-10-01 cron `hermes-cn-quarterly-borrow-audit` 季度审计
+
+---
+
+# CHANGELOG — 2026-09-20 批次 (K-11~K-18 轻跟进实施: 15 commits, 5 簇落地 2 簇 deferred)
+
+> **阶段**: 用户拍板"现在就做轻跟进" (窗口 9-04→09-19 扫描 → 当日实施) + K-12 选 A 拍板
+> **工作分支**: `phase1-cand085-v19`, 15 K-series commits + 2 扫描 docs commits, NO push default
+> **模式**: 直接 cherry-pick 优先 (保作者署名 -x), 依赖重构链的降级为语义移植或 deferred-to-bump
+
+## 审核门状态
+
+| Gate | 状态 | 说明 |
+|------|------|------|
+| G-编译 | ✅ 通过 | 全部触碰文件 ast.parse; 全冲突文件 0 marker 残留 |
+| G-测试 | ✅ Windows 可跑集全绿 | redact+debug 151 / weixin secret-scope 10 + test_weixin 45 / normalize+metadata 87 / qqbot 67 (新增 6 全绿) / reasoning floor 33 |
+| G-环境 | ⚠ 记录 | Windows .venv aiohttp 安装损坏 (`_cookie_helpers`/`TCPConnector` 缺失) 致 3 个 pre-existing fail + gateway 大面积 collection error — 与本批无关, WSL 验证为准 |
+
+## 实施结果
+
+| 簇 | 结果 | commits |
+|---|---|---|
+| K-16 redaction 双修 | ✅ done 3/3 | `f35a0562d4` dpaste 1 天 + `301552f4f0` Zhipu key 脱敏 + `d109041cda` dotted sk- 防二次塌缩 |
+| K-11 Weixin 韧性 | ✅ done 6/6 | `bc9d11362f`→`ff9257b806`; **附带 P0 修复**: weixin.py `_extra_or_secret`/`_send_items` base bump 半接线 NameError (调用点在定义缺失, adapter 构造即炸) |
+| K-13 Ollama 本地路由 | ✅ 语义移植 1/5 | `64dbe4f622` 64K floor 读 served num_ctx (解析块前移 + max 合并); 余 4 依赖 aux named-custom 链 + model_switch_providers 新架构 |
+| K-14 DeepSeek flash | ✅ 语义移植 1/6 | `b381bd6e67` 目录/元数据层 4 文件 (1M 条目/600s floor/normalize 折叠 deepseek-flash/provider thinking+fallback+aux); CN 配置漂移风险缓解; 余 5 依赖 anthropic 拆分 + usage_pricing 重构 |
+| K-17 qqbot approval | ✅ done 3/3 | `db4b686c6b`/`bd2d299b44`/`b3ad6c70a4` 0 冲突; Spark 5 CN approval 前置就位 |
+| K-18 杂项 | ✅ 1/4 | `a10ffa3a99` trajectory JSONL 文件锁 (POSIX flock + Windows msvcrt); vision embed/BOM/credential-pool 兄弟 key 依赖重构链 |
+| K-12 multiplex | ⏸ deferred-to-bump | 依赖 multiplex 现代化重构链 (gateway_multiplex_mode/served/migrate 树上无), 14 文件冲突硬合必产半接线。**选 A 拍板有效**: bump 落地时 default-on 跟上游不翻回 |
+| K-15 state 韧性 | ⏸ deferred-to-bump | 依赖 turn_explainers/run_notifications 重构 |
+
+## 关键发现 (记录为新风险模式)
+
+**"依赖重构链"是 cherry-pick 窗口拖长后的主要成本**: 27 候选 commits 中 13 个 (48%) 因依赖 v0.20.0→9 月的上游中间重构而无法直接落地。三个处理档位已沉淀: 直接 cherry-pick (保署名) → 语义移植 (核心行为落到本地结构, 记 upstream hash) → deferred-to-bump (CANDIDATES 记录, bump 白拿)。另: base bump 半接线是双向的 — 不仅丢 CN 模块, 上游自身的重构 (weixin scoped-secret) 也会半落地, K-11 顺带修了两处。
+
+## 下一步
+
+- ⏳ WSL 同步 + 真机验证 (aiohttp 相关测试以 WSL 为准)
+- ⏳ 批量 push (user 拍板)
+- ⏳ 10 月中旬 base bump v0.21.x: 13 个 deferred commits 随重构链白拿 + K-12 default-on 落地 + K-14 余量
+- ⏳ 10-01 cron 审计窗口 9-04→10-01

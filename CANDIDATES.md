@@ -1077,10 +1077,12 @@
 > 窗口 5,992 upstream commits（v0.20.0 基线后，上游 0.21.3 / tag v2026.9.14）；2,894 涉 CN 保留路径；8 簇 27 commits 全部 hash 验证。
 > **10-01 季度审计窗口 = 9-04→10-01**（user 拍板）：本批候选自动纳入复核，增量 = 9-19→10-01 段。
 > 上次 K-6~K-10（Sprint 13/14 v0.20.0 sync）全部 0 work，编号顺延为 K-11 起。
+>
+> **实施结果（2026-09-20 sprint，15 commits）**：K-11 ✅ 6/6、K-13 ✅ 语义移植 1/5（余 4 依赖重构链）、K-14 ✅ 语义移植 1/6（余 5 依赖重构链）、K-17 ✅ 3/3、K-18 ✅ 1/4（trajectory 文件锁；余 3 依赖重构链）；**K-12 ⏸ deferred-to-bump**（依赖 multiplex 现代化重构链 `gateway_multiplex_mode/served/migrate`，14 文件冲突硬合必产半接线；**选 A 拍板有效**：bump 落地时 default-on 跟上游，不翻回）；**K-15 ⏸ deferred-to-bump**（依赖 turn_explainers/run_notifications 重构）。重要附带修复：主线 weixin.py 的 `_extra_or_secret`/`_send_items` 半接线 NameError（v0.20.0 base bump 残留）随 K-11 落地修复。依赖重构链的 13 个 commit 全部记录在案，10 月 bump 时白拿。
 
 ### [K-11] Weixin 发送韧性 6 件套
 
-- **状态**: 🟡 proposed
+- **状态**: ✅ done (2026-09-20, 6 commits `bc9d11362f`→`ff9257b806`; 附带修复 weixin.py `_extra_or_secret`/`_send_items` base bump 半接线 NameError)
 - **Source**: upstream `bd39167c56` (ret=-2 prepare failed = session error 非 rate limit, #80125) + `5db9f02372` (media leg 同类) + `97066a0eb5` (iLink ret + 无 stale token 重发) + `2995063bcd` (tokenless 重发不吃 retry budget) + `46ab37ce35` (prepare 失败无 token 重试) + `33c872e52e` (split_multiline 在 multiplex profile 下生效)
 - **估时**: 2-3h (6 commits, ~14 files gateway/weixin/base)
 - **风险**: 🟢 低 (CN 主推平台路径, 上游原生持续维护)
@@ -1089,7 +1091,7 @@
 
 ### [K-12] Gateway multiplex profiles（K-3 的上游原生实现, adopt-instead）
 
-- **状态**: 🟡 proposed (⚠ 决策点: default-on 行为变更)
+- **状态**: ⏸ deferred-to-bump (**选 A 拍板有效**: 依赖 multiplex 现代化重构链 `gateway_multiplex_mode/served/migrate`, 硬合 14 文件冲突必产半接线; 10 月 bump 时随重构链整体落地, default-on 跟上游不翻回; CN 保持独立网关显式路径 = `gateway.multiplex_profiles: false` / `--standalone`)
 - **Source**: upstream `a10bbf95bb` (gateway.multiplex_profiles defaults to on + boot-time serve guard) + `208bd0b65a` (per-profile 插件缓存 + Yuanbao active adapter) + `388b881b33` (per-profile Yuanbao home + env_passthrough allowlist)
 - **估时**: 0.5-1d (~34 files, 含新 gateway_multiplex_mode.py; config_defaults 与我们 cost_aware 块同文件需并排合)
 - **风险**: 🟡 中 (default-on 改变单 profile 网关行为; 触我们的 config_defaults 接缝)
@@ -1098,7 +1100,7 @@
 
 ### [K-13] Ollama 本地路由 4 件套（SmartRouter 协同）
 
-- **状态**: 🟡 proposed
+- **状态**: ✅ 部分done (2026-09-20: 3de7140bcd 64K floor 语义移植 `64dbe4f622` — num_ctx 解析移到 floor 前 + floor 取 max(probed, served); 其余 4 commits 依赖 aux named-custom 重构链 + model_switch_providers 新架构, 留 bump 白拿)
 - **Source**: upstream `3de7140bcd` (64K context floor 读 num_ctx 服务窗口而非 GGUF 元数据 — 修 local fallback 拒构造) + `b7e0d715be` (ollama/vllm explicit alias 走 aux custom branch) + `4de3bce8af`/`d6d6565d90`/`8294eff4ce` (native Ollama picker 缓存 TTL/headers-key/不 stale-serve 空 catalog)
 - **估时**: 1-2h (~9 files; agent_init 与我们 `_last_routing_decision` 初始化相隔 ~5 行, 需并排合)
 - **风险**: 🟢 低
@@ -1107,7 +1109,7 @@
 
 ### [K-14] DeepSeek flash 规范化 + Flash 1M 窗口 + thinking replay
 
-- **状态**: 🟡 proposed (⚠ 含 CN 配置漂移风险)
+- **状态**: ✅ 部分done (2026-09-20: 目录/元数据层语义移植 `b381bd6e67` — model_metadata 1M 条目 + reasoning_timeouts 600s floor + normalize 折叠目标 deepseek-flash + provider thinking 判定/fallback/aux 默认; CN 配置漂移风险已缓解; 余 5 commits 依赖 anthropic 拆分模块/usage_pricing 重构, 留 bump) (⚠ 含 CN 配置漂移风险)
 - **Source**: upstream `8435a3ae00`/`aeecb110f8`/`696d078959`/`6964eebd35` (deepseek-flash 规范 id + 旧名折叠 + custom id 透传) + `759024bdff` (Flash 1M 窗口 leftovers + native vision) + `0543fa2f1b` (thinking replay contract for 第三方 proxy)
 - **估时**: 0.5d (~20 files incl. models.py — PROVIDER_GROUPS 接缝文件)
 - **风险**: 🟡 中
@@ -1116,7 +1118,7 @@
 
 ### [K-15] state 损坏韧性 5 件套
 
-- **状态**: 🟡 proposed
+- **状态**: ⏸ deferred-to-bump (依赖 turn_explainers/run_notifications 损坏恢复指引重构, 我们树无此二文件; bump 白拿)
 - **Source**: upstream `496eb13bd7` (单条 corrupt timestamp 不杀 sessions list/export/insights) + `38adfe90a4` (FTS 损坏归类 fts_index 非整文件) + `754ecff466`/`16e4496d90`/`342967058c` (corrupt-session 恢复指引锚定 profile/session/backups dir)
 - **估时**: 0.5-1d (~25 files hermes_state*/cli)
 - **风险**: 🟢 低
@@ -1125,7 +1127,7 @@
 
 ### [K-16] 安全 redaction 双修（Zhipu key 泄露面）
 
-- **状态**: 🟡 proposed
+- **状态**: ✅ done (2026-09-20, 3 commits `f35a0562d4`/`301552f4f0`/`d109041cda` — dpaste 1 天保留 + Zhipu key 脱敏 + dotted sk- 防二次塌缩; 151 测试绿)
 - **Source**: upstream `7b57cda6d9` + `aebc71d78c` (Zhipu API key redaction + dotted sk- 二次掩码) + `77ca949b90` (dpaste.com fallback 泄露调试日志 7 天)
 - **估时**: 1h (~5 files agent/redact + cli)
 - **风险**: 🟢 低
@@ -1134,7 +1136,7 @@
 
 ### [K-17] qqbot approval dm session keys（Spark 5 前置）
 
-- **状态**: 🟡 proposed
+- **状态**: ✅ done (2026-09-20, 3 commits `db4b686c6b`/`bd2d299b44`/`b3ad6c70a4` — 0 冲突干净落地; 新增 6 测试全绿; Spark 5 的 CN approval 前置就位)
 - **Source**: upstream `2ff990c13f` + `adc4fad919` + `e5382cd823` (approval 点击/按钮按 dm session key 鉴权 + 真实 dm key 测试)
 - **估时**: 0.5-1h (~4 files)
 - **风险**: 🟢 低
@@ -1143,7 +1145,7 @@
 
 ### [K-18] 杂项 4 件
 
-- **状态**: 🟡 proposed
+- **状态**: ✅ 部分done (2026-09-20: trajectory 文件锁 `a10ffa3a99` 落地, 含 Windows msvcrt 分支; vision embed 预算/BOM 存活/credential-pool 兄弟 key 3 件依赖 prepared-pipeline/auth_qwen/pool 重构, 留 bump)
 - **Source**: upstream `996f7bc563` (credential-pool 编号兄弟 KEY_2/3… 种子轮换) + `5705b68f70` (memory-plugin/Qwen-CLI config JSON 存活 Windows BOM) + `f37336522b` (vision.embed_target_bytes 替代硬编码 256KB) + `bd70d7387a` (save_trajectory JSONL 并发加锁)
 - **估时**: 2-3h (~15 files)
 - **风险**: 🟢 低
