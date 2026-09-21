@@ -430,9 +430,13 @@ def _install_stub_aimc_client(monkeypatch, calls):
 
         async def refresh(self):
             calls.append("refreshed")
+            # 记录运行中的事件循环 —— 门检必须在同一个循环里完成
+            # refresh + aclose（两个 asyncio.run 会把绑定在第一个循环上
+            # 的 httpx 客户端关在第二个循环里 → "Event loop is closed"）。
+            calls.append(("loop", id(asyncio.get_running_loop())))
 
         async def aclose(self):
-            pass
+            calls.append(("loop", id(asyncio.get_running_loop())))
 
     stub_module.AIMCClient = _StubClient
     monkeypatch.setitem(sys.modules, "aimc_client", stub_module)
@@ -456,6 +460,12 @@ def test_gate_activates_fail_fast_for_dict_model_default(hermes_home, monkeypatc
     _initialize_aimc_client_or_fail()  # 不抛 = refresh 走通
     assert calls[0]["base_url"] == "http://127.0.0.1:8080/v1"
     assert "refreshed" in calls
+    # refresh 与 aclose 必须跑在同一个事件循环上
+    loops = [c for c in calls if isinstance(c, tuple) and c[0] == "loop"]
+    assert len(loops) == 2 and loops[0][1] == loops[1][1], (
+        f"refresh/aclose ran on different event loops: {loops!r} "
+        f"(double asyncio.run breaks httpx teardown)"
+    )
 
 
 def test_gate_skips_when_main_model_is_not_aimc_group(hermes_home, monkeypatch):

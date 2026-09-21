@@ -891,13 +891,20 @@ def _initialize_aimc_client_or_fail() -> None:
         return
 
     # Iron law 1+4: synchronous refresh; raise on any HTTP error.
+    # One event loop for refresh + aclose — splitting them across two
+    # asyncio.run() calls closes the httpx client on a different loop
+    # than the one its transport was created on ("Event loop is closed").
     try:
         from aimc_client import AIMCClient
-        client = AIMCClient(base_url=base_url, api_key=api_key, timeout=30.0)
-        try:
-            asyncio.run(client.refresh())
-        finally:
-            asyncio.run(client.aclose())
+
+        async def _refresh_aimc_groups() -> None:
+            client = AIMCClient(base_url=base_url, api_key=api_key, timeout=30.0)
+            try:
+                await client.refresh()
+            finally:
+                await client.aclose()
+
+        asyncio.run(_refresh_aimc_groups())
     except Exception as exc:
         raise RuntimeError(
             f"CAND-085: AIMC refresh failed at startup ({type(exc).__name__}: {exc}). "
