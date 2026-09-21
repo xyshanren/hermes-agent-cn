@@ -122,6 +122,17 @@ MODEL_REGISTRY = [
         "description": "轻量本地模型 (~469MB, Q4_K_M GGUF)，资源受限环境首选",
         "install_hint": "从 ModelScope 下载 GGUF 格式量化模型（q4_k_m 版本）",
     },
+    {
+        "id": "minicpm5-1b",
+        "name": "MiniCPM5-1B (LLM)",
+        "category": "llm",
+        "tier": "recommended",
+        "model_scope_id": "OpenBMB/MiniCPM5-1B-GGUF",
+        "local_dir": "minicpm5-1b-q4_k_m",
+        "size_mb": 688,
+        "description": "通用离线兜底模型 (~688MB, Q4_K_M GGUF)，1B 参数 CPU 可跑，强于 qwen-0.5b",
+        "install_hint": "从 ModelScope 下载 GGUF 格式量化模型（q4_k_m 版本）",
+    },
 ]
 
 # Group registry by category
@@ -438,6 +449,15 @@ def download_model(model_id: str, progress_callback=None) -> bool:
                                        allow_patterns=[gguf_pattern])
 
     # -------------------------------------------------------------------------
+    # Other LLM GGUF (e.g. minicpm5-1b): pull only the compact q4_k_m
+    # file(s) — ModelScope GGUF repos ship several quant variants, most
+    # of which this machine will never load.
+    # -------------------------------------------------------------------------
+    if m.get("category") == "llm":
+        return _download_via_snapshot(m["model_scope_id"], dest, token, _print,
+                                       allow_patterns=["*q4_k_m*"])
+
+    # -------------------------------------------------------------------------
     # Other models: full snapshot_download
     # -------------------------------------------------------------------------
     return _download_via_snapshot(m["model_scope_id"], dest, token, _print)
@@ -581,7 +601,7 @@ def get_available_embedded_model() -> Optional[str]:
     """
     Find the best available embedded LLM model.
 
-    Priority (best first): qwen-coder-1.5b > qwen-0.5b
+    Priority (best first): minicpm5-1b > qwen-coder-1.5b > qwen-0.5b
 
     Returns:
         Model ID string, or None if no embedded LLM is available.
@@ -593,7 +613,7 @@ def get_available_embedded_model() -> Optional[str]:
     except Exception:
         return None
 
-    candidates = ["qwen-coder-1.5b", "qwen-0.5b"]
+    candidates = ["minicpm5-1b", "qwen-coder-1.5b", "qwen-0.5b"]
     for model_id in candidates:
         if is_installed(model_id) and _find_gguf_file(model_id) is not None:
             return model_id

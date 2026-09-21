@@ -857,10 +857,17 @@ def _initialize_aimc_client_or_fail() -> None:
     # Only block startup if the main model is actually an AIMC group.
     # Otherwise the user is just running a normal hermes command and
     # AIMC is irrelevant.
-    main_model = cfg.get("model") or ""
-    if not (isinstance(main_model, str) and (
-        main_model.startswith("tier:") or main_model.startswith("scene:")
-    )):
+    # `model` is a dict ({default, provider}) in every config the
+    # quickstart / setup wizard / auth writer produces — read
+    # model.default, same as main.py's own wizard-detection code does.
+    main_model_cfg = cfg.get("model")
+    if isinstance(main_model_cfg, dict):
+        main_model = str(main_model_cfg.get("default") or "").strip()
+    elif isinstance(main_model_cfg, str):
+        main_model = main_model_cfg.strip()
+    else:
+        main_model = ""
+    if not (main_model.startswith("tier:") or main_model.startswith("scene:")):
         return
 
     providers = cfg.get("providers") or {}

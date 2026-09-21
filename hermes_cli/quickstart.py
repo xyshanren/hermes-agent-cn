@@ -281,12 +281,40 @@ Populated by `_detect_ollama()` on success; consulted by
 auxiliary.vision, etc.) match the URL detection proved reachable."""
 
 
+def _parse_default_gateway(route_text: str) -> Optional[str]:
+    """Parse the IPv4 default gateway from ``/proc/net/route`` content.
+
+    Pure function — takes the route table text, returns the dotted-quad
+    gateway of the default route (Destination == 0.0.0.0), or None.
+    Gateway IPs are stored little-endian in the hex field.
+    """
+    for line in route_text.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        if parts[1] != "00000000":
+            continue
+        gw_hex = parts[2]
+        if gw_hex == "00000000":
+            continue
+        try:
+            octets = [int(gw_hex[i:i + 2], 16) for i in (6, 4, 2, 0)]
+        except ValueError:
+            continue
+        gw = ".".join(str(o) for o in octets)
+        if gw and not gw.startswith(("127.", "0.")):
+            return gw
+        break
+    return None
+
+
 def _probe_ollama_urls() -> list[str]:
     """Return ordered candidate URLs to probe for an Ollama server.
 
-    Pure function — no network I/O. Used both by detection (probe each
-    until one answers) and by base_url writers (fall back to localhost
-    when detection never ran).
+    No network I/O (reads /proc/net/route for the WSL/Linux default
+    gateway — a cheap file read, not a connection). Used both by
+    detection (probe each until one answers) and by base_url writers
+    (fall back to localhost when detection never ran).
     """
     candidates: list[str] = []
     env = os.getenv("HERMES_OLLAMA_HOST", "").strip()
@@ -314,6 +342,24 @@ def _probe_ollama_urls() -> list[str]:
                         if ip and ip not in ("127.0.0.1", "::1", "127.0.0.53"):
                             candidates.append(f"http://{ip}:11434")
                     break
+    except Exception:
+        pass
+    # Default-gateway fallback. Newer WSL ships a DNS tunnel: the
+    # resolv.conf nameserver is 10.255.255.254, a loopback-hosted proxy
+    # that does NOT route to the Windows host. The default gateway of
+    # the WSL virtual NIC does (the Windows host sits on the other end),
+    # which is how "quickstart can't see my Windows Ollama" manifests
+    # on modern WSL even though Ollama binds 0.0.0.0.
+    try:
+        route = Path("/proc/net/route")
+        if route.exists():
+            gw = _parse_default_gateway(
+                route.read_text(encoding="utf-8", errors="ignore")
+            )
+            if gw:
+                url = f"http://{gw}:11434"
+                if url not in candidates:
+                    candidates.append(url)
     except Exception:
         pass
     return candidates
@@ -370,6 +416,23 @@ def _detect_ollama() -> Optional[dict]:
                 data = json.loads(resp.read().decode())
                 models = data.get("models", [])
                 _OLLAMA_HOST_CACHE = base
+                # Persist a non-default host so runtime tooling that
+                # reads HERMES_OLLAMA_HOST (and future quickstart runs)
+                # keeps working after the probe. The gateway IP a WSL
+                # guest sees can drift across host reboots — re-running
+                # quickstart rewrites it.
+                if base != "http://localhost:11434" and not os.getenv(
+                    "HERMES_OLLAMA_HOST", ""
+                ).strip():
+                    try:
+                        from hermes_cli.config import save_env_value
+
+                        save_env_value("HERMES_OLLAMA_HOST", base)
+                        logger.info(
+                            "HERMES_OLLAMA_HOST=%s saved to .env", base
+                        )
+                    except Exception:
+                        pass
                 logger.info("Ollama detected at %s (%d models)", base, len(models))
                 if models:
                     model_names = [m.get("name", "") for m in models if m.get("name")]
@@ -393,12 +456,123 @@ def _detect_ollama() -> Optional[dict]:
     return None
 
 
+def _probe_gateway_url(url: str, timeout: float = 2.0) -> bool:
+    """GET *url* 一次，2xx 即 True。探测本地/局域网网关专用守卫：
+    仅允许 http/https，拒绝云元数据地址（169.254.169.254），禁用重定向。
+    loopback/私网是合法目标 —— 被探测的 AIMC / Ollama 网关就部署在
+    本机或 WSL 宿主上，URL 来源是操作员自己的 config/.env（与
+    ``_detect_ollama`` 既有探测同一信任边界），不是不可信输入。
+    """
+    from urllib.parse import urlparse
+    from urllib.error import HTTPError
+    from urllib.request import build_opener, HTTPRedirectHandler
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host in ("169.254.169.254", "metadata.google.internal"):
+        return False
+
+    class _NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = build_opener(_NoRedirect)
+    try:
+        resp = opener.open(url, timeout=timeout)
+        return 200 <= resp.status < 300
+    except HTTPError as exc:
+        return False
+    except Exception:
+        return False
+
+
+# ── AIMC 网关检测（CAND-085 一等公民化） ──────────────────────────────
+
+def _is_aimc_group(model: str) -> bool:
+    """True when *model* is an AIMC routing-group name (``tier:``/``scene:``)."""
+    m = str(model or "").strip()
+    return m.startswith("tier:") or m.startswith("scene:")
+
+
+def _detect_aimc() -> Optional[dict]:
+    """探测本机 AIMC 网关（``$AIMC_BASE_URL`` → ``providers.aimc.base_url``
+    → 默认 ``http://127.0.0.1:8080``）。
+
+    AIMC 是 WSL-本机 / 局域网内的 OpenAI 兼容网关（与 Windows 侧的
+    Ollama 不同，它就在 127.0.0.1 上），所以 localhost 是合法候选而非
+    被拒目标。探测用 ``GET /health``（免鉴权）；拿到 key 时再抓一次
+    ``/v1/models`` 的 ``data_groups``，供路由规则挑选 ``tier:strong``。
+
+    Returns: ``{"available": True, "base_url": base, "groups": set[str]}``
+    （groups 可能为空 —— 此时调用方按标准 seed 组名保守处理）。
+    """
+    candidates: list[str] = []
+    env = os.getenv("AIMC_BASE_URL", "").strip()
+    if env:
+        candidates.append(env.rstrip("/"))
+    try:
+        from hermes_cli.config import load_config
+
+        _cfg = load_config()
+        _providers = _cfg.get("providers")
+        if isinstance(_providers, dict):
+            _aimc_entry = _providers.get("aimc")
+            if isinstance(_aimc_entry, dict):
+                _url = str(_aimc_entry.get("base_url") or "").strip().rstrip("/")
+                if _url:
+                    candidates.append(_url)
+    except Exception:
+        pass
+    candidates.append("http://127.0.0.1:8080")
+
+    import urllib.request
+
+    seen: set[str] = set()
+    for base in candidates:
+        if base in seen:
+            continue
+        seen.add(base)
+        if not _probe_gateway_url(f"{base}/health"):
+            continue
+        info: dict = {"available": True, "base_url": base, "groups": set()}
+        # 尽力抓一次组列表（失败不失败探测 —— 启动期的 fail-fast
+        # refresh 才是组校验的权威，铁律 4）。
+        key = os.getenv("AIMC_API_KEY", "").strip()
+        if key:
+            try:
+                req = urllib.request.Request(
+                    f"{base}/v1/models",
+                    headers={"Authorization": f"Bearer {key}"},
+                )
+                payload = json.loads(
+                    urllib.request.urlopen(req, timeout=3).read().decode()
+                )
+                info["groups"] = {
+                    str(g.get("id"))
+                    for g in payload.get("data_groups", [])
+                    if isinstance(g, dict) and g.get("id")
+                }
+            except Exception:
+                pass
+        logger.info(
+            "AIMC detected at %s (%d groups)", base, len(info["groups"])
+        )
+        return info
+    return None
+
+
 def _has_embedded_models() -> bool:
     """检查是否已安装本地离线模型。"""
     try:
         from hermes_cli.model_manager import is_installed
 
-        return is_installed("qwen-0.5b") or is_installed("qwen-coder-1.5b")
+        return (
+            is_installed("qwen-0.5b")
+            or is_installed("qwen-coder-1.5b")
+            or is_installed("minicpm5-1b")
+        )
     except Exception:
         return False
 
@@ -898,6 +1072,60 @@ def _configure_embedded() -> bool:
         return False
 
 
+def _configure_aimc(aimc_info: dict) -> bool:
+    """将 AIMC 网关写入 config.yaml（CAND-085 一等公民化）。
+
+    写四样，缺一 fail-fast 就仍然是死代码：
+      - ``providers.aimc.{base_url, api_key}``（api_key 引用 .env 的
+        ``${AIMC_API_KEY}``，不落明文 —— 密钥只进 .env）
+      - 顶层 ``aimc.enabled: true``（保留段内其他既有键）
+      - ``model.{default, provider}`` = ``tier:balanced`` / ``aimc``
+      - base_url 以 ``/v1`` 结尾（OpenAI 兼容端点约定）
+    """
+    try:
+        from hermes_cli.config import load_config, save_config
+
+        cfg = load_config()
+
+        base_url = str(aimc_info.get("base_url") or "").strip().rstrip("/")
+        if not base_url:
+            return False
+        if not base_url.endswith("/v1"):
+            base_url = f"{base_url}/v1"
+
+        providers = cfg.setdefault("providers", {})
+        if not isinstance(providers, dict):
+            providers = {}
+            cfg["providers"] = providers
+        aimc_entry = providers.get("aimc")
+        aimc_entry = dict(aimc_entry) if isinstance(aimc_entry, dict) else {}
+        aimc_entry["base_url"] = base_url
+        # 引用 env，绝不把 key 明文写进 config.yaml。
+        if not str(aimc_entry.get("api_key") or "").strip():
+            aimc_entry["api_key"] = "${AIMC_API_KEY}"
+        providers["aimc"] = aimc_entry
+
+        aimc_section = cfg.get("aimc")
+        if not isinstance(aimc_section, dict):
+            aimc_section = {}
+        aimc_section["enabled"] = True
+        cfg["aimc"] = aimc_section
+
+        model = cfg.get("model", {})
+        if not isinstance(model, dict):
+            model = {}
+        model["default"] = "tier:balanced"
+        model["provider"] = "aimc"
+        cfg["model"] = model
+
+        save_config(cfg)
+        logger.info("AIMC 配置完成: base_url=%s, aimc.enabled=true", base_url)
+        return True
+    except Exception as e:
+        logger.warning("配置 AIMC 失败: %s", e)
+        return False
+
+
 def _configure_local_server(local_info: dict) -> bool:
     """将 LM Studio / llama.cpp 配置写入 config.yaml。
 
@@ -994,16 +1222,22 @@ def _build_fallback_chain(
                 "model": provider_model,
             })
 
-    # Ollama（如果不是主力）— 取参数规模最大的非 embedding 模型（含 vision）
+    # Ollama（如果不是主力）— 优先选通用对话模型（排除 embedding /
+    # OCR 专用模型，有纯文本模型时不选视觉模型），同池取参数规模最大
     if ollama_info and primary_provider_id != "ollama":
         all_models = ollama_info.get("models", [])
         if all_models:
             chat_models = [
                 m for m in all_models
-                if not any(kw in m.lower() for kw in ("embed",))
+                if not any(kw in m.lower() for kw in ("embed", "ocr"))
             ]
-            if chat_models:
-                best = max(chat_models, key=_get_param_size)
+            non_vision = [
+                m for m in chat_models
+                if _classify_ollama_model(m) != "vision"
+            ]
+            pool = non_vision or chat_models
+            if pool:
+                best = max(pool, key=_get_param_size)
                 chain.append({
                     "provider": "ollama",
                     "model": best,
@@ -1024,11 +1258,19 @@ def _build_fallback_chain(
                 })
                 break  # 只加一个 Ollama fallback
 
-    # 嵌入式模型始终放最后（断网兜底）
-    if has_embedded:
+    # 嵌入式模型放最后（断网兜底）。Ollama 兜底已就位时不再叠加 ——
+    # 用户要求以 Windows 侧 Ollama 为兜底，embedded 仅在完全无
+    # Ollama 时保留。
+    if has_embedded and not any(e.get("provider") == "ollama" for e in chain):
+        try:
+            from hermes_cli.model_manager import get_available_embedded_model
+
+            embedded_model = get_available_embedded_model() or "qwen-0.5b"
+        except Exception:
+            embedded_model = "qwen-0.5b"
         chain.append({
             "provider": "embedded",
-            "model": "qwen-0.5b",
+            "model": embedded_model,
         })
 
     return chain
@@ -1042,6 +1284,7 @@ def _generate_routing_rules(
     ollama_info: Optional[dict] = None,
     vision_model: Optional[str] = None,
     vision_provider: Optional[str] = None,
+    reasoning_model: Optional[str] = None,
 ) -> list[dict]:
     """CAND-084: smart generation of ``model_routing.rules`` (2026-08-04).
 
@@ -1093,19 +1336,24 @@ def _generate_routing_rules(
     old-format keys ``model_routing.{default,vision,reasoning}``).
     """
     is_cloud_primary = primary_provider not in ("ollama", "custom", "embedded", "")
+    is_aimc_primary = _is_aimc_group(primary_model)
     rules: list[dict] = []
 
     # --- vision ----------------------------------------------------------
     # Prefer an Ollama vision model (sits on the local server, can
     # answer "has_image" prompts without going to the cloud). Fall
     # back to the cloud provider's vision model if cloud-primary.
-    if ollama_info and ollama_info.get("vision_model"):
+    # AIMC-group primaries skip both branches: an Ollama vision model
+    # under model.provider=aimc is a cross-provider rule (the group id
+    # would be sent to AIMC verbatim and fail), and image analysis is
+    # already owned by auxiliary.vision (tier:vision) in that setup.
+    if ollama_info and ollama_info.get("vision_model") and not is_aimc_primary:
         rules.append({
             "name": "vision",
             "match": {"has_image": True},
             "model": ollama_info["vision_model"],
         })
-    elif is_cloud_primary and vision_provider and vision_model:
+    elif is_cloud_primary and not is_aimc_primary and vision_provider and vision_model:
         rules.append({
             "name": "vision",
             "match": {"has_image": True},
@@ -1116,11 +1364,13 @@ def _generate_routing_rules(
     # Keywords-only — supported by the match engine; the rule fires on
     # Chinese / English reasoning prompts (mixed list). Model inherits
     # the primary; if primary is an AIMC group, AIMC resolves the
-    # actual model at request time.
+    # actual model at request time. The caller may pin a stronger
+    # reasoning group (tier:strong) when AIMC's group catalog proves
+    # one exists.
     rules.append({
         "name": "reasoning",
         "match": {"keywords": ["分析", "推理", "思考", "证明"]},
-        "model": primary_model,
+        "model": reasoning_model or primary_model,
     })
 
     # --- coding ----------------------------------------------------------
@@ -1191,6 +1441,7 @@ def _write_smart_routing(
     api_providers: list[dict],
     ollama_info: Optional[dict] = None,
     local_server_infos: Optional[list[dict]] = None,
+    aimc_info: Optional[dict] = None,
 ) -> bool:
     """将智能路由配置写入 config.yaml。
 
@@ -1321,6 +1572,16 @@ def _write_smart_routing(
                     and m["name"] != primary_model
                 ]
 
+        reasoning_model = None
+        if _is_aimc_group(primary_model):
+            # 标准 seed 组名（tier:flagship/strong/balanced/light + scene:）
+            # 是 AIMC 侧约定；group 探测成功时按实际目录收紧，未探测到
+            # 时保守假定 tier:strong 存在（启动期 fail-fast refresh 会
+            # 校验 model.default 的组，规则组缺失由 AIMC 请求期兜底）。
+            groups = aimc_info.get("groups") if aimc_info else set()
+            if not groups or "tier:strong" in groups:
+                reasoning_model = "tier:strong"
+
         rules = _generate_routing_rules(
             api_providers=api_providers,
             local_backends=local_server_infos,
@@ -1329,6 +1590,7 @@ def _write_smart_routing(
             ollama_info=ollama_info,
             vision_model=vision_model,
             vision_provider=vision_provider,
+            reasoning_model=reasoning_model,
         )
 
         routing["rules"] = rules
@@ -1384,7 +1646,7 @@ def _write_smart_routing(
         # operator's first instinct will be to assume the quickstart
         # dropped the entry. This warning surfaces the real cause.
         if fallback_chain:
-            known_providers: set[str] = set()
+            known_providers: set[str] = {"embedded"}  # 内置离线层，无需 providers 段
             providers_dict = cfg.get("providers")
             if isinstance(providers_dict, dict):
                 known_providers.update(
@@ -1399,6 +1661,9 @@ def _write_smart_routing(
                 entry for entry in fallback_chain
                 if isinstance(entry, dict)
                 and entry.get("provider") not in known_providers
+                # 带 inline base_url 的条目是自描述的（provider/model/
+                # base_url 齐全即可直连），不依赖 providers 段。
+                and not str(entry.get("base_url") or "").strip()
             ]
             if dangling:
                 names = sorted({
@@ -1752,6 +2017,7 @@ def cmd_quickstart(args) -> int:
 
     api_providers = _detect_api_key_providers()
     ollama_info = _detect_ollama()
+    aimc_info = _detect_aimc()
     has_embedded = _has_embedded_models()
     mempalace_info = _detect_mempalace()
 
@@ -1765,6 +2031,7 @@ def cmd_quickstart(args) -> int:
     resource_count = (
         len(api_providers)
         + (1 if ollama_info else 0)
+        + (1 if aimc_info else 0)
         + len(local_server_infos)
         + (1 if has_embedded else 0)
     )
@@ -1777,6 +2044,13 @@ def cmd_quickstart(args) -> int:
             print(f"      {p['name']:12s}  ({p['env_var']}={key_preview}...)")
     else:
         print(f"  {color('⚠', Colors.YELLOW)} 云端 API Key: 未检测到")
+
+    if aimc_info:
+        groups_n = len(aimc_info.get("groups") or ())
+        groups_txt = f"，{groups_n} 个路由组" if groups_n else ""
+        print(f"  {color('✓', Colors.GREEN)} AIMC 网关: 运行中 ({aimc_info['base_url']}{groups_txt})")
+    else:
+        print(f"  {color('⚠', Colors.YELLOW)} AIMC 网关: 未检测到")
 
     if ollama_info:
         models = ollama_info.get("models", [])
@@ -1801,6 +2075,7 @@ def cmd_quickstart(args) -> int:
             print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中（暂无模型）")
     else:
         print(f"  {color('⚠', Colors.YELLOW)} Ollama 本地推理: 未运行")
+        print(f"     ℹ 无 Ollama 时的离线兜底推荐: hermes local-models install minicpm5-1b (~688MB, ModelScope)")
 
     # 显示 LM Studio / llama.cpp 检测结果
     for li in local_server_infos:
@@ -1880,7 +2155,7 @@ def cmd_quickstart(args) -> int:
     # ── Step 2: 确定主力推理方式 ──
     print(f"  ⚙ Step 2/3: 配置智能路由...")
 
-    has_cloud = bool(api_providers)
+    has_cloud = bool(api_providers) or bool(aimc_info)
     has_local = bool(ollama_info) or bool(local_server_infos)
     current_label = _get_current_provider_label()
 
@@ -1895,9 +2170,14 @@ def cmd_quickstart(args) -> int:
     primary_model = ""
     primary_local_info = None
 
-    if primary_strategy == "cloud" and api_providers:
-        primary_id = api_providers[0]["id"]
-        primary_model = api_providers[0]["default_model"]
+    if primary_strategy == "cloud":
+        if aimc_info:
+            # 优先使用 AIMC 路由组（CAND-085 一等公民）
+            primary_id = "aimc"
+            primary_model = "tier:balanced"
+        elif api_providers:
+            primary_id = api_providers[0]["id"]
+            primary_model = api_providers[0]["default_model"]
     elif ollama_info:
         primary_id = "ollama"
         primary_model = ollama_info["default_model"]
@@ -1905,6 +2185,9 @@ def cmd_quickstart(args) -> int:
         primary_local_info = local_server_infos[0]
         primary_id = primary_local_info["provider_id"]
         primary_model = primary_local_info["default_model"]
+    elif aimc_info:
+        primary_id = "aimc"
+        primary_model = "tier:balanced"
     elif api_providers:
         primary_id = api_providers[0]["id"]
         primary_model = api_providers[0]["default_model"]
@@ -1917,13 +2200,22 @@ def cmd_quickstart(args) -> int:
         return 1
 
     # ── Step 3: 构建路由链并写入 ──
+    # AIMC 作为 cloud provider 参与 fallback（主力不是 aimc 时）。
+    api_providers_for_routing = list(api_providers)
+    if aimc_info:
+        api_providers_for_routing.append(
+            {"id": "aimc", "default_model": "tier:balanced"}
+        )
+
     fallback_chain = _build_fallback_chain(
-        api_providers, ollama_info, has_embedded, primary_id,
+        api_providers_for_routing, ollama_info, has_embedded, primary_id,
         local_server_infos=local_server_infos,
     )
 
     # 写入配置
-    if primary_id == "ollama":
+    if primary_id == "aimc":
+        _configure_aimc(aimc_info)
+    elif primary_id == "ollama":
         _configure_ollama(ollama_info)
     elif primary_id == "embedded":
         _configure_embedded()
@@ -1939,8 +2231,9 @@ def cmd_quickstart(args) -> int:
     # 然后写入完整的智能路由（覆盖上面写入的 model 配置）
     _write_smart_routing(
         primary_id, primary_model, fallback_chain,
-        api_providers, ollama_info,
+        api_providers_for_routing, ollama_info,
         local_server_infos=local_server_infos,
+        aimc_info=aimc_info,
     )
 
     # v2: 写入多后端配置（local_backends）
@@ -1966,6 +2259,7 @@ def cmd_quickstart(args) -> int:
 
     # 主力
     _provider_names = {p["id"]: p["name"] for p in _PROVIDER_CHECKS}
+    _provider_names["aimc"] = "AIMC 网关（tier 路由组）"
     _provider_names["ollama"] = "Ollama（本地）"
     _provider_names["lm_studio"] = "LM Studio（本地）"
     _provider_names["llama_cpp"] = "llama.cpp（本地）"
