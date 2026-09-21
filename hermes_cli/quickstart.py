@@ -532,6 +532,20 @@ def _is_aimc_group(model: str) -> bool:
     return m.startswith("tier:") or m.startswith("scene:")
 
 
+def _resolve_aimc_default(cfg: dict) -> str:
+    """快速启动写 AIMC 主力时选用的默认组。
+
+    操作员已把 model.default 设成 AIMC 组（如 tier:strong）则原样保留
+    （重跑 quickstart 不得覆盖操作员选择），否则默认 tier:balanced。
+    """
+    m = cfg.get("model")
+    if isinstance(m, dict):
+        d = str(m.get("default") or "").strip()
+        if _is_aimc_group(d):
+            return d
+    return "tier:balanced"
+
+
 def _detect_aimc() -> Optional[dict]:
     """探测 AIMC 网关（``$AIMC_BASE_URL`` → ``providers.aimc.base_url``
     → 默认 ``http://127.0.0.1:8080``）。
@@ -1119,7 +1133,8 @@ def _configure_aimc(aimc_info: dict) -> bool:
       - ``providers.aimc.{base_url, api_key}``（api_key 引用 .env 的
         ``${AIMC_API_KEY}``，不落明文 —— 密钥只进 .env）
       - 顶层 ``aimc.enabled: true``（保留段内其他既有键）
-      - ``model.{default, provider}`` = ``tier:balanced`` / ``aimc``
+      - ``model.{default, provider}`` = ``tier:balanced``（操作员已选
+        AIMC 组如 tier:strong 时保留其选择） / ``aimc``
       - base_url 以 ``/v1`` 结尾（OpenAI 兼容端点约定）
     """
     try:
@@ -1154,12 +1169,15 @@ def _configure_aimc(aimc_info: dict) -> bool:
         model = cfg.get("model", {})
         if not isinstance(model, dict):
             model = {}
-        model["default"] = "tier:balanced"
+        model["default"] = _resolve_aimc_default(cfg)
         model["provider"] = "aimc"
         cfg["model"] = model
 
         save_config(cfg)
-        logger.info("AIMC 配置完成: base_url=%s, aimc.enabled=true", base_url)
+        logger.info(
+            "AIMC 配置完成: base_url=%s, model.default=%s, aimc.enabled=true",
+            base_url, model["default"],
+        )
         return True
     except Exception as e:
         logger.warning("配置 AIMC 失败: %s", e)
@@ -2212,9 +2230,15 @@ def cmd_quickstart(args) -> int:
 
     if primary_strategy == "cloud":
         if aimc_info:
-            # 优先使用 AIMC 路由组（CAND-085 一等公民）
+            # 优先使用 AIMC 路由组（CAND-085 一等公民）；操作员已选
+            # AIMC 组主力（如 tier:strong）则保留其选择。
             primary_id = "aimc"
-            primary_model = "tier:balanced"
+            try:
+                from hermes_cli.config import load_config as _load_cfg
+
+                primary_model = _resolve_aimc_default(_load_cfg())
+            except Exception:
+                primary_model = "tier:balanced"
         elif api_providers:
             primary_id = api_providers[0]["id"]
             primary_model = api_providers[0]["default_model"]
@@ -2227,7 +2251,12 @@ def cmd_quickstart(args) -> int:
         primary_model = primary_local_info["default_model"]
     elif aimc_info:
         primary_id = "aimc"
-        primary_model = "tier:balanced"
+        try:
+            from hermes_cli.config import load_config as _load_cfg
+
+            primary_model = _resolve_aimc_default(_load_cfg())
+        except Exception:
+            primary_model = "tier:balanced"
     elif api_providers:
         primary_id = api_providers[0]["id"]
         primary_model = api_providers[0]["default_model"]

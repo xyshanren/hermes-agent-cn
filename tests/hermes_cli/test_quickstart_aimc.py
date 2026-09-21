@@ -257,6 +257,39 @@ def test_configure_aimc_preserves_existing_keys_and_inline_url_suffix(hermes_hom
     assert cfg["aimc"] == {"enabled": True, "note": "keep"}
 
 
+def test_configure_aimc_preserves_operator_chosen_aimc_default(hermes_home):
+    """操作员已选 AIMC 组主力（tier:strong）时，重跑 quickstart 不得
+    硬编码回 tier:balanced。"""
+    from hermes_cli import quickstart
+
+    _write_config(hermes_home, {
+        "model": {"default": "tier:strong", "provider": "aimc"},
+    })
+
+    assert quickstart._configure_aimc(
+        {"available": True, "base_url": "http://127.0.0.1:8080", "groups": set()}
+    )
+
+    cfg = _read_config(hermes_home)
+    assert cfg["model"]["default"] == "tier:strong"
+    assert cfg["model"]["provider"] == "aimc"
+
+
+def test_resolve_aimc_default_preserves_group_else_tier_balanced():
+    from hermes_cli import quickstart
+
+    assert quickstart._resolve_aimc_default(
+        {"model": {"default": "tier:strong"}}
+    ) == "tier:strong"
+    assert quickstart._resolve_aimc_default(
+        {"model": {"default": "scene:code"}}
+    ) == "scene:code"
+    assert quickstart._resolve_aimc_default(
+        {"model": {"default": "qwen-0.5b"}}
+    ) == "tier:balanced"
+    assert quickstart._resolve_aimc_default({}) == "tier:balanced"
+
+
 # ---------------------------------------------------------------------------
 # A5 — _generate_routing_rules（AIMC 主力）
 # ---------------------------------------------------------------------------
