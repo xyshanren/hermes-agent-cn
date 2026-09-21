@@ -93,8 +93,18 @@ class AIMCClient:
         client = await self._get_client()
         # Iron law 1: GET only. The call signature has no method kwarg
         # that could be flipped to POST/PUT/PATCH.
+        # httpx 0.28 AsyncClient merges request paths as base-path
+        # prefixes: base "…/v1/" + relative "models" → "…/v1/models",
+        # while an absolute-path "/v1/models" would double the prefix
+        # ("…/v1/v1/models"). Request relative when the base already
+        # carries the /v1 suffix.
+        models_path = (
+            "models"
+            if self._base_url.endswith("/v1")
+            else "/v1/models"
+        )
         try:
-            response = await client.get("/v1/models")
+            response = await client.get(models_path)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
