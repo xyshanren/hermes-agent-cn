@@ -101,26 +101,26 @@ def test_detect_aimc_prefers_env_then_default_and_fetches_groups(monkeypatch, tm
         health_hits.append(url)
         return "8080" in url
 
-    def fake_urlopen(req, timeout=3):
-        class _Resp:
-            def read(self):
-                return (
-                    b'{"data": [], "data_groups": ['
-                    b'{"id": "tier:strong", "member_count": 2},'
-                    b'{"id": "tier:balanced", "member_count": 3}]}'
-                )
-
-        return _Resp()
+    def fake_fetch(url, headers=None, timeout=3.0):
+        assert headers and "Bearer" in headers.get("Authorization", "")
+        return {
+            "data": [],
+            "data_groups": [
+                {"id": "tier:strong", "member_count": 2},
+                {"id": "tier:balanced", "member_count": 3},
+            ],
+        }
 
     monkeypatch.setattr(quickstart, "_probe_gateway_url", fake_probe)
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(quickstart, "_fetch_gateway_json", fake_fetch)
 
     info = quickstart._detect_aimc()
 
     assert info is not None
-    # 先试 env（未设）→ config（空）→ 默认 127.0.0.1:8080
-    assert health_hits[0].startswith("http://127.0.0.1:8080")
-    assert info["base_url"] == "http://127.0.0.1:8080"
+    # 先试 env（未设）→ config（空）→ 默认 127.0.0.1:8080；/health 挂在
+    # origin 根上（不带 /v1）
+    assert health_hits[0] == "http://127.0.0.1:8080/health"
+    assert info["base_url"] == "http://127.0.0.1:8080/v1"  # 规范化为 OpenAI 端点
     assert info["groups"] == {"tier:strong", "tier:balanced"}
 
 
@@ -150,7 +150,50 @@ def test_detect_aimc_env_candidate_tried_before_default(monkeypatch):
     info = quickstart._detect_aimc()
 
     assert hits[0] == "http://192.168.8.9:9000/health"
-    assert info["base_url"] == "http://192.168.8.9:9000"
+    assert info["base_url"] == "http://192.168.8.9:9000/v1"
+
+
+def test_detect_aimc_env_with_v1_suffix_probed_at_origin(monkeypatch):
+    """带 /v1 后缀的候选（.env 实况形态）必须在 origin 根上探 /health，
+    否则 /v1/health 404 会把活跃网关误跳过。"""
+    from hermes_cli import quickstart
+
+    monkeypatch.setenv("AIMC_BASE_URL", "http://127.0.0.1:8080/v1")
+    monkeypatch.delenv("AIMC_API_KEY", raising=False)
+    hits: list[str] = []
+
+    def fake_probe(url, timeout=2.0):
+        hits.append(url)
+        return url.endswith("/health") and "8080" in url
+
+    monkeypatch.setattr(quickstart, "_probe_gateway_url", fake_probe)
+
+    info = quickstart._detect_aimc()
+
+    assert hits[0] == "http://127.0.0.1:8080/health"
+    assert info["base_url"] == "http://127.0.0.1:8080/v1"
+
+
+# ---------------------------------------------------------------------------
+# A3b — 网关请求守卫（协议/元数据）
+# ---------------------------------------------------------------------------
+
+def test_gateway_url_ok_rejects_non_http_and_metadata():
+    from hermes_cli.quickstart import _gateway_url_ok
+
+    assert _gateway_url_ok("http://127.0.0.1:8080/health") is True
+    assert _gateway_url_ok("https://aimc.example.internal/v1/models") is True
+    assert _gateway_url_ok("ftp://127.0.0.1/health") is False
+    assert _gateway_url_ok("file:///etc/passwd") is False
+    assert _gateway_url_ok("http://169.254.169.254/latest/meta-data") is False
+    assert _gateway_url_ok("http://metadata.google.internal/computeMetadata") is False
+
+
+def test_fetch_gateway_json_rejects_bad_scheme_and_metadata():
+    from hermes_cli.quickstart import _fetch_gateway_json
+
+    assert _fetch_gateway_json("ftp://127.0.0.1/x", {}) is None
+    assert _fetch_gateway_json("http://169.254.169.254/x", {}) is None
 
 
 # ---------------------------------------------------------------------------

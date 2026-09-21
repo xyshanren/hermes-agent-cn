@@ -456,22 +456,33 @@ def _detect_ollama() -> Optional[dict]:
     return None
 
 
-def _probe_gateway_url(url: str, timeout: float = 2.0) -> bool:
-    """GET *url* 一次，2xx 即 True。探测本地/局域网网关专用守卫：
-    仅允许 http/https，拒绝云元数据地址（169.254.169.254），禁用重定向。
+def _gateway_url_ok(url: str) -> bool:
+    """校验网关 URL 是否可发起请求：仅 http/https、拒绝云元数据地址。
+
     loopback/私网是合法目标 —— 被探测的 AIMC / Ollama 网关就部署在
-    本机或 WSL 宿主上，URL 来源是操作员自己的 config/.env（与
-    ``_detect_ollama`` 既有探测同一信任边界），不是不可信输入。
+    本机或经操作员自己的 ssh 隧道可达，URL 来源是操作员自己的
+    config/.env（与 ``_detect_ollama`` 既有探测同一信任边界），不是
+    不可信输入。
     """
     from urllib.parse import urlparse
-    from urllib.error import HTTPError
-    from urllib.request import build_opener, HTTPRedirectHandler
 
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return False
     host = (parsed.hostname or "").strip().lower()
     if not host or host in ("169.254.169.254", "metadata.google.internal"):
+        return False
+    return True
+
+
+def _probe_gateway_url(url: str, timeout: float = 2.0) -> bool:
+    """GET *url* 一次，2xx 即 True。探测本地/局域网网关专用守卫：
+    仅允许 http/https，拒绝云元数据地址（169.254.169.254），禁用重定向。
+    """
+    from urllib.error import HTTPError
+    from urllib.request import build_opener, HTTPRedirectHandler
+
+    if not _gateway_url_ok(url):
         return False
 
     class _NoRedirect(HTTPRedirectHandler):
@@ -488,6 +499,31 @@ def _probe_gateway_url(url: str, timeout: float = 2.0) -> bool:
         return False
 
 
+def _fetch_gateway_json(url: str, headers: dict, timeout: float = 3.0) -> Optional[dict]:
+    """GET *url* 并解析 JSON；守卫与 ``_probe_gateway_url`` 相同
+    （协议/元数据校验 + 禁重定向）。失败返回 None，不抛。
+    """
+    import urllib.request
+    from urllib.error import HTTPError
+    from urllib.request import build_opener, HTTPRedirectHandler
+
+    if not _gateway_url_ok(url):
+        return None
+
+    class _NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = build_opener(_NoRedirect)
+    try:
+        resp = opener.open(urllib.request.Request(url, headers=headers), timeout=timeout)
+        return json.loads(resp.read().decode())
+    except HTTPError:
+        return None
+    except Exception:
+        return None
+
+
 # ── AIMC 网关检测（CAND-085 一等公民化） ──────────────────────────────
 
 def _is_aimc_group(model: str) -> bool:
@@ -497,13 +533,16 @@ def _is_aimc_group(model: str) -> bool:
 
 
 def _detect_aimc() -> Optional[dict]:
-    """探测本机 AIMC 网关（``$AIMC_BASE_URL`` → ``providers.aimc.base_url``
+    """探测 AIMC 网关（``$AIMC_BASE_URL`` → ``providers.aimc.base_url``
     → 默认 ``http://127.0.0.1:8080``）。
 
-    AIMC 是 WSL-本机 / 局域网内的 OpenAI 兼容网关（与 Windows 侧的
-    Ollama 不同，它就在 127.0.0.1 上），所以 localhost 是合法候选而非
-    被拒目标。探测用 ``GET /health``（免鉴权）；拿到 key 时再抓一次
-    ``/v1/models`` 的 ``data_groups``，供路由规则挑选 ``tier:strong``。
+    典型部署：AIMC 跑在远程主机上，操作员用 ssh 本地转发
+    （``ssh -L 127.0.0.1:8080:…``）把它映射到本机回环 —— 所以
+    127.0.0.1 是合法候选而非被拒目标（与 ``_detect_ollama`` 同一
+    信任边界：URL 来自操作员自己的 config/.env）。探测用
+    ``GET /health``（免鉴权，挂在 origin 根上，不在 /v1 下）；
+    拿到 key 时再抓一次 ``/v1/models`` 的 ``data_groups``，供路由
+    规则挑选 ``tier:strong``。
 
     Returns: ``{"available": True, "base_url": base, "groups": set[str]}``
     （groups 可能为空 —— 此时调用方按标准 seed 组名保守处理）。
@@ -527,37 +566,38 @@ def _detect_aimc() -> Optional[dict]:
         pass
     candidates.append("http://127.0.0.1:8080")
 
-    import urllib.request
-
     seen: set[str] = set()
     for base in candidates:
+        base = base.rstrip("/")
         if base in seen:
             continue
         seen.add(base)
-        if not _probe_gateway_url(f"{base}/health"):
+        # /health 挂在 origin 根上 —— 剥掉候选可能带的 /v1 后缀再探，
+        # 否则带 /v1 的候选会被 /v1/health 404 错误跳过。
+        origin = base[:-3].rstrip("/") if base.endswith("/v1") else base
+        if not _probe_gateway_url(f"{origin}/health"):
             continue
-        info: dict = {"available": True, "base_url": base, "groups": set()}
+        info: dict = {
+            "available": True,
+            "base_url": f"{origin}/v1",  # 规范化为 OpenAI 兼容端点
+            "groups": set(),
+        }
         # 尽力抓一次组列表（失败不失败探测 —— 启动期的 fail-fast
         # refresh 才是组校验的权威，铁律 4）。
         key = os.getenv("AIMC_API_KEY", "").strip()
         if key:
-            try:
-                req = urllib.request.Request(
-                    f"{base}/v1/models",
-                    headers={"Authorization": f"Bearer {key}"},
-                )
-                payload = json.loads(
-                    urllib.request.urlopen(req, timeout=3).read().decode()
-                )
+            payload = _fetch_gateway_json(
+                f"{origin}/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            if isinstance(payload, dict):
                 info["groups"] = {
                     str(g.get("id"))
                     for g in payload.get("data_groups", [])
                     if isinstance(g, dict) and g.get("id")
                 }
-            except Exception:
-                pass
         logger.info(
-            "AIMC detected at %s (%d groups)", base, len(info["groups"])
+            "AIMC detected at %s (%d groups)", info["base_url"], len(info["groups"])
         )
         return info
     return None
