@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""NeoHorse-Jev 路由回放评测（Jev 决策层规划 Step 0/1，stdlib-only）。
+"""NeoHorse-Jev 路由回放评测（Jev 决策层规划 Step 2a，stdlib-only）。
 
-从 hermes SessionDB 导出最近的真实用户 turn，构造路由 state 打决策服务
-的 /predict（Choice 三档），输出 JSON 报告。
+从 hermes SessionDB 导出最近的真实用户 turn，按生产同款 state 构造
+（当前消息 + 上一轮用户消息摘录）打决策服务的 /predict（Choice 四档：
+light/balanced/strong/flagship），输出 JSON 报告。
 
-配套文档: docs/plans/2026-09-25-jev-decision-layer-plan.md（§5c / §6 Step 0-1）
+配套文档: docs/plans/2026-09-25-jev-decision-layer-plan.md（§6 Step 2a）
 
 用法（WSL 内，任意 python3 均可，无需 hermes 依赖）:
     python3 scripts/neohorse_replay_eval.py \
         --db /root/.hermes/state.db \
         --server http://127.0.0.1:8001 --allow-private \
-        --limit 20 --days 21 \
-        --out /root/neohorse/replay1
+        --limit 50 --days 60 \
+        --out /root/neohorse/replay2
 
 过滤规则: role=user、非斜杠命令、非注入消息、非 COMPACTION 参考块、
 长度>=15 字符；按前 50 字符去重。state 超 384 token 时自动折半重试。
@@ -31,19 +32,23 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-PREAMBLE = "你是 hermes-agent 的模型路由器。以下是用户本轮消息，判断应路由到哪个执行档位。"
+PREAMBLE = "你是 hermes-agent 的模型路由器。以下是用户本轮消息（可能附上一轮摘要作上下文），判断应路由到哪个执行档位。"
 QUESTION = {
     "tier": {
         "type": "choice",
         "instructions": "本轮用户消息应由哪个档位的模型执行？",
         "criteria": {
-            "local": "本地小模型(Ollama 2B级)：简单查询/状态询问/机械改动/格式化，最便宜且足够。",
-            "balanced": "中档模型(AIMC tier:balanced)：常规编码/调试/多步工具任务/带报错信息的排查。",
-            "strong": "旗舰模型(AIMC tier:strong)：复杂推理/方案设计/长文创作/新功能实现/疑难杂症。",
+            "light": "免费小模型(glm-4.7-flash/qwen3-8b级)：状态询问、确认类追问、单步查询、纯文本问答、机械格式化——几乎不需要多步工具编排。",
+            "balanced": "中档agent级模型(minimax-m3/deepseek-v3级)：常规编码、调试、多步工具任务、带报错信息的排查、常规运维操作(卸载/清理/检查服务)。",
+            "strong": "强模型：复杂推理、疑难排查、跨模块重构、多文件方案实施。",
+            "flagship": "最强模型：大型方案设计、长文创作、复杂新功能实现、高难度技术攻关。",
         },
     }
 }
 EXCLUDE_PREFIXES = ("<", "[CONTEXT COMPACTION")
+
+PREV_EXCERPT_CHARS = 100
+STATE_BUDGET_CHARS = 300
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -87,18 +92,24 @@ def fetch_messages(db_path: str, days: int, limit: int):
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     rows = con.execute(
         """
-        SELECT m.timestamp, s.source, m.content
+        SELECT m.timestamp, s.source, m.content,
+          (SELECT m2.content FROM messages m2
+           WHERE m2.session_id = m.session_id AND m2.role = 'user'
+             AND m2.timestamp < m.timestamp
+             AND length(m2.content) >= 15
+             AND m2.content NOT LIKE '/%'
+           ORDER BY m2.timestamp DESC LIMIT 1) AS prev_content
         FROM messages m JOIN sessions s ON m.session_id = s.id
         WHERE m.role = 'user'
           AND m.timestamp > ?
           AND length(m.content) >= 15
-        ORDER BY m.timestamp DESC LIMIT 400
+        ORDER BY m.timestamp DESC LIMIT 800
         """,
         (since,),
     ).fetchall()
     con.close()
     seen, out = set(), []
-    for ts, source, content in rows:
+    for ts, source, content, prev_content in rows:
         text = content.strip()
         if text.startswith("/") or any(text.startswith(p) for p in EXCLUDE_PREFIXES):
             continue
@@ -106,19 +117,29 @@ def fetch_messages(db_path: str, days: int, limit: int):
         if key in seen:
             continue
         seen.add(key)
-        out.append({"timestamp": ts, "source": source, "content": text})
+        prev = (prev_content or "").strip()
+        if prev.startswith("/") or any(prev.startswith(p) for p in EXCLUDE_PREFIXES):
+            prev = ""
+        out.append({"timestamp": ts, "source": source, "content": text, "prev_content": prev})
         if len(out) >= limit:
             break
     out.reverse()  # 时间正序
     return out
 
 
-def clamp_state(text: str, budget: int) -> str:
+def clamp_head(text: str, budget: int) -> str:
     text = " ".join(text.split())
     if len(text) <= budget:
         return text
-    head, tail = int(budget * 0.75), int(budget * 0.2)
-    return text[:head] + " ……[截断] " + text[-tail:]
+    return text[:budget] + "……"
+
+
+def build_state(cur_text: str, prev_text: str, budget: int = STATE_BUDGET_CHARS) -> str:
+    """生产同款 state v1：当前消息为主，多轮追问前置上一轮摘录。"""
+    state = cur_text
+    if prev_text:
+        state = f"[上一轮] {clamp_head(prev_text, PREV_EXCERPT_CHARS)}\n[本轮] {state}"
+    return clamp_head(state, budget)
 
 
 def predict(server: str, state: str):
@@ -139,9 +160,9 @@ def main():
     ap.add_argument("--server", default="http://127.0.0.1:8001")
     ap.add_argument("--allow-private", action="store_true",
                     help="显式放行环回/私网目标（决策服务在本机/内网的预期场景）")
-    ap.add_argument("--limit", type=int, default=20)
-    ap.add_argument("--days", type=int, default=21)
-    ap.add_argument("--max-state-chars", type=int, default=300,
+    ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--days", type=int, default=60)
+    ap.add_argument("--max-state-chars", type=int, default=STATE_BUDGET_CHARS,
                     help="state 字符预算（384 token 上限的保守近似）")
     ap.add_argument("--out", default="/root/neohorse/replay")
     args = ap.parse_args()
@@ -153,11 +174,11 @@ def main():
 
     records = []
     for i, m in enumerate(msgs):
-        state = clamp_state(m["content"], args.max_state_chars)
+        state = build_state(m["content"], m.get("prev_content", ""), args.max_state_chars)
         try:
             result, ms = predict(server, state)
         except Exception as exc:  # 超长等运行时错误 → 折半重试一次
-            state = clamp_state(m["content"], args.max_state_chars // 2)
+            state = build_state(m["content"], "", args.max_state_chars // 2)
             try:
                 result, ms = predict(server, state)
             except Exception as exc2:
@@ -170,6 +191,7 @@ def main():
             "time": time.strftime("%m-%d %H:%M", time.localtime(m["timestamp"])),
             "source": m["source"],
             "content": m["content"],
+            "prev_content": m.get("prev_content", ""),
             "state_chars": len(state),
             "input_tokens": result.get("input_tokens"),
             "jev_tier": ans["choice"],
