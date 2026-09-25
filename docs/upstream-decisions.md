@@ -318,7 +318,7 @@ scout 标记 C3=2。**问题**：T3 本身就在 CN 仓库里（保留但不维�
 
 **架构边界 (已拍板)**: 独立 System-1 决策服务 + 多消费者, SmartRouter 只是 consumer #1; 决策逻辑在 hermes 侧, hermes 拿选定模型调 AIMC; AIMC 保持透明 (多客户端 zcode/dsh/RAG/db-center, 语义改写 = breaking change). 红线: per-turn 工具 schema 过滤不做 (cache 神圣性), 主模型绕行 deferred.
 
-**部署**: 决策服务落独立 Linux 环境 (随包 GGUF runtime, pin llama.cpp `9425611`@2026-09-23, Q4_K_M); Windows 环境/Ollama 跑不了 (构建 Linux-only + prefill-only 概率接口不在 Ollama API 面; 未来需要本地冗余走 WSL 同一套 Linux 构建, 不做原生 Windows 移植); hermes 留 WSL, fail-open 回规则层. Linux 环境与开发环境网络隔离, **交付介质 = 本仓库**: Linux 侧 `git pull` 后按规划文档 §5b runbook 执行, 参考服务脚本 `scripts/neohorse_decision_server.py`.
+**部署**: 决策服务落**本机 WSL**（与 hermes 同机 localhost 直连; CUDA 经 Windows 驱动旁路直通, toolkit 装 WSL 内; 隔离内网 Linux 机方案搁置为备选）。随包 GGUF runtime, pin llama.cpp `9425611`@2026-09-23, Q4_K_M。Windows 原生/Ollama 跑不了 (构建 Linux-only + prefill-only 概率接口不在 Ollama API 面; 需要本地冗余走 WSL 同一套 Linux 构建, 不做原生 Windows 移植); hermes fail-open 回规则层. **✅ 2026-09-25 WSL 全链路验证通过**: 构建/冒烟/服务化全绿, 热态延迟 mean 91ms / p95 116ms, Choice 决策正确 (HTTP 端到端 113ms), 详见规划文档 §5c.
 
 **详细规划**: `docs/plans/2026-09-25-jev-decision-layer-plan.md` (Step 0 回放集 → Step 1 Linux 环境部署+概率验证 → Step 2 影子模式 → Step 3 生效+规则降级 guardrail; 每步带门检).
 

@@ -43,12 +43,14 @@ Jev 适用三条件（高频 / 选项有限 / 错了能兜住）逐条满足：�
 ## 4. 部署拓扑
 
 ```
-Linux 环境 ── 决策服务         NeoHorse-Jev-4B Q4_K_M + 随包 GGUF runtime + 薄 HTTP 包装（单实例加锁）
 WSL ───────── hermes           SmartRouter 每轮调决策服务（fail-open 回规则层）
+            ├─ 决策服务(:8001)  NeoHorse-Jev-4B Q4_K_M + 随包 GGUF runtime + 薄 HTTP 包装（单实例加锁）——与 hermes 同机，localhost 直连
             └─ 拿选定模型调 AIMC
 Windows ───── Ollama(:11434)   补全模型（minicpm5 等），现状不动；不跑决策服务（见下）
 aliy-hy ───── AIMC(隧道:8080)  云端模型透明网关，多客户端，不动
 ```
+
+**部署环境定案（2026-09-25 更新）**：决策服务落**本机 WSL**（与 hermes 同机，CUDA 经 Windows 驱动旁路直通：`/dev/dxg` + `/usr/lib/wsl/lib/libcuda.so`；驱动留 Windows 侧，toolkit 装 WSL 内）。原隔离内网 Linux 机方案搁置（取件/回传循环成本高），保留为备选。
 
 **为什么 Windows 环境不跑决策服务**：`build.py` 是纯 Linux 构建流程（g++/`.so`/nvcc 路径硬编码），原生 Windows 需要整套移植，不值得——决策服务集中一个端点，Windows 侧 fail-open 已覆盖 Linux 环境宕机场景。**零改动路径 = Linux 环境。** 若未来真需要本地冗余，正确的跨平台姿势是**在 WSL 内跑同一套 Linux 构建**（CUDA 直通或纯 CPU），而不是做原生 Windows 移植。
 
@@ -71,7 +73,7 @@ aliy-hy ───── AIMC(隧道:8080)  云端模型透明网关，多客户�
 - **别用 vanilla llama-cli/llama-server 冒烟**：未打补丁的 loader 会在统一 GGUF 的重复 tensor 名上 abort；`E:\llama.cpp`（b9437 Windows 版）runtime 用不上。
 - 依赖：`requirements.txt` = torch 2.8.0（选 cu128/cu130 wheel）/ transformers 5.17 / numpy / pydantic / Pillow。
 
-### 5b. Linux 环境验证 runbook（网络隔离，交付介质 = 本仓库）
+### 5b. Linux 环境验证 runbook（✅ 已于本机 WSL 完成全链路验证，见 §5c；隔离内网 Linux 机路径保留为备选）
 
 Linux 机器在隔离内网，开发侧无法直连。执行方式：提交本仓库至 origin/cn → Linux 侧 `git pull` → 按以下步骤执行 → 结果（一致率 / 延迟 / 概率分布样本）回传开发会话。
 
@@ -112,6 +114,21 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 ```
 
 **跨平台结论**：验证效果好也**不做原生 Windows 版**。理由：① 决策服务按架构就是集中单端点多消费者，Windows 侧再造一个是重复部署；② fail-open 已覆盖可用性；③ 原生移植（编译器/库格式/flags 全套重写 + 长期维护分叉）成本与收益不成比例。真需要本地冗余时走 **WSL 内同一套 Linux 构建**（零移植成本），该结论随本规划归档，重估条件见 §10。
+
+### 5c. WSL 全链路验证结果（2026-09-25 实测）
+
+| 项 | 结果 |
+|---|---|
+| 构建 | ✅ `build.py` 一次通过（patch + mtmd + `libnh_hidden.so`/`libnh_vision.so`），CUDA toolkit 12.8 + sm_120（Windows 驱动旁路直通） |
+| 权重 | Q4_K_M 3.2G；CUDA 计算缓冲 ~1988 MiB，4060 8GB 容纳无压力 |
+| example.py 冒烟 | ✅ refund 判例 → `probabilities {false: 0.996, true: 0.004}`，正确且置信度分离清晰 |
+| 热态决策延迟（10 发） | **mean 91.0ms / p95 115.9ms** —— Step 1 门检（<500ms）大幅通过 |
+| 服务化 | ✅ `scripts/neohorse_decision_server.py`：`/health` 200；POST `/predict`（Choice 型）端到端 **113ms** |
+| Choice 决策正确性 | 路由形态冒烟题（"修一行 typo"三档候选）→ `local`（0.927 / confidence 0.890），判断正确 |
+
+环境备注：WSL 侧 Python 依赖经清华镜像安装（PyPI 直连会断流卡死）；模型权重可经 `/mnt/e` 直读（首次加载 ~16s，热态推理不受影响）；`wsl.exe -e` 会话退出会带走普通后台子进程，常驻服务需 `setsid nohup ... & disown`。
+
+**下一步（Step 0/1 续）**：从 WSL 侧 session store 导 20 条历史 turn（state + 当时启发式决策 + tier 真值）打 `/predict`，验证真实分布下的一致率与置信度可用性 → 进影子模式。
 
 ## 6. 分步计划（每步带准入门检，建议值可调）
 
