@@ -1385,24 +1385,33 @@ def _apply_model_routing(agent, api_messages: list) -> None:
     if getattr(agent, "_fallback_activated", False):
         return
 
-    # ── Extract user message and image flag ──
+    # ── Extract user message (current + previous turn) and image flag ──
     user_text = ""
+    prev_user_text = ""
     has_image = False
     for msg in reversed(api_messages):
         if not isinstance(msg, dict) or msg.get("role") != "user":
             continue
         content = msg.get("content", "")
+        text = ""
+        image = False
         if isinstance(content, list):
             text_parts = []
             for part in content:
                 if isinstance(part, dict) and "image_url" in part:
-                    has_image = True
+                    image = True
                 elif isinstance(part, dict) and part.get("type") == "text":
                     text_parts.append(part.get("text", ""))
-            user_text = " ".join(text_parts)
+            text = " ".join(text_parts)
         else:
-            user_text = content
-        break
+            text = content
+        if not user_text:
+            user_text = text
+            has_image = image
+            continue
+        if not prev_user_text:
+            prev_user_text = text
+            break
 
     # ── Delegate to SmartRouter route_with_rules() ──
     try:
@@ -1449,6 +1458,13 @@ def _apply_model_routing(agent, api_messages: list) -> None:
         if not result:
             return
 
+        # ── Jev 决策通道（model_routing.decision, consumer #1）──
+        # 在 rules 基线（默认规则 → tier:strong）之上覆写档位；失败静默回落。
+        try:
+            _apply_jev_lane(route_config, result, user_text, prev_user_text, has_image)
+        except Exception:
+            logger.debug("jev_routing: lane failed", exc_info=True)
+
         new_provider = result.provider
         new_model = result.model
         current_provider = getattr(agent, "provider", "auto") or "auto"
@@ -1488,6 +1504,49 @@ def _apply_model_routing(agent, api_messages: list) -> None:
     except Exception as ex:
         # Routing unavailable: keep existing model
         logger.debug("model_routing: SmartRouter skipped: %s", ex)
+
+
+def _apply_jev_lane(route_config, result, user_text: str,
+                    prev_user_text: str, has_image: bool) -> None:
+    """CN model_routing.decision: Jev 决策通道（consumer #1）。
+
+    mode=shadow 只记日志不生效；mode=live 时 conf >= threshold 采纳 Jev 档位
+    （仅覆写 result.model，复用既有 provider/切换机制），否则维持基线
+    （rules 默认规则）。服务不可达/超时/低置信一律静默回落——fail-open，
+    绝不阻塞请求。vision 轮次跳过（vision 组不在通用阶梯内）。
+
+    每轮 INFO 落盘（含 shadow），供观察期统计阈值曲线与降/升档质量。
+    """
+    decision_cfg = route_config.get("decision") if isinstance(route_config, dict) else None
+    if not isinstance(decision_cfg, dict):
+        return
+    mode = str(decision_cfg.get("mode", "off")).lower()
+    if mode not in ("shadow", "live"):
+        return
+    if has_image:
+        logger.info("jev_routing: mode=%s skip=has_image (vision groups not in ladder)", mode)
+        return
+
+    from agent.jev_router import decide
+
+    outcome = decide(decision_cfg, user_text, prev_user_text)
+    if outcome is None:
+        logger.info("jev_routing: mode=%s outcome=none (unreachable/cooldown/invalid)", mode)
+        return
+
+    tier = outcome["tier"]
+    conf = outcome["confidence"]
+    threshold = float(decision_cfg.get("threshold", 0.6))
+    baseline = result.model
+    applied = False
+    if mode == "live" and conf >= threshold and f"tier:{tier}" != baseline:
+        result.model = f"tier:{tier}"
+        result.reason = f"Jev 决策 conf={conf:.2f}"
+        applied = True
+    logger.info(
+        "jev_routing: mode=%s tier=%s conf=%.3f lat=%.0fms applied=%s baseline=%s",
+        mode, tier, conf, outcome.get("latency_ms", 0.0), applied, baseline,
+    )
 
 
 def build_api_kwargs(agent, api_messages: list, tools_for_api: list | None = None) -> dict:
