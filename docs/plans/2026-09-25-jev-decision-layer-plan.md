@@ -164,7 +164,12 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 **Step 2 —— 接入实现：影子日志 + 双向四档 live 通道（config 门控）**
 > 2026-09-26 操作员拍板更新：**不做恒 strong**——AIMC 提供 flagship/strong/vision/vision-light/balanced/light 组，通用路由升档可至 flagship，config 开关打开。
 
-**路由阶梯（四档，全 AIMC）**：`light / balanced / strong / flagship`；vision 系列组（tier:vision / tier:vision-light）是任务型组，**不参与**通用轮次路由（vision 归 auxiliary.vision 管）。最低档为 tier:light（Ollama 2B 不在阶梯内，见 Step 2c）。
+**路由阶梯（四档，全 AIMC，组内成员 2026-09-26 操作员确认）**：`light / balanced / strong / flagship`：
+- **tier:light**（免费小模型）：glm-4.7-flash / qwen3-8b / qwen3.5-4b——定位最低，只接几乎无需多步工具编排的轮次；
+- **tier:balanced**（中档 agent 级，可胜任一般 agent 任务）：minimax-m3 / sensenova-6.8-flash-lite / deepseek-v3；
+- **tier:strong / tier:flagship**：档内成员 AIMC 内部定义，criteria 按"高于 balanced 的推理/创作强度"相对定义；
+- vision 系列组（tier:vision / tier:vision-light）任务型组，**不参与**通用轮次路由（vision 归 auxiliary.vision 管）。最低档 tier:light（Ollama 2B 不在阶梯内）。
+- 成本注记：**tier:light 免费**——降到 light 的轮次成本为 0；升档 flagship 的增量成本由 session_model_usage 实测。
 
 **双向语义**：
 - conf ≥ threshold（初始 0.6）→ 采纳 Jev 档位，**升/降均可**；
@@ -188,7 +193,12 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 **观测**：每轮记录 ts/session/state 摘要/jev 档位+conf+分布/实际档位/consumer；成本对照用现成 `session_model_usage` 表（tier→实际 billing），灰度期即可出真实成本差（升档花的钱、降档省的钱都是实测数）。
 
 **Step 2a —— 四档阶梯重放校准（实现前先跑，纯离线）**
-- 阶梯 3 档→4 档，Choice criteria 重写（tier:light 与 tier:balanced 的 AIMC 组内模型边界，实现时向 AIMC 配置确认后写准）；
+- 阶梯 3 档→4 档，Choice criteria 重写（组边界已确认，2026-09-26）：
+  - `light`：状态询问/确认类追问（"完成了吗"）/单步查询/纯文本问答/机械格式化——几乎不需要多步工具编排；
+  - `balanced`：常规编码/调试/多步工具任务/带报错信息的排查/常规运维操作（卸载/清理/检查服务）；
+  - `strong`：复杂推理/疑难排查/跨模块重构；
+  - `flagship`：大型方案设计/长文创作/复杂新功能实现；
+- **light 通道质量风险**：成员均为小模型，工具编排能力弱——观察期"降档轮次续问率"单独拆 light 轮次统计；若 light 是重灾区，config 预留 per-tier 最低 conf 或禁用 light 通道的开关（实现时带上，默认不启用）；
 - 样本扩至 ~50 条（days=60）；重点看：四档混淆矩阵、**升档建议的频率与 conf 分布**（全新信号，18 条样本中不存在）、阈值曲线；
 - 已校准真值（2026-09-26）滚动进回放集。
 
@@ -224,7 +234,6 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 ## 9. 信息缺口
 
 - 基元律动 0.95M 路由器权重是否开放（官方核实中）——不影响架构与拓扑。
-- tier:light 与 tier:balanced 的 AIMC 组内模型边界（Step 2a 写 criteria 前向 AIMC 配置确认）。
 - 升档（strong→flagship）的真实频率与成本增量——18 条回放中不存在该信号，Step 2a 扩样后首测。
 - state ≤384 tokens 的压缩策略具体设计（Step 0 时一并做）。
 - NeoHorse-Jev 置信度语义需自测校准（官方未公开计算方式）。
