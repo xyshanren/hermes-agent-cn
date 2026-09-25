@@ -26,10 +26,27 @@ import io
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _lock = threading.Lock()
 _model = None
+_model_label = None
+
+
+def _keepalive_loop(model, interval_s: float) -> None:
+    """空闲降频对策：小消费级 GPU（如笔记本 4060）在请求间隔数十秒后会
+    掉到低功耗 P 态，下一次真实路由要付几百 ms 的拉频延迟。此线程定期跑
+    一次微型决策把时钟摁在高位。模型自身锁是非阻塞的（并发报 Model busy），
+    与真实请求重叠时本轮直接跳过。"""
+    req = {"state": "ok", "questions": {"k": {"type": "noul",
+            "instructions": "Is this ok?"}}}
+    while True:
+        time.sleep(interval_s)
+        try:
+            model.predict(req)
+        except Exception:
+            pass  # busy / transient — 下一轮再说
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -55,8 +72,13 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 result = _model.predict(request, image)
             self._send(200, result)
+        except BrokenPipeError:
+            pass  # 客户端超时先走（如 hermes timeout_ms）——结果作废，别再写
         except Exception as exc:  # noqa: BLE001 — 单请求异常不应杀死服务
-            self._send(500, {"error": repr(exc)})
+            try:
+                self._send(500, {"error": repr(exc)})
+            except OSError:
+                pass
 
     def _send(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -78,6 +100,9 @@ def main():
                     help="NeoHorse 仓库 runtime/ 目录（含 runtime.py 与 libnh_*.so）")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8001)
+    ap.add_argument("--keepalive-interval", type=float, default=60.0,
+                    help="空闲时钟保持间隔秒数（0=关闭）；对空闲降频的消费级 GPU "
+                         "可显著降低间歇性慢调用")
     args = ap.parse_args()
 
     sys.path.insert(0, args.runtime_dir)
@@ -85,6 +110,9 @@ def main():
 
     _model = NeoHorseGGUF(args.model)
     _model_label = args.model
+    if args.keepalive_interval > 0:
+        threading.Thread(target=_keepalive_loop, args=(_model, args.keepalive_interval),
+                         daemon=True).start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[decision-server] listening on {args.host}:{args.port}, model={args.model}",
           flush=True)
