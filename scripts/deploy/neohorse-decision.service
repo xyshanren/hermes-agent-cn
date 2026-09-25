@@ -1,0 +1,11 @@
+[Unit]
+Description=NeoHorse-Jev-4B decision server (hermes model_routing.decision)
+After=default.target
+
+[Service]
+ExecStart=/root/neohorse/.venv/bin/python /root/hermes-agent-cn/scripts/neohorse_decision_server.py --model /root/neohorse/models/NeoHorse-Jev-4B-Q4_K_M.gguf --runtime-dir /root/neohorse/runtime --port 8001
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -161,7 +161,8 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 
 **判定：Step 1 门检通过**（fail-open + 阈值放行设计下零质量风险，放行集 86% 降档 = 真实省钱空间；对照 AppWorld 第三方实测 -52% 成本的方向一致）。**准入 Step 2**。
 
-**Step 2 —— 接入实现：影子日志 + 双向四档 live 通道（config 门控）**
+**Step 2 —— 接入实现：影子日志 + 双向四档 live 通道（config 门控）** —— ✅ 已实施（2026-09-26，commit `6c675ee2eb`）
+> 实施记录：`agent/jev_router.py`（决策客户端：state v1 / SSRF 边界校验+allow_private / 连续 5 失败冷却 5min 熔断 / 阶梯外档位拒绝）+ `chat_completion_helpers._apply_jev_lane`（rules 基线之上覆写档位）。部署侧 config 已开启 live（备份 `config.yaml.bak-20260926-jev-live`）。端到端驱动验证：低置信轮守基线 ✓；高置信运维轮 applied→balanced（conf 0.922）✓；多轮追问 applied（conf 0.698）✓。tests/agent/test_jev_router.py 21 例，52 passed 零回归。
 > 2026-09-26 操作员拍板更新：**不做恒 strong**——AIMC 提供 flagship/strong/vision/vision-light/balanced/light 组，通用路由升档可至 flagship，config 开关打开。
 
 **路由阶梯（四档，全 AIMC，组内成员 2026-09-26 操作员确认）**：`light / balanced / strong / flagship`：
@@ -217,13 +218,16 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 
 **判定：Step 2a 通过**。阈值 0.6 确认；升档通道零成本风险确认；state v1 进生产。准入 Step 2 实现。
 
-**Step 2c —— 决策服务运维定案**
+**Step 2c —— 决策服务运维定案** —— ✅ 已实施（2026-09-26）
+- GGUF 已迁 `/root/neohorse/models/`（ext4）；systemd user service `neohorse-decision.service` 随 WSL 启动、`Restart=on-failure`（unit 参考件 `scripts/deploy/neohorse-decision.service`）；/health 200。
+- Ollama 暂关由操作员执行；gateway 已重启加载新代码（03:34，1 platform 正常）。
 - GGUF 迁 WSL ext4（`~/neohorse/models/`）——消除 DrvFS/E 盘挂载依赖，加载 16s → 预期 3-6s；
 - systemd user service（WSL 实测 systemd 可用）：随 WSL 启动、`Restart=on-failure` 常驻；
 - 显存：Jev 常驻实测总占用 ~6.2/8.2GB；Ollama 暂关后无 GPU 争用，余量 ~2GB；minicpm5:2b 保留为 AIMC 故障兜底配置（不常驻），观察期后如需省显存再议 idle-exit。
 
-**Step 3 —— 观察期与规则层收缩（≥2 周真实流量）**
-- 观察指标：降档轮次任务完成质量（主观 + 会话续问率）、升档轮次成本增量、阈值曲线（0.5/0.6 放行率 vs 错误率）、延迟尾部（长 state 526-607ms 是否复现）；
+**Step 3 —— 观察期与规则层收缩（≥2 周真实流量）** —— 🕐 观察期开始 2026-09-26（gateway live + 新代码）
+- 数据落点：`grep "jev_routing" ~/.hermes/logs/agent.log`（每轮 tier/conf/lat/applied/baseline）；成本对照 `session_model_usage` 表。
+- 观察指标：降档轮次任务完成质量（主观 + 会话续问率，light 轮次单列）、升档轮次成本增量、阈值曲线（0.5/0.6 放行率 vs 错误率）、延迟尾部与空闲暖机尖峰频率。
 - 稳定后规则层正式收缩为 guardrail：任务类型关键词并入 state 构造，RoutingRule 表保留为 fail-open 兜底与操作员显式规则的承载；
 - trace 积累（jev 建议 vs 实际档位 vs 结果）即未来自研小路由器（0.95M 级）的训练种子。
 
