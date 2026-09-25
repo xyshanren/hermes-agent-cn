@@ -302,3 +302,24 @@ scout 标记 C3=2。**问题**：T3 本身就在 CN 仓库里（保留但不维�
 > - 2026-08 末 (v0.20.0+cn.5 → v0.21.0) — 重新跑 scout, 跟 v0.16 数据对比
 > - 触发条件: upstream new commits > 1000 OR upstream new tag (2026-10-01 cron `hermes-cn-quarterly-borrow-audit` 自动 fire)
 > - 模板: 复用本文件 §1-§10 结构, 增量更新"历史快照"section
+
+---
+
+## 2026-09-25 Jev 类决策模型评估 (NeoHorse-Jev-4B) — defer
+
+**背景**: "System One" 决策模型范式 (TypeSafe Jev 引爆, 一周内出现开源复现) 与本分支原设想的"智能路由模型 (需微调)"不谋而合. 评估 4 选 1 结论:
+
+| 对象 | 决策 | 一句话理由 |
+|---|---|---|
+| TypeSafe Jev API | **reject** | 路由状态=用户消息原文出第三方 API (数据驻留未公开, CN 生死线) + 远程 820ms/轮不可接受 |
+| NeoHorse-Jev-4B (官方 GGUF, Apache-2.0) | **defer → 规划完成** | 主候选; 决策训练开箱即用, 微调降级为可选优化; 回放数据说话后才动手 |
+| 基元律动 0.95M 路由器 | **watch** | MS 无权重, 官方核实中; 不影响架构 |
+| SemIf / open-jev | 参照 | 证明范式一周可复现, 不抢跑 |
+
+**架构边界 (已拍板)**: 独立 System-1 决策服务 + 多消费者, SmartRouter 只是 consumer #1; 决策逻辑在 hermes 侧, hermes 拿选定模型调 AIMC; AIMC 保持透明 (多客户端 zcode/dsh/RAG/db-center, 语义改写 = breaking change). 红线: per-turn 工具 schema 过滤不做 (cache 神圣性), 主模型绕行 deferred.
+
+**部署**: 决策服务落独立 Linux 环境 (随包 GGUF runtime, pin llama.cpp `9425611`@2026-09-23, Q4_K_M); Windows 环境/Ollama 跑不了 (构建 Linux-only + prefill-only 概率接口不在 Ollama API 面; 未来需要本地冗余走 WSL 同一套 Linux 构建, 不做原生 Windows 移植); hermes 留 WSL, fail-open 回规则层. Linux 环境与开发环境网络隔离, **交付介质 = 本仓库**: Linux 侧 `git pull` 后按规划文档 §5b runbook 执行, 参考服务脚本 `scripts/neohorse_decision_server.py`.
+
+**详细规划**: `docs/plans/2026-09-25-jev-decision-layer-plan.md` (Step 0 回放集 → Step 1 Linux 环境部署+概率验证 → Step 2 影子模式 → Step 3 生效+规则降级 guardrail; 每步带门检).
+
+**Revisit 条件**: NeoHorse 大版本变更 / 0.95M 权重开源 / 影子期数据异常; 方向退出条件见规划文档 §10.
