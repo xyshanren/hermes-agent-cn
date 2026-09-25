@@ -226,8 +226,10 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 - 显存：Jev 常驻实测总占用 ~6.2/8.2GB；Ollama 暂关后无 GPU 争用，余量 ~2GB；minicpm5:2b 保留为 AIMC 故障兜底配置（不常驻），观察期后如需省显存再议 idle-exit。
 
 **Step 3 —— 观察期与规则层收缩（≥2 周真实流量）** —— 🕐 观察期开始 2026-09-26（gateway live + 新代码）
-- 数据落点：`grep "jev_routing" ~/.hermes/logs/agent.log`（每轮 tier/conf/lat/applied/baseline）；成本对照 `session_model_usage` 表。
-- 观察指标：降档轮次任务完成质量（主观 + 会话续问率，light 轮次单列）、升档轮次成本增量、阈值曲线（0.5/0.6 放行率 vs 错误率）、延迟尾部与空闲暖机尖峰频率。
+- 数据落点：`grep -a "jev_routing" ~/.hermes/logs/agent.log`（每轮 tier/conf/lat/applied/baseline；注意 agent.log 含二进制字节，grep 需 `-a`）；成本对照 `session_model_usage` 表。
+- **上线首日修复（2026-09-26，commit `ba96454d0c`）**：消费级 GPU（4060 Laptop）空闲数十秒掉低功耗 P 态 → 隔离路由调用付 491ms~1.3s 拉频延迟 → timeout 500ms 间歇性 fail-open。修复：决策服务加 `--keepalive-interval 60s`（微型决策保持时钟，与真实请求重叠自动跳过）+ hermes 侧 `timeout_ms: 1500`；验证空闲 75s 后调用 394ms（余量 ~4 倍）。
+- **首日行为基线（重要预期管理）**：闲聊/自我介绍类轮次 Jev 置信度低（如 0.154）→ 按设计守 strong——这类轮次不会离开 strong 是当前校准下的正常现象；路由生效集中在运维/编码/多步轮次（回放实测 conf 0.62-0.95）。阈值调优等观察期数据（考虑 per-tier 阈值让 light 通道可发射）。
+- 观察指标：降档轮次任务完成质量（主观 + 会话续问率，light 轮次单列）、升档轮次成本增量、阈值曲线（0.5/0.6 放行率 vs 错误率）、延迟尾部与暖机尖峰频率（修复后应显著减少）。
 - 稳定后规则层正式收缩为 guardrail：任务类型关键词并入 state 构造，RoutingRule 表保留为 fail-open 兜底与操作员显式规则的承载；
 - trace 积累（jev 建议 vs 实际档位 vs 结果）即未来自研小路由器（0.95M 级）的训练种子。
 
