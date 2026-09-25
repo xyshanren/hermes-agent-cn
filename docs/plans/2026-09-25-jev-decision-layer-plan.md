@@ -46,8 +46,10 @@ Jev 适用三条件（高频 / 选项有限 / 错了能兜住）逐条满足：�
 WSL ───────── hermes           SmartRouter 每轮调决策服务（fail-open 回规则层）
             ├─ 决策服务(:8001)  NeoHorse-Jev-4B Q4_K_M + 随包 GGUF runtime + 薄 HTTP 包装（单实例加锁）——与 hermes 同机，localhost 直连
             └─ 拿选定模型调 AIMC
-Windows ───── Ollama(:11434)   补全模型（minicpm5 等），现状不动；不跑决策服务（见下）
-aliy-hy ───── AIMC(隧道:8080)  云端模型透明网关，多客户端，不动
+Windows ───── Ollama(:11434)   暂关（2026-09-26）：minicpm5:2b 仅保留为 AIMC 故障兜底配置，
+                              不常驻——为决策服务让显存；通用路由最低档=tier:light（AIMC）
+aliy-hy ───── AIMC(隧道:8080)  云端模型透明网关，多客户端，不动；
+                              通用路由阶梯 light/balanced/strong/flagship 全在此解析
 ```
 
 **部署环境定案（2026-09-25 更新）**：决策服务落**本机 WSL**（与 hermes 同机，CUDA 经 Windows 驱动旁路直通：`/dev/dxg` + `/usr/lib/wsl/lib/libcuda.so`；驱动留 Windows 侧，toolkit 装 WSL 内）。原隔离内网 Linux 机方案搁置（取件/回传循环成本高），保留为备选。
@@ -155,16 +157,50 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 | 延迟 | 中位 ~150ms；长 state 尾部 526-607ms（p95 边缘超 500ms 门检，主因首跑/长文本） |
 | WYSIATI 活案例 | 1205 字符创作任务截断至 300 字符 → 误判 balanced（conf 0.225 被阈值兜住）——state 压缩需保任务类型信号，且即便压坏阈值兜底仍有效 |
 
-**判定：Step 1 门检通过**（fail-open + 阈值放行设计下零质量风险，放行集 86% 降档 = 真实省钱空间；对照 AppWorld 第三方实测 -52% 成本的方向一致）。**准入 Step 2 影子模式**：`chat_completion_helpers` 并行记录不生效，跑 ≥2 周真实流量，重点观察阈值曲线（0.4/0.5/0.6）与降档轮次的下游任务完成质量。
+**操作员真值校准（2026-09-26）**：6 条分歧中操作员判定 05/10/15 归 Jev 正确——三条均为运维语义（重建清理/确认卸载/删除），Jev 从措辞读出"真实操作"优于单条消息文本判读，且都是**低置信度答对**：低置信区同时含正确与错误答案，阈值拒绝是保守的（牺牲部分降档机会、不牺牲质量）。校准后：严格准确率 **13/18（72%）**；错误仍仅 3 条（06 conf 0.43 / 07 conf 0.08 / 11 conf 0.23），全部 conf<0.5；conf≥0.5 依旧 7/7；guardrail 结论不变。
 
-**Step 2 —— 影子模式**
-- 接入 `chat_completion_helpers`：决策服务与现役规则并行跑，只记日志不生效。
-- **门检（→Step 3）**：影子期（建议 ≥2 周）tier 一致率 ≥ 现有启发式基线，过度路由（选高档做低档任务）比例可控。
+**判定：Step 1 门检通过**（fail-open + 阈值放行设计下零质量风险，放行集 86% 降档 = 真实省钱空间；对照 AppWorld 第三方实测 -52% 成本的方向一致）。**准入 Step 2**。
 
-**Step 3 —— 生效 + 规则降级 guardrail**
-- 决策服务给建议；规则层保留否决权（置信度 < 阈值回落启发式）；HealthTracker/成本表不动。
-- **fail-open**：决策端点不可达 → 静默回现有规则，不阻塞启动、不阻塞请求（与 AIMC 的 fail-fast 拒启语义相反，门检别套 AIMC 模板）。
-- 落位：`smart_model_routing` 配置内实现替换（Footprint Ladder 第 1 档，零新 schema）；`decision_backend` 条目 + BackendHub 候选池排除决策模型。
+**Step 2 —— 接入实现：影子日志 + 双向四档 live 通道（config 门控）**
+> 2026-09-26 操作员拍板更新：**不做恒 strong**——AIMC 提供 flagship/strong/vision/vision-light/balanced/light 组，通用路由升档可至 flagship，config 开关打开。
+
+**路由阶梯（四档，全 AIMC）**：`light / balanced / strong / flagship`；vision 系列组（tier:vision / tier:vision-light）是任务型组，**不参与**通用轮次路由（vision 归 auxiliary.vision 管）。最低档为 tier:light（Ollama 2B 不在阶梯内，见 Step 2c）。
+
+**双向语义**：
+- conf ≥ threshold（初始 0.6）→ 采纳 Jev 档位，**升/降均可**；
+- conf < threshold、超时、服务不可达 → 回落 config 默认档 tier:strong（fail-open，静默，不阻塞）；
+- 风险不对称性：升档错误=纯成本（漏升=维持 strong 现状无回归，误升=多花钱），降档错误=质量——单一阈值起步，影子数据足够后再考虑分方向阈值；
+- **操作员显式选择优先**：会话级显式指定模型/档位时 Jev 不介入（延续 13dd0f66c3 保留操作员选择的精神）。
+
+**范围（v1 只做模型路由，其他环节不接）**：
+- 只接主会话循环的路由决策点（`chat_completion_helpers` route 处——替换 rules 的档位输出，复用现有模型切换机制）；
+- auxiliary（标题/curator/vision 的 per-task 覆盖）、delegation 子代理、cron 会话：v1 不接；
+- 其他消费者（web 筛查 #2、Noul 门槛 #3）按 §7 路线图后续单独立项——每个消费者自带回放+阈值+兜底政策；决策服务本身已多消费者就绪（共享端点），接入成本递减；
+- 日志带 consumer 字段，从第一天为未来消费者复用留口。
+
+**config 设计**（落 `smart_model_routing.decision`；DEFAULT_CONFIG 默认 `mode: off`，操作员部署配置设 `live`）：
+- `mode: off | shadow | live`（shadow=只记不生效；live=conf≥threshold 采纳+回落 strong）
+- `endpoint` / `threshold: 0.6` / `timeout_ms: 500`
+- 熔断：连续 5 次失败 → 冷却 5 分钟内跳过调用（服务宕机时不每轮白付超时）。
+
+**state 构造 v1**：当前用户消息为主（300 字符预算，超长保头截尾）；多轮追问（"再说准确点"类）前置上一条用户消息摘录；任务类型信号（创作/方案/实现/升级评估等关键词）必须存活——规则层这部分并入 state 构造而非删除（06/07/11 三条错误的教训）。
+
+**观测**：每轮记录 ts/session/state 摘要/jev 档位+conf+分布/实际档位/consumer；成本对照用现成 `session_model_usage` 表（tier→实际 billing），灰度期即可出真实成本差（升档花的钱、降档省的钱都是实测数）。
+
+**Step 2a —— 四档阶梯重放校准（实现前先跑，纯离线）**
+- 阶梯 3 档→4 档，Choice criteria 重写（tier:light 与 tier:balanced 的 AIMC 组内模型边界，实现时向 AIMC 配置确认后写准）；
+- 样本扩至 ~50 条（days=60）；重点看：四档混淆矩阵、**升档建议的频率与 conf 分布**（全新信号，18 条样本中不存在）、阈值曲线；
+- 已校准真值（2026-09-26）滚动进回放集。
+
+**Step 2c —— 决策服务运维定案**
+- GGUF 迁 WSL ext4（`~/neohorse/models/`）——消除 DrvFS/E 盘挂载依赖，加载 16s → 预期 3-6s；
+- systemd user service（WSL 实测 systemd 可用）：随 WSL 启动、`Restart=on-failure` 常驻；
+- 显存：Jev 常驻实测总占用 ~6.2/8.2GB；Ollama 暂关后无 GPU 争用，余量 ~2GB；minicpm5:2b 保留为 AIMC 故障兜底配置（不常驻），观察期后如需省显存再议 idle-exit。
+
+**Step 3 —— 观察期与规则层收缩（≥2 周真实流量）**
+- 观察指标：降档轮次任务完成质量（主观 + 会话续问率）、升档轮次成本增量、阈值曲线（0.5/0.6 放行率 vs 错误率）、延迟尾部（长 state 526-607ms 是否复现）；
+- 稳定后规则层正式收缩为 guardrail：任务类型关键词并入 state 构造，RoutingRule 表保留为 fail-open 兜底与操作员显式规则的承载；
+- trace 积累（jev 建议 vs 实际档位 vs 结果）即未来自研小路由器（0.95M 级）的训练种子。
 
 ## 7. 消费者路线图（决策层的长大方式）
 
@@ -188,6 +224,8 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 ## 9. 信息缺口
 
 - 基元律动 0.95M 路由器权重是否开放（官方核实中）——不影响架构与拓扑。
+- tier:light 与 tier:balanced 的 AIMC 组内模型边界（Step 2a 写 criteria 前向 AIMC 配置确认）。
+- 升档（strong→flagship）的真实频率与成本增量——18 条回放中不存在该信号，Step 2a 扩样后首测。
 - state ≤384 tokens 的压缩策略具体设计（Step 0 时一并做）。
 - NeoHorse-Jev 置信度语义需自测校准（官方未公开计算方式）。
 
