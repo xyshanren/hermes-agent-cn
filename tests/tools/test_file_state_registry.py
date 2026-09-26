@@ -186,5 +186,112 @@ class FileToolsIntegrationTests(unittest.TestCase):
         self.assertNotIn("error", w)
 
 
+class FileLockBusyTests(unittest.TestCase):
+    """lock_path gives up after a bounded wait instead of hanging forever.
+
+    An unbounded ``acquire()`` here turned any wedged holder into a silent,
+    log-less tool hang — dangling patch/write_file calls with no result.
+    """
+
+    def setUp(self) -> None:
+        file_state.get_registry().clear()
+        self._tmpfiles: list[str] = []
+
+    def tearDown(self) -> None:
+        for p in self._tmpfiles:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        file_state.get_registry().clear()
+
+    def _mk(self) -> str:
+        fd, path = tempfile.mkstemp(prefix="hermes_lock_busy_test_", suffix=".txt")
+        os.close(fd)
+        self._tmpfiles.append(path)
+        return path
+
+    def test_contended_lock_raises_file_lock_busy(self):
+        p = self._mk()
+        release = threading.Event()
+        holder_ready = threading.Event()
+
+        def hold() -> None:
+            with file_state.lock_path(p):
+                holder_ready.set()
+                release.wait(timeout=5.0)
+
+        t = threading.Thread(target=hold, name="wedged-holder", daemon=True)
+        t.start()
+        self.assertTrue(holder_ready.wait(timeout=3.0))
+
+        with self.assertRaises(file_state.FileLockBusy) as ctx:
+            with file_state.lock_path(p, timeout=0.2):
+                pass
+        msg = str(ctx.exception)
+        self.assertIn(p, msg)
+        self.assertIn("wedged-holder", msg)
+        self.assertIn("retry", msg.lower())
+
+        release.set()
+        t.join(timeout=3.0)
+
+    def test_lock_acquirable_after_holder_releases(self):
+        p = self._mk()
+        release = threading.Event()
+        holder_ready = threading.Event()
+
+        def hold() -> None:
+            with file_state.lock_path(p):
+                holder_ready.set()
+                release.wait(timeout=5.0)
+
+        t = threading.Thread(target=hold, name="holder", daemon=True)
+        t.start()
+        self.assertTrue(holder_ready.wait(timeout=3.0))
+        release.set()
+        t.join(timeout=3.0)
+
+        # Holder cleared the entry on exit: a fresh acquire must succeed and
+        # a timed-out wait must not name a stale holder.
+        entered = threading.Event()
+
+        def reacquire() -> None:
+            with file_state.lock_path(p, timeout=0.2):
+                entered.set()
+
+        t2 = threading.Thread(target=reacquire, daemon=True)
+        t2.start()
+        self.assertTrue(entered.wait(timeout=3.0))
+        t2.join(timeout=3.0)
+
+    def test_timeout_none_keeps_unbounded_wait(self):
+        p = self._mk()
+        release = threading.Event()
+        holder_ready = threading.Event()
+        acquired = threading.Event()
+
+        def hold() -> None:
+            with file_state.lock_path(p):
+                holder_ready.set()
+                release.wait(timeout=5.0)
+
+        def waiter() -> None:
+            with file_state.lock_path(p, timeout=None):
+                acquired.set()
+
+        t = threading.Thread(target=hold, daemon=True)
+        t.start()
+        self.assertTrue(holder_ready.wait(timeout=3.0))
+        tw = threading.Thread(target=waiter, daemon=True)
+        tw.start()
+        time.sleep(0.3)  # waiter must still be waiting, not failed
+        self.assertFalse(acquired.is_set())
+        release.set()
+        self.assertTrue(acquired.wait(timeout=3.0))
+        t.join(timeout=3.0)
+        tw.join(timeout=3.0)
+
+
 if __name__ == "__main__":
     unittest.main()

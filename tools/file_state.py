@@ -32,12 +32,15 @@ loop detection, which is a different concern.
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Iterable, List, Optional, Tuple
 
 
@@ -55,6 +58,31 @@ _MAX_PATHS_PER_AGENT = 4096
 # Global last-writer map cap.  Same policy.
 _MAX_GLOBAL_WRITERS = 4096
 
+#: Max seconds ``lock_path`` waits for a contended path lock. Writes held
+#: under the lock are short; a lock held longer than this means the holder
+#: is wedged, and failing loudly beats blocking the tool thread forever
+#: (an unbounded ``acquire()`` here turned wedged holders into silent,
+#: log-less tool hangs — dangling patch/write_file calls with no result).
+_LOCK_WAIT_TIMEOUT_S = 30.0
+
+
+class FileLockBusy(Exception):
+    """A per-path file lock stayed held longer than ``lock_path``'s budget.
+
+    Tool layers surface ``str(e)`` to the model as a retryable error; the
+    holder thread name in the message is diagnostics for the operator.
+    """
+
+    def __init__(self, resolved: str, holder: str, waited_s: float):
+        self.resolved = resolved
+        self.holder = holder
+        self.waited_s = waited_s
+        super().__init__(
+            f"target file is locked by another operation ({holder}); "
+            f"waited {waited_s:.0f}s for {resolved} and gave up. Re-read "
+            f"the file and retry shortly, or work on a different file."
+        )
+
 
 class FileStateRegistry:
     """Process-wide coordinator for cross-agent file edits."""
@@ -65,6 +93,9 @@ class FileStateRegistry:
         self._path_locks: Dict[str, threading.Lock] = {}
         self._meta_lock = threading.Lock()  # guards _path_locks
         self._state_lock = threading.Lock()  # guards _reads + _last_writer
+        # resolved -> (holder thread name, monotonic acquire ts); guarded by
+        # _meta_lock. Diagnostics for FileLockBusy messages only.
+        self._lock_holders: Dict[str, Tuple[str, float]] = {}
 
     # ── Path lock management ────────────────────────────────────────
     def _lock_for(self, resolved: str) -> threading.Lock:
@@ -76,18 +107,47 @@ class FileStateRegistry:
             return lock
 
     @contextmanager
-    def lock_path(self, resolved: str):
+    def lock_path(self, resolved: str, timeout: float = _LOCK_WAIT_TIMEOUT_S):
         """Acquire the per-path lock for a read→modify→write section.
 
         Same process, same filesystem — threads on the same path serialize.
         Different paths proceed in parallel.
+
+        The wait is bounded: a lock held past ``timeout`` raises
+        ``FileLockBusy`` (naming the holder thread) instead of blocking
+        forever. ``timeout=None`` restores the historical unbounded wait.
         """
         lock = self._lock_for(resolved)
-        lock.acquire()
+        if timeout is not None and timeout > 0:
+            acquired = lock.acquire(timeout=timeout)
+        else:
+            acquired = lock.acquire()
+        if not acquired:
+            holder = self._lock_holder_desc(resolved)
+            logger.warning(
+                "file_state: lock busy on %s — %s; gave up after %.1fs",
+                resolved, holder, timeout,
+            )
+            raise FileLockBusy(resolved, holder, timeout)
+
+        with self._meta_lock:
+            self._lock_holders[resolved] = (
+                threading.current_thread().name, time.monotonic(),
+            )
         try:
             yield
         finally:
+            with self._meta_lock:
+                self._lock_holders.pop(resolved, None)
             lock.release()
+
+    def _lock_holder_desc(self, resolved: str) -> str:
+        with self._meta_lock:
+            entry = self._lock_holders.get(resolved)
+        if not entry:
+            return "a thread that already released it"
+        name, since = entry
+        return f"thread {name!r}, held for {time.monotonic() - since:.0f}s"
 
     # ── Read/write accounting ───────────────────────────────────────
     def record_read(
@@ -256,6 +316,7 @@ class FileStateRegistry:
             self._last_writer.clear()
         with self._meta_lock:
             self._path_locks.clear()
+            self._lock_holders.clear()
 
 
 # ── Module-level singleton + helpers ─────────────────────────────────
@@ -304,8 +365,8 @@ def check_stale(task_id: str, resolved_or_path: str | Path) -> Optional[str]:
     return _registry.check_stale(task_id, str(resolved_or_path))
 
 
-def lock_path(resolved_or_path: str | Path):
-    return _registry.lock_path(str(resolved_or_path))
+def lock_path(resolved_or_path: str | Path, timeout: float = _LOCK_WAIT_TIMEOUT_S):
+    return _registry.lock_path(str(resolved_or_path), timeout=timeout)
 
 
 def writes_since(
@@ -321,6 +382,7 @@ def known_reads(task_id: str) -> List[str]:
 
 
 __all__ = [
+    "FileLockBusy",
     "FileStateRegistry",
     "get_registry",
     "record_read",
