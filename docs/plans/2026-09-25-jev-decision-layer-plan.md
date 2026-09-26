@@ -229,6 +229,11 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 - 数据落点：`grep -a "jev_routing" ~/.hermes/logs/agent.log`（每轮 tier/conf/lat/applied/baseline；注意 agent.log 含二进制字节，grep 需 `-a`）；成本对照 `session_model_usage` 表。
 - **上线首日修复（2026-09-26，commit `ba96454d0c`）**：消费级 GPU（4060 Laptop）空闲数十秒掉低功耗 P 态 → 隔离路由调用付 491ms~1.3s 拉频延迟 → timeout 500ms 间歇性 fail-open。修复：决策服务加 `--keepalive-interval 60s`（微型决策保持时钟，与真实请求重叠自动跳过）+ hermes 侧 `timeout_ms: 1500`；验证空闲 75s 后调用 394ms（余量 ~4 倍）。
 - **首日行为基线（重要预期管理）**：闲聊/自我介绍类轮次 Jev 置信度低（如 0.154）→ 按设计守 strong——这类轮次不会离开 strong 是当前校准下的正常现象；路由生效集中在运维/编码/多步轮次（回放实测 conf 0.62-0.95）。阈值调优等观察期数据（考虑 per-tier 阈值让 light 通道可发射）。
+- **首日全量核对（2026-09-26 晚，26 条决策全检，记录链路 ✅ 符合设计）**：
+  - **记录面**：mode/tier/conf/lat/applied/baseline 全落盘；fail-open 亦有记录（03:55 `outcome=none` 系决策服务 03:59 启动完成前的暖机请求；另有 call failed ×1）；keepalive 修复生效（lat median 369ms / max 610ms，1500ms 预算内余量充足）；baseline 25/25 恒 tier:strong 符合现役规则；升档通道休眠（仅 1 次 flagship 建议、conf 不足未采纳，与回放 0/50 一致）。
+  - **偏差①（校准差距）**：live conf 整体显著低于回放预期——median 0.295 / max 0.805，阈值 0.6 仅放行 4/25（16%），通道基本处于"只记不采"。回放时目标轮次 0.62-0.95 的置信度在 live 未复现，**阈值曲线评估时需先解释 live-vs-replay 差距**（候选：live 消息形态/多轮上下文 vs 回放样本分布）。
+  - **偏差②（light 续问率首例实证）**：被采纳的 4 次全部是 light 降档、且全部落在单个会话（86d315 dsh 升级任务）；其中 2 个 light 轮出现"输出文字承诺下一步→不发工具调用→turn 结束"的断头模式、1 个 light 轮误报"无需审批，已直接处理"——Step 2a 预警的 light 工具编排弱风险首日兑现，per-tier 最低 conf / light 禁用开关（config 预留）有了第一个数据点。
+  - **成本事实（降档非免费）**：`session_model_usage`——tier:light 9 次调用 745K input / cache_read=0；tier:strong 79 次调用 213K input / cache_read 4.65M。长会话降档每轮全量重付输入（无前缀缓存），per-tier 决策时应把会话长度纳入考量。
 - 观察指标：降档轮次任务完成质量（主观 + 会话续问率，light 轮次单列）、升档轮次成本增量、阈值曲线（0.5/0.6 放行率 vs 错误率）、延迟尾部与暖机尖峰频率（修复后应显著减少）。
 - 稳定后规则层正式收缩为 guardrail：任务类型关键词并入 state 构造，RoutingRule 表保留为 fail-open 兜底与操作员显式规则的承载；
 - trace 积累（jev 建议 vs 实际档位 vs 结果）即未来自研小路由器（0.95M 级）的训练种子。
