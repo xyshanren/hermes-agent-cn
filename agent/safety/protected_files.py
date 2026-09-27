@@ -89,9 +89,12 @@ def is_protected_path(path: str) -> bool:
 def _is_protected_files_enabled() -> bool:
     """Check if protected files gate is enabled (default True, 跟 v0.21 一致)."""
     # 优先 ~/.hermes/config.yaml: protected_files.enabled
+    # 直接读 load_config(): hermes_cli.config.get_config_value 是 `hermes
+    # config get` 的 CLI 打印函数, key 缺失时 sys.exit(1), 当 getter 用会把
+    # SystemExit 泄进 write_file / patch 工具调用链杀死整个任务
     try:
-        from hermes_cli.config import get_config_value
-        cfg = get_config_value("protected_files")
+        from hermes_cli.config import load_config
+        cfg = (load_config() or {}).get("protected_files")
         if isinstance(cfg, dict) and cfg.get("enabled") is False:
             return False
     except Exception:

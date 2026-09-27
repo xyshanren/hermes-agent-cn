@@ -46,9 +46,10 @@ _PROFILE_CONSENT_LOG_PREFIX = "[profile-consent]"
 def _is_profile_consent_required() -> bool:
     """Check if profile consent gate is enabled (default True, 跟 v0.20.6 一致)."""
     try:
-        from hermes_cli.config import get_config_value
-        value = get_config_value("profile_consent_required")
-        if value is False:
+        # 直接读 load_config(): get_config_value 是 `hermes config get` 的
+        # CLI 打印函数, key 缺失时 sys.exit(1), 不能当 getter 用
+        from hermes_cli.config import load_config
+        if (load_config() or {}).get("profile_consent_required") is False:
             return False
         return True
     except Exception:
