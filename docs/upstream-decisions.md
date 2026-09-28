@@ -314,6 +314,7 @@ scout 标记 C3=2。**问题**：T3 本身就在 CN 仓库里（保留但不维�
 | TypeSafe Jev API | **reject** | 路由状态=用户消息原文出第三方 API (数据驻留未公开, CN 生死线) + 远程 820ms/轮不可接受 |
 | NeoHorse-Jev-4B (官方 GGUF, Apache-2.0) | **defer → 规划完成** | 主候选; 决策训练开箱即用, 微调降级为可选优化; 回放数据说话后才动手 |
 | 基元律动 0.95M 路由器 | **watch** | MS 无权重, 官方核实中; 不影响架构 |
+| Laya (ConvAI, Apache-2.0, 421M encoder) | **watch** | 开源 Jev 复刻, 但开箱高基数分类弱 (Banking77 0.425 vs Jev 0.870)、定制域需微调, 不够格换 consumer #1; 价值在: 长 state 消费者 (encoder 原生 8k 级 vs NeoHorse 384-token 上限) / CPU 冗余 (不占 4060 显存) / 用回放集微调做置信度校准对照 (打 live conf median 0.295) |
 | SemIf / open-jev | 参照 | 证明范式一周可复现, 不抢跑 |
 
 **架构边界 (已拍板)**: 独立 System-1 决策服务 + 多消费者, SmartRouter 只是 consumer #1; 决策逻辑在 hermes 侧, hermes 拿选定模型调 AIMC; AIMC 保持透明 (多客户端 zcode/dsh/RAG/db-center, 语义改写 = breaking change). 红线: per-turn 工具 schema 过滤不做 (cache 神圣性), 主模型绕行 deferred.
@@ -322,4 +323,6 @@ scout 标记 C3=2。**问题**：T3 本身就在 CN 仓库里（保留但不维�
 
 **详细规划**: `docs/plans/2026-09-25-jev-decision-layer-plan.md` (Step 0 回放集 → Step 1 Linux 环境部署+概率验证 → Step 2 影子模式 → Step 3 生效+规则降级 guardrail; 每步带门检).
 
-**Revisit 条件**: NeoHorse 大版本变更 / 0.95M 权重开源 / 影子期数据异常; 方向退出条件见规划文档 §10.
+**2026-09-28 追加** (mu 双引擎报告交叉核对): 报告主张的"接入 Jev/Laya 决策层"与我方已实施路径同向 (本地模型而非远程 API), **无架构增量**; 其信息量在两点: ① 确认 **consumer #2 (上下文过滤) 的价值次序**——mu 五个决策点中"工具输出筛选"是其核心创新, 与我方路线图排序一致; ② 提示**新消费者候选: 审批闸门** (mu ⑤ Jev 审批), 已列入规划文档 §7 候选 #4。TypeSafe Jev API 的 reject 结论不受影响 (报告未考虑数据驻留)。Laya → **watch** (理由见上表), 触发条件见下。
+
+**Revisit 条件**: NeoHorse 大版本变更 / 0.95M 权重开源 / 影子期数据异常 / consumer #2 立项时做 "NeoHorse 分块 vs Laya 长 state" 离线 A/B / Laya 出经第三方验证的中文决策 checkpoint; 方向退出条件见规划文档 §10.

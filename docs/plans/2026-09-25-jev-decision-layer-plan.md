@@ -245,8 +245,15 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 | #1 | 模型/tier 路由 | 满足（最高频、审计最全） | 本规划 |
 | #2 | web/搜索结果相关性 + 注入筛查 | 满足（只过滤/重排，可离线回放评测；文章自有示例场景） | #1 稳后 |
 | #3 | 门槛类 Noul：memory prefetch 门槛、本轮是否需要 vision | 满足（低风险） | #2 稳后 |
+| #4 | 审批闸门（Noul）：破坏性命令语义判定，补模式表漏检（find 家族管道形态） | 满足（state 短、可离线回放；但 false-allow 不可逆 → 只能加严） | 规则样例表修复先行，之后立项 |
 | 远期 | delegation 时机、压缩时机 | 错误代价高 | 等 trace 积累 |
 | 不做 | per-turn 工具 schema 过滤 / 主模型绕行 | 违反 cache/alternation 不变量 | 红线，见 §3 |
+
+**候选 #4（审批闸门）要点**（2026-09-28 追加）：
+- 形态：state = 命令原文（+cwd/影响面小上下文），question = Noul「这条命令会不可逆地删除或覆盖用户数据吗？」→ true/false + 概率；概率支撑在 `approvals.mode` 的 manual 与 yolo 之间插一档（对齐 mu 的三档设计）。
+- **组合不变量（命门）**：规则层（`tools/approval.py` 的 HARDLINE/DANGEROUS 模式表）仍是主闸，Noul **只能加严不能放宽**——可把规则漏检的命令升级为人工确认，不得把规则已命中的降级放行；服务不可达时行为与纯规则层一致（闸门缺席不降低安全）。
+- **阈值方向相反**：auto-allow 需高阈值、escalate-to-human 可低阈值（从严方向可激进）；评测主指标是**误升级率**而非准确率（live conf median 0.295 偏保守，对"只能加严"的闸门属安全侧，代价是操作员摩擦）。
+- **前置**：先把 `docs/approval-classifier-gaps.md` 的 find 家族扩成 `命令形态 → 期望分类` 样例表，量出现役模式表漏检率；**补规则够用则本消费者不立项**（确定性、可测、无副作用优先）。
 
 攒够 3 个消费者后再抽公共薄客户端（`agent/decision_client.py` 之类）——系统从下往上长，不预建框架。
 
