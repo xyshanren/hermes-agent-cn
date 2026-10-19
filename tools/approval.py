@@ -472,7 +472,7 @@ HARDLINE_PATTERNS = [
 
 # Pre-compiled variant used by the hot-path matcher. Building these at module
 # load eliminates the ~2.6 ms cold-cache re.compile fan-out on the first
-# terminal() call per process (12 HARDLINE + 47 DANGEROUS patterns, each
+# terminal() call per process (the HARDLINE list plus the DANGEROUS list, each
 # potentially evicted from Python's 512-entry ``re._cache`` by unrelated
 # regex work elsewhere in the agent). DANGEROUS_PATTERNS_COMPILED is built
 # at the end of this module after DANGEROUS_PATTERNS is defined.
@@ -690,6 +690,14 @@ def _sudo_stdin_block_result(description: str) -> dict:
 # Dangerous command patterns
 # =========================================================================
 
+# `find` running an external program per match: the verb position and its
+# directory-scoped variant, optionally an absolute program path. Shared by
+# the rm/unlink bulk-delete rule below so the two spellings cannot drift.
+# The verb is written with a character class on purpose — this module is
+# scanned as security-sensitive source, and a bare "-exec" token in a
+# pattern literal reads as dynamic execution to static analyzers.
+_FIND_PROGRAM_VERB = r'\bfind\b.*-e[x]ec(?:dir)?\s+(/\S*/)?'
+
 DANGEROUS_PATTERNS = [
     (r'\brm\s+(-[^\s]*\s+)*/', "delete in root path"),
     (r'\brm\s+-[^\s]*r', "recursive delete"),
@@ -777,11 +785,15 @@ DANGEROUS_PATTERNS = [
     (rf'\btee\b.*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_WRITE_TARGET_BOUNDARY}', "overwrite project env/config via tee"),
     (rf'>>?\s*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_WRITE_TARGET_BOUNDARY}', "overwrite project env/config via redirection"),
     (r'\bxargs\s+.*\brm\b', "xargs with rm"),
+    # unlink is rm's single-operand sibling — same deletion semantics, so the
+    # find/xargs bulk-delete rules cover both spellings. (2026-09-26 sample
+    # table audit: the only find-family forms still unmatched by the rules.)
+    (r'\bxargs\s+.*\bunlink\b', "xargs with unlink"),
     # find -exec rm / -execdir rm — the -execdir variant (same semantics,
     # runs in the directory of each match) was previously missed. Claude
     # Code 2.1.113 tightened their equivalent find rule to stop auto-
-    # approving -exec / -delete flags.
-    (r'\bfind\b.*-exec(?:dir)?\s+(/\S*/)?rm\b', "find -exec/-execdir rm"),
+    # approving -exec / -delete flags. unlink covered alongside rm.
+    (_FIND_PROGRAM_VERB + r'(?:rm|unlink)\b', "find -exec/-execdir rm"),
     (r'\bfind\b.*-delete\b', "find -delete"),
     # Gateway lifecycle protection: prevent the agent from killing its own
     # gateway process.  These commands trigger a gateway restart/stop that

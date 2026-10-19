@@ -252,7 +252,7 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 | #1 | 模型/tier 路由 | 满足（最高频、审计最全） | 本规划 |
 | #2 | web/搜索结果相关性 + 注入筛查 | 满足（只过滤/重排，可离线回放评测；文章自有示例场景） | #1 稳后 |
 | #3 | 门槛类 Noul：memory prefetch 门槛、本轮是否需要 vision | 满足（低风险） | #2 稳后 |
-| #4 | 审批闸门（Noul）：破坏性命令语义判定，补模式表漏检（find 家族管道形态） | 满足（state 短、可离线回放；但 false-allow 不可逆 → 只能加严） | 规则样例表修复先行，之后立项 |
+| #4 | 审批闸门（Noul）：破坏性命令语义判定 | 满足（state 短、可离线回放；但 false-allow 不可逆 → 只能加严） | **不立项**（2026-10-20：前置判定"补规则够用"成立，且原始动机被证伪，见下） |
 | 远期 | delegation 时机、压缩时机 | 错误代价高 | 等 trace 积累 |
 | 不做 | per-turn 工具 schema 过滤 / 主模型绕行 | 违反 cache/alternation 不变量 | 红线，见 §3 |
 
@@ -261,6 +261,12 @@ curl -s http://127.0.0.1:8001/predict -d @turn_001.json
 - **组合不变量（命门）**：规则层（`tools/approval.py` 的 HARDLINE/DANGEROUS 模式表）仍是主闸，Noul **只能加严不能放宽**——可把规则漏检的命令升级为人工确认，不得把规则已命中的降级放行；服务不可达时行为与纯规则层一致（闸门缺席不降低安全）。
 - **阈值方向相反**：auto-allow 需高阈值、escalate-to-human 可低阈值（从严方向可激进）；评测主指标是**误升级率**而非准确率（live conf median 0.295 偏保守，对"只能加严"的闸门属安全侧，代价是操作员摩擦）。
 - **前置**：先把 `docs/approval-classifier-gaps.md` 的 find 家族扩成 `命令形态 → 期望分类` 样例表，量出现役模式表漏检率；**补规则够用则本消费者不立项**（确定性、可测、无副作用优先）。
+
+**候选 #4 收口（2026-10-20，样例表前置判定完成 → 不立项）**：
+- 样例表落地 `scripts/approval_classifier_samples.py`（38 条：27 destructive + 11 clean）+ 行为契约测试 `tests/tools/test_approval_find_family_samples.py`（跑真实检测器）。
+- **漏检率测量**：补规则前 2/27（7.4%，全部是 `find -exec unlink` / `-execdir unlink`），误报 0/11；补 unlink 规则（find 动词位抽成共享 fragment `_FIND_PROGRAM_VERB`，rm/unlink 同规则）后**漏检 0/27、误报 0/11** → **"补规则够用"成立**。
+- **原始动机被证伪**：2026-09-26 那次"find 管道批量删 326 目录未触发审批"**不是检测缺口**——用事故时点部署的代码（`a1ea634afb`）复测原命令，detection 结果与当前代码一致（dangerous=True, key=`recursive delete`）。真因是**审批记忆粒度**：此前用户对"删两个 lib 目录"的 `rm -rf` 做过 session 级批准，存的 key 是描述字符串 `"recursive delete"`，而事故命令内嵌的 `rm -rf` 命中同一个 key → `is_approved()` 短路静默放行（规模无关）。`find -delete` 正常弹窗是因为 key 不同。
+- **为什么 Noul 解不了**：Noul 判定"这条命令是否破坏性"，事故的绕过发生在"要不要问人"这一层——语义闸门加进来不会改变 `is_approved` 的授权粒度，只会多一个消费者。残留问题（session 批准的授权覆盖面与规模无关）属审批记忆/交互设计，已单独记录在 `docs/approval-classifier-gaps.md` 的"残留发现"一节，待独立拍板。
 
 攒够 3 个消费者后再抽公共薄客户端（`agent/decision_client.py` 之类）——系统从下往上长，不预建框架。
 
