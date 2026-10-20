@@ -326,3 +326,35 @@ scout 标记 C3=2。**问题**：T3 本身就在 CN 仓库里（保留但不维�
 **2026-09-28 追加** (mu 双引擎报告交叉核对): 报告主张的"接入 Jev/Laya 决策层"与我方已实施路径同向 (本地模型而非远程 API), **无架构增量**; 其信息量在两点: ① 确认 **consumer #2 (上下文过滤) 的价值次序**——mu 五个决策点中"工具输出筛选"是其核心创新, 与我方路线图排序一致; ② 提示**新消费者候选: 审批闸门** (mu ⑤ Jev 审批), 已列入规划文档 §7 候选 #4。TypeSafe Jev API 的 reject 结论不受影响 (报告未考虑数据驻留)。Laya → **watch** (理由见上表), 触发条件见下。
 
 **Revisit 条件**: NeoHorse 大版本变更 / 0.95M 权重开源 / 影子期数据异常 / consumer #2 立项时做 "NeoHorse 分块 vs Laya 长 state" 离线 A/B / Laya 出经第三方验证的中文决策 checkpoint; 方向退出条件见规划文档 §10.
+
+---
+
+### 2026-10-20 — v0.21 + v0.22 双 minor base bump 前置分析（18,198 commits）
+
+> 完整扫描：`archive/2026-10-20/scan-2026-09-19-to-10-19.md`（4 路子代理深扫，hash 全验证）｜候选池：`CANDIDATES.md` K-19~K-37
+> 窗口 2026-09-19→10-20，18,198 upstream commits（CN 保留路径 8,597）；上游 v0.21.0→**v0.22.2**，CN 仍 v0.20.0。
+
+**总体判定**：**分三阶段推进的 base bump**——阶段一 P0 cherry-pick（零结构冲突，~1.5d）→ 阶段二 bump 主体（结构工程，~5-7d）→ 阶段三 one-gateway runtime / local_runtime 拍板。
+
+**阶段一 P0（adopt 为主）**：
+
+| 簇 | 判定 | 理由 |
+|---|---|---|
+| K-19 Prompt cache 红线修复（9c18b383de / e56c8d6ddb / ec78ae2211 / 3bf97898ac） | **adopt** | CN 红线"prompt caching 神圣"直接受益；ec78ae2211 是唯一"加法而不动 system prompt 结构"的改动 |
+| K-20 Approval 闸门 + allowlist 同步 | **adopt + reimplement** | allowlist 写回竞态是安全回归；模式表增量纯行；A2 即时回收语义需在 CN 位置重实现 |
+| K-21 依赖 CVE（PyJWT critical / urllib3 / mcp / httpx2） | **adopt** | critical CVE 必升；但 mcp 2.x 需连带 httpx2 且与 K-29 同批 |
+| K-22 state.db / memory 韧性（接续 K-15） | **adopt** | WSL state.db 133MB WAL 痛点 + 静默失败红线 |
+| K-23 CN provider 定向修复 | **adopt** | 阿里 guardrail / DeepSeek / MiniMax 直接收益 |
+| K-24 渠道韧性 4 件（weixin/feishu/dingtalk/qqbot） | **adopt** | CN 6 平台上游原生维护中 |
+| K-25 运行时解释器自保护 floor（541e4dc0ba） | **reimplement** | 与 CN HARDLINE 同构，写在 CN 自己的 approval 位置 |
+| K-26 Tirith 退役后 core 检测回流（凭据外传 + 不可见 Unicode） | **reimplement** | 上游删 tirith 但把最有价值的两类搬进 core；与 CN semantic firewall 职责邻接，作 firewall 恢复的参照基线 |
+
+**阶段二 P1（bump 主体，结构工程）**：K-27 平台 core→plugin 搬迁（🔴 最高风险，weixin/qqbot/yuanbao 逐文件手工 re-port 2-3d，**不可 cherry-pick**）｜K-28 Python 3.14 marker 剥离 + 3.14-only 语法回补（不做则 py3.11 缺 46 个依赖 + gateway import 失败）｜K-29 mcp 2.x + httpx2｜K-30 cli.py 18,664→1,796 拆解（**defer，先拍板**）｜K-31 默认值回写（max_turns 500→None / turn_lease 1800→5s / bot_loop_guard / cron_drain_timeout 全部回写 CN 安全值）｜K-32 deferred-to-bump 白拿 20 commits｜K-33 依赖删除跟随。
+
+**阶段三 P2（拍板）**：K-34 one-gateway runtime（eb75627faf，1968 文件，本窗口所有 approval 语义改动的前提）｜K-35 上游 local_runtime 子系统 vs CN local-models（同 64K floor 不同判据）｜K-36 gateway 核心分解｜K-37 cron 重写。
+
+**reject**：海外 19 平台（上游仍维护 793 commits）｜apps/desktop（13,961 commits）｜onboarding（22 feat）｜plugin-catalog（545）｜海外 provider/模型/connectors｜Telegram DM topic transfer｜session.export TUI /save｜stable release 通道（CN 走 pip -e）｜claude-subscription-directsdk｜docker sandbox ownership（CN 已裁 docker 栈）。
+
+**CN 特色（本轮独立实现，不提上游）**：**session 授权粒度**——2026-09-26 事故真因是 session 级 pattern 批准按描述字符串 key 授权（一次"删两个 lib 目录"的 rm -rf 批准静默放行 326 目录的 find|xargs rm，详见 `docs/approval-classifier-gaps.md`）。上游本窗口给了两个相关但 grain 不同的新物：A2 配置级（allowlist 即时回收）、A4 回合级（`viewer_turn` contextvar 豁免），均**不覆盖** CN 事故的 pattern-key 粒度。CN 方向：session 批准 key 改**命令形态指纹** + 命中规模/批量语义变化时强制重弹。**reimplement（CN 原创）**。
+
+**Revisit 条件**：K-30/K-35 需 user 拍板（cli.py 拆解路线、CN local-models vs 上游 local_runtime）｜阶段二 bump 完成后重算 2027-01-01 季度窗口｜上游 0.95M 权重开源 / NeoHorse 大版本变更（见 Jev 段）｜bump 完成后需复核 CN config 漂移（模型更名致静默 404，K-14 同族）。

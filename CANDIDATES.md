@@ -1158,6 +1158,58 @@
 - **K-3 式 defer 的红利**: 7 月 defer 的 K-3 等来了上游原生实现（K-12），比自行重写省 1.5d 且少维护一份
 - **配置漂移是新型风险**: K-14 说明 base bump 拖尾期 CN config（deepseek-v4-flash）会因上游模型更名静默失效——10 月 bump 前应把 K-14 先行或与 bump 捆绑
 
+## 窗口 2026-09-19 → 10-20（2026-10-20 base bump 前置扫描）
+
+> 完整扫描（4 路子代理深扫，hash 全验证）：`archive/2026-10-20/scan-2026-09-19-to-10-19.md`。
+> 窗口 18,198 upstream commits（CN 保留路径 8,597）；上游 v0.21.0 → **v0.22.2**，CN 仍 v0.20.0（跨两个 minor）。
+> 性质 = **base bump 前置分析**（不是轻跟进）：本轮候选按"是否依赖结构工程"分 P0/P1/P2 三阶段。
+
+### 阶段一 P0（立即 cherry-pick，零结构冲突，~1.5d）
+
+| ID | 簇 | commits | 判定 | 价值 |
+|---|---|---|---|---|
+| K-19 | Prompt cache 红线修复（internal events 不重键 prompt pin / skill scaffold 不重写 / session 中途装 skill 不重建 prompt / 前缀瘦身） | 9c18b383de, e56c8d6ddb, ec78ae2211, 3bf97898ac | adopt | 🔴 CN 神圣红线 |
+| K-20 | Approval 闸门 + allowlist 同步（写回竞态、模式表增量、无人应答 fail-closed） | eea7c437eb, fc5b1b0d45, 4a9902d513, 886df27c6e, 6ae1fab336, eb8d21f482, b4969d8e2d, 33c9b1d779 | adopt + reimplement | 🔴 |
+| K-21 | 依赖 CVE 批量修复（PyJWT critical / urllib3 / mcp / httpx2） | 0346b3ba6a, 189400a990, e27dee2035, bc8545bd1a, 5ff23a77f5, 832ca9826d | adopt | 🔴 critical |
+| K-22 | state.db / memory 韧性（接续 K-15） | R-2 12 + R-1 16 commits | adopt | 🔴 WSL 133MB WAL |
+| K-23 | CN provider 定向修复（阿里 guardrail / MiniMax reasoning / DeepSeek tool-call / 模型目录） | 42f210de11, 2ab2270b32, 3f3bdf3ee2, 0f9fc3434e, 8d153b26aa, 868b9f244f | adopt | 🔴 |
+| K-24 | 渠道韧性 4 件（weixin 游标 / feishu 评论 scope / dingtalk 重试风暴 / qqbot 媒体降级） | 73dc249ccada, c7ae28da710a, 4b17231b53b2, 8d959f965c64, 857ad4b954a3, 3c6b995456ae, aa5038303041, 749f657fbf80 | adopt | 🔴 |
+| K-25 | 运行时解释器自保护 floor（yolo/off/cron 之前生效） | 541e4dc0ba | reimplement | 🔴 与 CN HARDLINE 同构 |
+| K-26 | Tirith 退役后 core 内容层检测回流（凭据外传 + 不可见 Unicode） | 911da42e9e, 68dd992769 | reimplement | 🔴 与 CN firewall 邻接 |
+| **CN 特色** | **session 授权粒度**（session 批准 key 改命令形态指纹 / 规模变化强制重弹） | — | CN 原创 | 🔴 09-26 事故真因，本轮独立实现，不提上游 |
+
+### 阶段二 P1（base bump 主体，~5-7d）
+
+| ID | 项 | 判定 | 说明 |
+|---|---|---|---|
+| K-27 | 平台 core→plugin 搬迁（weixin/qqbot/yuanbao + PlatformEntry 链，硬耦合） | reimplement（随 bump） | CN 三文件被改过，**逐文件手工 re-port**，不可 cherry-pick，2-3d |
+| K-28 | Python 3.14 marker 剥离 + 3.14-only 语法回补 + 自己 uv lock | reimplement | 不做则 py3.11 环境残废 / gateway import 失败 |
+| K-29 | mcp 2.x + httpx2 栈 | adopt | 不跟则 tool schema 静默为空 |
+| K-30 | cli.py 巨型拆解（18,664→1,796 行） | defer（先拍板） | 接拆解 vs 整文件保留逐条补 |
+| K-31 | 默认值变更回写（max_turns 500→None / turn_lease 1800→5s / bot_loop_guard / cron_drain_timeout） | reimplement | 全部回写 CN 安全值 |
+| K-32 | deferred-to-bump 白拿（K-12 3 + K-15 5 + K-13 余 4 + K-14 余 5 + K-18 余 3 = 20 commits） | adopt（随 bump） | 全部验证 NOT-IN-CN |
+| K-33 | 依赖删除跟随（mem0/supermemory/honcho/Langfuse/HA/Spotify/tirith 等上游已从 core 删） | adopt | 符合减法哲学 |
+
+### 阶段三 P2（bump 后评估，需拍板）
+
+| ID | 项 | 判定 |
+|---|---|---|
+| K-34 | one-gateway runtime（eb75627faf，1968 文件） | defer——本窗口所有 approval 语义改动的前提 |
+| K-35 | local_runtime 子系统 vs CN local-models（同 64K floor 不同判据） | defer，先拍板 |
+| K-36 | gateway 核心分解（上游 run.py 27,807→13 mixin / session.py→20+ 碎件） | reimplement/defer |
+| K-37 | cron 重写（13→45 文件，firer/owner 归属模型） | defer（CN cron/ 零本地改动，可整体随 bump） |
+
+### Reject（CN 边界外）
+
+海外 19 平台（上游仍在维护 793 commits）、apps/desktop（13,961）、onboarding（22 feat）、plugin-catalog（545）、海外 provider/模型、connectors、Telegram DM topic transfer、session.export TUI /save、stable release 通道、claude-subscription-directsdk、docker sandbox ownership。
+
+### 本窗口启示
+
+- **"表面积大、深度浅"**: 18,198 commits 里真正落到 CN 用户面的是 ~90 个可靠性/安全 commits，1173 个 feat 中 700+ 是 desktop/onboarding/catalog（reject 即可）
+- **bump 的真门槛是三件结构工程**: 平台 core→plugin 搬迁（B-1+B-11）、Python 3.14 marker 与语法（B-2/B-3）、cli.py 拆解（B-4）——不是"合多少 commit"
+- **上游也在解审批粒度但 grain 不同**: A2 配置级（allowlist 即时回收）/ A4 回合级（viewer_turn origin）≠ CN 事故的 pattern-key 级；CN 特色（命令形态指纹）独立成立
+- **K-3 式 defer 红利第二次兑现**: K-12/K-15 及 20 个 deferred commits 随 bump 白拿，验证"规则表跟不上就 defer，等上游原生实现"的策略
+
 ---
 
 ## 触发条件总表 (扩展)
