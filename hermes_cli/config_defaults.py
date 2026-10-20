@@ -101,7 +101,12 @@ DEFAULT_CONFIG = {
         # Max seconds an alias routing key waits for the active turn holding the same session lease;
         # on expiry the message is rejected with a resend notice. Keep short: Telegram dispatches
         # sequentially, so a waiter delays unrelated topics. Non-positive -> 5s.
-        "gateway_turn_lease_timeout": 5,
+        #
+        # CN 回写（2026-10-20, v0.22 base bump）：上游改成 5 秒——对 Telegram 那种
+        # 顺序派发合理，但 CN 的渠道（微信/企微/飞书）用户习惯在 agent 还跑着的时候
+        # 接着发消息，5 秒就把后续消息拒掉（resend notice）是用户可见的挫败。
+        # 回到 CN 原来的 1800 秒。
+        "gateway_turn_lease_timeout": 1800,
         # Per-session AIAgent cache in the gateway. Each entry keeps a warm prompt prefix AND the
         # full transcript: too small re-pays uncached prompts, too large fills the heap.
         "agent_cache": {
@@ -132,7 +137,11 @@ DEFAULT_CONFIG = {
         # min is a safety valve for wedged agents, not a target; raise for long unattended turns.
         # Default 30 min is a safety valve for wedged agents, not a target latency — an interactive `hermes
         # gateway restart` must never block for hours on a turn that wedged (#79133).
-        "restart_after_turn_timeout": 1800,
+        #
+        # CN 回写（2026-10-20, v0.22 base bump）：上游 30 分钟，CN 原来 6 小时。
+        # CN 的 WSL 部署常跑长任务（构建/批量 agent），30 分钟会把在跑的活截断，
+        # 回到 CN 的 21600 秒（6 小时）——卡死的 turn 由别处的看门狗兜底。
+        "restart_after_turn_timeout": 21600,
         # Max seconds a submitted prompt waits for the deferred agent build (MCP discovery, model
         # metadata, skills scan) before failing visibly. The prompt is delivered as soon as the
         # build completes (progress notice past 30s), so this only fires on a hung build. Raise for
@@ -2168,7 +2177,11 @@ DEFAULT_CONFIG = {
         # Allow all users without allowlists (security opt-in).
         "allow_all_users": False,
         # Bot-to-bot loop guard: admitted bot messages per conversation before a cooldown.
-        "bot_loop_guard": {"enabled": True, "max_events": 20, "window_seconds": 300, "cooldown_seconds": 600},
+        # CN 回写（2026-10-20, v0.22 base bump）：上游默认开（20 条/300 秒后冷却
+        # 600 秒）。CN 的渠道用户习惯连发消息，这个守卫会**静默吞掉**后续消息
+        # （不是排队，是直接冷却），是用户可见的丢消息。默认关，需要时在
+        # config.yaml 里显式开。
+        "bot_loop_guard": {"enabled": False, "max_events": 20, "window_seconds": 300, "cooldown_seconds": 600},
         # Startup-liveness watchdog: stdlib-only daemon thread armed at process entry that
         # hard-exits 75 if the loop isn't live within the deadline. Armed before config loads, so
         # run_gateway() bridges these to HERMES_STARTUP_WATCHDOG / HERMES_STARTUP_WATCHDOG_TIMEOUT_S
