@@ -18,7 +18,6 @@ Caller 路径 (跟 stub 兼容):
 - hermes_cli/main.py:cmd_uninstall `if getattr(args, "gui", False)` branch → 改 stub
 - hermes_cli/main.py:cmd_gui (A.3.2 stub) → 跟本 stub 1:1 配对
 """
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -77,8 +76,7 @@ def gui_install_summary(hermes_home: "Optional[Path]" = None) -> dict:
         "source_built_artifacts": [],
         "packaged_app_paths": [],
         "userdata_exists": False,
-        "userdata_dir": Path("/dev/null"),
-    }
+        "userdata_dir": Path("/dev/null"),    }
 
 
 def _remove_path(path: Path) -> bool:

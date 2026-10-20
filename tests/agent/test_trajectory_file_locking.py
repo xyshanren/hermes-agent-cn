@@ -13,12 +13,6 @@ from agent.trajectory import save_trajectory
 
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
-# Windows: the msvcrt.locking branch currently drops writes under 6-process
-# contention (26/30 lines observed, 2026-09-20). POSIX flock is the verified
-# path; the Windows lock interaction is a known open issue — skip here rather
-# than pin a broken behavior, and revisit with the v0.21.x base bump.
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="msvcrt lock path drops concurrent writes on Windows (#12684 follow-up)")
-
 
 def test_concurrent_process_appends_stay_parseable(tmp_path):
     """Payloads far larger than one atomic write() from several processes: every line parses."""
@@ -68,3 +62,13 @@ def test_append_honours_a_foreign_exclusive_lock(tmp_path):
         holder.wait()
     assert waited >= 1.0, f"append went through a held lock after {waited:.2f}s"
     assert json.loads(target.read_text(encoding="utf-8").strip().splitlines()[-1])["completed"] is False
+
+# Windows: the msvcrt.locking branch drops writes under 6-process contention
+# (26/30 lines observed, 2026-09-20). Re-checked at the v0.22 base bump
+# (2026-10-20): upstream's agent/trajectory.py::_lock_append_handle still takes
+# a 1-byte msvcrt range lock on Windows, so the skip stays — POSIX flock is the
+# verified path.
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="msvcrt lock path drops concurrent writes on Windows (#12684 follow-up)",
+)

@@ -47,11 +47,37 @@ _DEFAULT_TIER_CATALOG: dict[str, int] = {
     "glm": 0,
     "minimax": 0,
     "kimi": 0,
+    # tier 0 补充: 上表的 key 是 **provider id 前缀**, 实际注册名对不上的一批
+    # 2026-10-20 核对: Kimi 的 provider id 是 moonshot (不是 kimi)、智谱是 zhipu、
+    # 阿里是 alibaba/dashscope、火山是 volcengine、腾讯混元是 tencent、字节是
+    # bytedance/seed —— 它们都落在默认 tier 1, 与"国内厂商不训练 user prompt"
+    # 的意图相反, 这里补齐。
+    "moonshot": 0,
+    "zhipu": 0,
+    "zai-org": 0,
+    "alibaba": 0,
+    "dashscope": 0,
+    "volcengine": 0,
+    "doubao": 0,
+    "tencent": 0,
+    "hunyuan": 0,
+    "bytedance": 0,
+    "seed": 0,
+    "baidu": 0,
+    "ernie": 0,
+    "xiaomi": 0,
+    "stepfun": 0,
+    "siliconflow": 0,
+    "inclusionai": 0,
     # tier 1: 国外付费 (opt-out 默认)
     "openai": 1,
     "anthropic": 1,
     "google": 1,
     "openrouter": 1,  # 多数 openrouter 模型是付费, 跟 mavis 4 件套 1:1
+    # tier 2: 国外训练免费档 (Meta `-contributor` 等)。**不按 provider 分档**:
+    # 同一个 provider 下既有付费档也有训练免费档 (Meta muse-spark 普通版 vs
+    # `-contributor`), 粒度在模型 id 上, 由 model_data_policy_guard 的规则表
+    # 判定, 这里不列 provider 以免把付费档一起误伤。
 }
 
 

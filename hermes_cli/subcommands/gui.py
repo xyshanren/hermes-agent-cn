@@ -7,7 +7,6 @@ Sprint 16 档 A.3 (跟 8-12 P3 拍 A "Cat 1 减法" 1:1 配对):
 - Sprint 16 档 A.4 跟 apps/desktop 1529 文件一起 `git rm -r apps/desktop/`
 - 推荐 CN 替代: hermes-tray (D:/work/workspace/Qoder/hermes-tray/) 轻量 Tauri 2 客户端
 """
-
 from __future__ import annotations
 
 from typing import Callable
@@ -65,11 +64,27 @@ def build_gui_parser(subparsers, *, cmd_gui: Callable) -> None:
     gui_parser.add_argument(
         "--skip-build",
         action="store_true",
-        help="(deprecated CN) Skip npm install/package and launch the existing unpacked app from apps/desktop/release",
+        help="(deprecated CN) Skip npm install/package and launch the existing unpacked app from apps/desktop/release",    )
+    gui_parser.add_argument(
+        "--local", action="store_true",
+        help="Show the local-models UI in the desktop app (models pane, quickstart, picker rows)")
+    gui_parser.add_argument(
+        "--force-build", action="store_true",
+        help="Force a full rebuild even if the content stamp matches")
+    gui_parser.add_argument(
+        "--setup-tcc-identity", action="store_true",
+        help="macOS only: create/import a self-signed code-signing certificate "
+            "in the login keychain and point desktop.macos_signing_identity at "
+            "it, then re-sign the packaged app. Makes macOS TCC grants (Full "
+            "Disk Access, Accessibility, Files and Folders, microphone) survive "
+            "rebuilds with a certificate-anchored identity. Idempotent — safe "
+            "to re-run after updates.")
+    gui_parser.add_argument(
+        "--identity", default="Hermes Local Signing",
+        help="Certificate name to create/use for --setup-tcc-identity (default: Hermes Local Signing)",
     )
     gui_parser.add_argument(
-        "--force-build",
+        "--close-preview",
         action="store_true",
-        help="(deprecated CN) Force a full rebuild even if the content stamp matches",
-    )
+        help="(deprecated CN) Force a full rebuild even if the content stamp matches",    )
     gui_parser.set_defaults(func=cmd_gui)
