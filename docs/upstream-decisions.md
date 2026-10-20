@@ -358,3 +358,28 @@ scout 标记 C3=2。**问题**：T3 本身就在 CN 仓库里（保留但不维�
 **CN 特色（本轮独立实现，不提上游）**：**session 授权粒度**——2026-09-26 事故真因是 session 级 pattern 批准按描述字符串 key 授权（一次"删两个 lib 目录"的 rm -rf 批准静默放行 326 目录的 find|xargs rm，详见 `docs/approval-classifier-gaps.md`）。上游本窗口给了两个相关但 grain 不同的新物：A2 配置级（allowlist 即时回收）、A4 回合级（`viewer_turn` contextvar 豁免），均**不覆盖** CN 事故的 pattern-key 粒度。CN 方向：session 批准 key 改**命令形态指纹** + 命中规模/批量语义变化时强制重弹。**reimplement（CN 原创）**。
 
 **Revisit 条件**：K-30/K-35 需 user 拍板（cli.py 拆解路线、CN local-models vs 上游 local_runtime）｜阶段二 bump 完成后重算 2027-01-01 季度窗口｜上游 0.95M 权重开源 / NeoHorse 大版本变更（见 Jev 段）｜bump 完成后需复核 CN config 漂移（模型更名致静默 404，K-14 同族）。
+
+---
+
+### 2026-10-20 拍板：K-30 cli.py 拆解 + K-35 local_runtime 融合 + WSL 部署
+
+**K-30 cli.py 拆解路线**：**跟上游拆成 ~1,796 行**。CN 的 cli.py 当前 18,664 行单体，本地改动（glyph layout、/refine、/heartbeat、voice 等）落在被上游搬走的那 18k 行里——bump 时按上游新结构（`cli_commands_mixin`/`cli_tui_mixin`/`main_desktop.py` + argv 层搬 `agent/legacy_cli.py`）重新组织，CN 本地功能逐条重放进对应 mixin。工作量含在 K-28 bump 主体里。
+
+**K-35 local_runtime 融合设计（adopt 服务层 + 保留 CN 资产层 + ModelScope 通道 + Ollama opt-in）**：
+
+上游 `hermes_cli/local_runtime/`（20 模块 5,081 行）= **托管 llama.cpp 运行时**：自管二进制 + 监督 llama-server 常驻 + 按层估 KV（estimator 知道 SWA/SSM recurrent 张量）+ 硬件预算（discrete 卡信任 nvidia-smi 扣 9%/2GiB 桌面余量、UMA 从可用物理内存减 20%）+ 上下文阶梯（FLOOR=64K→96K→144K→216K，依据 161 个真实会话统计）+ **下载前定价**（catalog.json 每条目带 estimator 输入，下载 GB 前就能算装不装得下、多快）+ **全自动推荐**（`recommended_entry()` 识别产品默认 → 否则常驻且预测 ≥20 tok/s 的 quality 最优 → 装不下返回 PhysicsRefusal、慢的不推荐但可浏览 opt-in）+ 作为 `llamacpp-alias` provider 接入 agent。**能跑离线 agent loop**（模型下载一次后 llama-server 在 127.0.0.1 常驻，含 vision 格式管理）。
+
+CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 STT/TTS/小 LLM 的 GGUF，从 ModelScope/HF；`load_embedded_model` 嵌入式加载小模型），不负责常驻服务——CN 主本地 LLM 服务现役靠 Ollama（`HERMES_OLLAMA_HOST` 桥）+ neohorse decision service（只管 Jev 路由）。两者**互补不冗余**：上游缺国产模型目录 + 国内可达下载通道，CN 缺预算/定价/推荐/服务。
+
+**融合方案**：
+1. **目录融合**——CN 国产模型条目（Qwen3/MiniCPM5/GLM-4 系列）按上游 catalog schema 补齐 estimator 输入字段（从 GGUF 元数据抄，CN 有同款 stdlib 读取器可自动提取），并入 catalog.json → 国产模型自动进 `recommended_entry` 推荐池，硬件自适应推荐对它们同样生效。
+2. **下载通道融合**——上游 `install_files()`/`hf_browse.py` 走 HF 直连（国内不可达）；CN 把下载层抽接口：**默认 ModelScope**（已有 `_download_via_snapshot` + MODELSCOPE_TOKEN 现成），HF 作 fallback。实现按 SSRF 约束（仅 http/https、host 校验拒 localhost/环回/私有/保留）。
+3. **CLI 收敛**——CN `hermes local-models` 退役为薄壳调 local_runtime `ensure_model_ready`/supervisor，避免两套并行 CLI。CN 保留增量：ModelScope 通道、国产目录条目、quickstart 接线。
+4. **Ollama 桥降级 opt-in**——主路径切 local_runtime 托管 llama-server；`HERMES_OLLAMA_HOST` 留给已有 Ollama 或想走 CPU 的用户，不删。
+5. **64K floor 判据迁移**——从"读 Ollama num_ctx"切到"上游 GGUF + 硬件预算 estimator"（升级，更准）；CN 的 `3de7140bcd` hump 重放进新 `agent_init_ollama.py`/`context_policy.py`。
+
+**WSL 部署结论**：上游 local_runtime **原生支持 WSL + Windows GPU passthrough**——`hardware.py` 显式找 `/usr/lib/wsl/lib/nvidia-smi`（WSL CUDA 驱动固定路径），CUDA backend 走 `libggml-cuda.so` 用宿主 Windows GPU；`recovery.py` 专门处理 WSL 时钟漂移对进程恢复的干扰。Windows 直跑也原生支持（ctypes 加载 ggml dll + System32 nvidia-smi + 进程树隔离 + windows_hide_flags）。**CN 现有 WSL 部署可平滑切到 local_runtime**：Jev 决策服务不动，主 agent loop 本地模型服务从 Ollama 桥切到 local_runtime 托管 llama-server（同 WSL + Windows GPU，对用户透明升级）。
+
+**WSL 微调 TODO（可选）**：上游 discrete 卡的桌面余量扣减（9%/2GiB）对纯 WSL 部署过度保守（WSL 进程不挂 Windows 桌面），CN 检测到 WSL 环境时可降此余量（如降到 1GiB 地板）。micro-tune，不影响主干。
+
+**Revisit**：bump 完成后复核 CN catalog 国产条目 estimator 字段是否齐全 + ModelScope 下载通道 SSRF 校验 + WSL 桌面余量微调实测收益。
