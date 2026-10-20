@@ -157,6 +157,26 @@ def _without_release_age(text: str) -> str:
     return re.sub(r"(?m)^exclude-newer\s*=.*\n", "", text)
 
 
+def _lock_without_release_age(data: bytes) -> bytes:
+    """Drop the release-age option from a copied lock (CN 2026-10-20).
+
+    Upstream strips the cutoff from the GENERATED pyproject
+    (``_without_release_age``) but copies the core lock verbatim, so the
+    copied lock keeps ``exclude-newer`` / ``exclude-newer-span``. Any
+    re-resolution then still needs every candidate's publish date, and
+    mirrors that do not serve PEP 700 upload times (Tsinghua / Aliyun) fail
+    the whole install — "pilk==0.2.4 has no publish time" → unsatisfiable
+    (#135589). The core lock is vetted at lock time, so the user's machine
+    does not need the cutoff; dropping it from the copy keeps installs
+    working on domestic mirrors without changing what was locked.
+    """
+    import re
+
+    text = data.decode("utf-8", errors="replace")
+    text = re.sub(r"(?m)^exclude-newer(?:-span)?\s*=.*\n", "", text)
+    return text.encode("utf-8")
+
+
 def _is_member_candidate(plugin_dir: Path) -> bool:
     return read_python_declaration(plugin_dir).is_member
 
@@ -367,7 +387,7 @@ def lock_and_sync(
     if replay is None:
         _generate_pyproject(plugin_dirs, root, source=source)
         if seed_lock is not None:
-            (root / "uv.lock").write_bytes(seed_lock.read_bytes())
+            (root / "uv.lock").write_bytes(_lock_without_release_age(seed_lock.read_bytes()))
     else:
         if not (replay / "pyproject.toml").is_file() or not (replay / "uv.lock").is_file():
             raise InstallError("venv", f"recorded workspace is missing: {replay}")

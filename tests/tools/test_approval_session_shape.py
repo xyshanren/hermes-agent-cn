@@ -26,6 +26,9 @@ from tools.approval import (
     clear_session,
     is_approved,
 )
+# The session-key context helpers moved to tools/approval_context in the v0.22
+# base bump; the CN shape feature they scope did not move with them.
+from tools.approval_context import reset_current_session_key, set_current_session_key
 
 PATTERN_KEY = "recursive delete"
 
@@ -123,7 +126,7 @@ class TestApprovalGateEndToEnd:
     def test_bulk_deletion_prompts_again_after_single_path_session_approval(self, monkeypatch):
         key = "shape_gate"
         _reset(key)
-        token = approval_module.set_current_session_key(key)
+        token = set_current_session_key(key)
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         try:
             approve_session(key, PATTERN_KEY, command="rm -rf lib1 lib2")
@@ -141,13 +144,13 @@ class TestApprovalGateEndToEnd:
             assert prompts, "a bulk deletion must prompt again after a single-path session approval"
             assert result.get("approved") is False
         finally:
-            approval_module.reset_current_session_key(token)
+            reset_current_session_key(token)
             _reset(key)
 
     def test_same_shape_deletion_does_not_prompt_again(self, monkeypatch):
         key = "shape_gate_same"
         _reset(key)
-        token = approval_module.set_current_session_key(key)
+        token = set_current_session_key(key)
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         try:
             approve_session(key, PATTERN_KEY, command="rm -rf lib1 lib2")
@@ -165,5 +168,5 @@ class TestApprovalGateEndToEnd:
             assert not prompts, "the same shape must stay auto-approved"
             assert result.get("approved") is True
         finally:
-            approval_module.reset_current_session_key(token)
+            reset_current_session_key(token)
             _reset(key)

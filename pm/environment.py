@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import io
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -128,6 +129,32 @@ def _project_name(source: Path) -> str:
             raise InstallError("venv", f"{source / 'pyproject.toml'} has no [project].name")
         return match.group(1)
     return tomllib.loads(text)["project"]["name"]
+
+
+# uv reuses an existing lock only when the index the lock was resolved from is
+# among the configured indexes, compared as a URL string (uv's
+# "missing remote index" check). A mirror whose URL differs from the lock's by
+# a trailing slash — pip's `index-url` conventionally ends in `/simple/` — is a
+# *different* index to uv, so `uv lock --check` re-resolves and then reports a
+# lock that is in fact current. The re-resolution differs from the lock in that
+# URL string alone, so the check has to run against the index the lock itself
+# records: what it answers is whether the lock still matches the manifest, and
+# the user's configured mirror must not decide that.
+_LOCK_REGISTRY = re.compile(r'source\s*=\s*\{\s*registry\s*=\s*"([^"]+)"')
+
+
+def _lock_registry(lock: Path) -> str | None:
+    """The index a lock records for its packages, when it records exactly one.
+
+    A lock that mixes several registries cannot be checked against a single
+    one, so the caller keeps its configured index for those.
+    """
+    try:
+        text = lock.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    registries = set(_LOCK_REGISTRY.findall(text))
+    return registries.pop() if len(registries) == 1 else None
 
 
 def prune_site_pth(venv_dir: Path) -> None:
@@ -305,10 +332,13 @@ class PythonEnvironment:
 
         return venv_python(self.destination)
 
-    def _run(self, args: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess:
+    def _run(self, args: list[str], *, cwd: Path, timeout: int,
+             env_overrides: Mapping[str, str] | None = None) -> subprocess.CompletedProcess:
         # Explicit index credentials survive, but cannot redirect the project,
         # interpreter or cache selected by the operation.
         env = _base_environment(self.env)
+        if env_overrides:
+            env.update(env_overrides)
         if self.no_config:
             # --no-config only removes config files; the pip-mirror bridge
             # (pm.index_config) reaches uv as env vars. The pinned runtime
@@ -387,8 +417,23 @@ class PythonEnvironment:
             raise classify_uv_failure("lock", result.returncode, result.stderr or result.stdout)
 
     def check_lock(self, source: Path) -> None:
+        """Reject a lock that no longer matches the manifest.
+
+        The check runs against the index the lock itself records (CN), not the
+        one this machine happens to be configured for: uv only reuses a lock
+        whose registry is among the configured indexes, compared as a URL
+        string, so a domestic mirror that differs from the lock's by a
+        trailing slash makes uv re-resolve and call a current lock stale. The
+        manifest is still verified against the lock — that is what the check
+        is for — but the configured mirror no longer decides the verdict
+        (``_lock_registry``).
+        """
+        overrides: dict[str, str] = {}
+        registry = _lock_registry(source / "uv.lock")
+        if registry:
+            overrides["UV_INDEX_URL"] = registry
         result = self._run(["lock", "--check", "--python", str(self.python)],
-                           cwd=source, timeout=1800)
+                           cwd=source, timeout=1800, env_overrides=overrides)
         if result.returncode:
             raise classify_uv_failure("lock", result.returncode, result.stderr or result.stdout)
 

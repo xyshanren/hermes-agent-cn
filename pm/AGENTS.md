@@ -27,3 +27,19 @@ may move a transitive core package within core's declared ranges
 (`tests/pm/test_workspace_build_inputs.py::test_plugin_can_move_compatible_transitive_but_not_exact_requirement`).
 Plugin `python_dependencies` follow the plugin's own policy. Teknium's rulings: "plugins dont have to abide by our 14 day rule … Only hermes'
 dependencies themselves have to"; dates are checked by us, not users; pinned deps need >3 days.
+
+## The lock check runs against the lock's own index (CN, 2026-10-20)
+
+uv reuses an existing lock only when the index the lock was resolved from is among the configured
+indexes, compared as a URL string. A mirror whose URL differs from the lock's by a trailing slash —
+pip's `index-url` conventionally ends in `/simple/` — is a *different* index to uv, so
+`uv lock --check` re-resolves and then reports a lock that is in fact current ("the lockfile needs
+to be updated"). The re-resolution differs from the lock in that URL string alone, and every
+install checks the lock before syncing, so a domestic mirror made every `hermes pm install` fail.
+
+`PythonEnvironment.check_lock` therefore asks about the index the lock itself records
+(`pm/environment.py::_lock_registry`), not the one this machine is configured for: the question the
+check answers is whether the lock still matches the manifest, and the configured mirror must not
+decide it. A lock that mixes several registries cannot be checked against a single index, so
+those keep the configured one. Locking (`pm lock`) still resolves against the configured index, so
+a relock keeps pinning the lock to the local mirror.

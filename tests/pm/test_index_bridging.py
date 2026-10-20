@@ -84,3 +84,55 @@ def test_uv_timeout_names_the_mirror_knobs(tmp_path, monkeypatch):
     with pytest.raises(InstallError, match="UV_INDEX_URL") as info:
         environment._run(["sync"], cwd=tmp_path, timeout=7)
     assert "timed out after 7s" in str(info.value)
+
+
+def _lock_check_env(tmp_path, monkeypatch, lock: str, configured: str) -> tuple[list[str], dict]:
+    """Run the lock check against a lock file and return the command and the child's env."""
+    source = tmp_path / "project"
+    source.mkdir()
+    (source / "uv.lock").write_text(lock, encoding="utf-8")
+    seen: dict = {}
+
+    def record(command, **kwargs):
+        seen["command"] = command
+        seen["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", record)
+    environment = PythonEnvironment(uv=tmp_path / "uv", python=tmp_path / "python",
+                                    destination=tmp_path / "venv", cache=tmp_path / "cache",
+                                    env={"UV_INDEX_URL": configured})
+    environment.check_lock(source)
+    return seen["command"], seen["env"]
+
+
+def test_lock_check_asks_about_the_index_the_lock_records(tmp_path, monkeypatch):
+    """uv reuses a lock only when its registry is among the configured indexes.
+
+    Compared as a URL string, so a mirror that differs from the lock's by a
+    trailing slash is a *different* index to uv: the check would re-resolve
+    and report a lock that is in fact current, failing every install on a
+    domestic mirror. The check must run against the lock's own index.
+    """
+    command, env = _lock_check_env(
+        tmp_path, monkeypatch,
+        lock='[[package]]\nname = "demo"\nversion = "1.0"\n'
+             'source = { registry = "https://mirror.example/simple" }\n',
+        configured="https://mirror.example/simple/")
+
+    assert command[1:3] == ["lock", "--check"]
+    assert env["UV_INDEX_URL"] == "https://mirror.example/simple"
+
+
+def test_lock_check_keeps_the_configured_index_when_the_lock_mixes_registries(tmp_path, monkeypatch):
+    """A lock that records several registries cannot be checked against one."""
+    command, env = _lock_check_env(
+        tmp_path, monkeypatch,
+        lock='[[package]]\nname = "demo"\nversion = "1.0"\n'
+             'source = { registry = "https://mirror.example/simple" }\n'
+             '[[package]]\nname = "other"\nversion = "2.0"\n'
+             'source = { registry = "https://private.example/simple" }\n',
+        configured="https://mirror.example/simple/")
+
+    assert command[1:3] == ["lock", "--check"]
+    assert env["UV_INDEX_URL"] == "https://mirror.example/simple/"

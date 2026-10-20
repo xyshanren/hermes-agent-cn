@@ -592,6 +592,13 @@ which Hermes passes to uv, or with `UV_INDEX_URL`.
 without upload times, it stops with `has no publish time`; use
 `https://pypi.org/simple` for that step.
 
+Hermes checks a lock against the index the lock itself records, not against the
+mirror this machine is configured for. A mirror whose URL differs from the
+lock's only by a trailing slash (`/simple` versus `/simple/`) therefore cannot
+make a current lock look stale, and an install is never blocked by the spelling
+of a mirror URL. Locking still resolves against the configured index, so
+`hermes pm lock` keeps pinning `uv.lock` to the local mirror.
+
 ## Diagnostics
 
 - **Slow Python dependency builds:** PM's streamed uv commands enable verbose output. Bundle and build logs show package activity and build-backend stdout/stderr while the build runs, not only after failure.

@@ -289,7 +289,14 @@ def legacy_selection(project_root: Path) -> list[str]:
     carried = sorted(
         # An umbrella extra shares its anchor with one member; carrying it
         # would install every sibling the user never chose.
-        extra for extra in ANCHORS if extra not in {"messaging", "voice", "wake"}
+        #
+        # CN 追加 "silk"（2026-10-20, v0.22 base bump）：silk 拉 pilk，而 pilk 在
+        # 国内镜像（清华/阿里）的 simple index 上不报 upload time → uv 的
+        # release-age 检查判为 unsatisfiable，`uv sync` 直接失败。上游自己的
+        # 策略就要求 opt-in 后端（voice/TTS 类）只留在 opt-in extra 里、首次
+        # 使用时再装（tools/transcription_tools.py 有 pilk 的自愈路径），
+        # silk 只是漏在这个排除名单外。
+        extra for extra in ANCHORS if extra not in {"messaging", "voice", "wake", "silk"}
         # PM refuses a gated extra outside its platform even if a hand-synced venv carried it.
         # Installed first: judging a gate may cost a PM-runtime subprocess.
         if any(all(_installed_in(tree, anchor) for anchor in _anchors(extra)) for tree in trees)
