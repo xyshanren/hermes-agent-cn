@@ -8249,6 +8249,10 @@ def call_llm(
     if latency_info is not None:
         latency_info["queue_wait_ms"] = _elapsed_ms(queue_started_at, request_started_at)
     prior_progress_hook = getattr(_aux_progress, "hook", None)
+    # CN: the finally below reads ``response``; on the exception path the impl
+    # never assigns it, and an unbound local inside a finally would replace the
+    # real error and skip the S12 tracking reset that _rd_end performs.
+    response: Any = None
     try:
         with (
             scoped_runtime_main(main_runtime),
