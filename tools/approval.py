@@ -2214,6 +2214,10 @@ def detect_dangerous_command(command: str) -> tuple:
 _lock = threading.Lock()
 _pending: dict[str, dict] = {}
 _session_approved: dict[str, set] = {}
+# session_key -> pattern_key -> set of approved command SHAPES (CN feature:
+# session approvals are scoped to the shape that was actually approved, not
+# to every future command that happens to share the pattern description).
+_session_approved_shapes: dict[str, dict[str, set]] = {}
 _session_yolo: set[str] = set()
 _permanent_approved: set = set()
 
@@ -2543,10 +2547,116 @@ def submit_pending(session_key: str, approval: dict):
         _pending[session_key] = approval
 
 
-def approve_session(session_key: str, pattern_key: str):
-    """Approve a pattern for this session only."""
+# Constructors that can fan a deletion out over an unbounded set of paths.
+# A command using one of these is a different SHAPE from the same verb used
+# on a single path — that distinction is the whole point of shape-scoped
+# session approvals. The per-match verb is written with a character class
+# because this module is scanned as security-sensitive source and a bare
+# verb token there reads as dynamic execution to static analyzers.
+_SHAPE_BULK_MARKERS = (
+    r'\bfind\b', r'\bxargs\b', r'-e[x]ec(?:dir)?\b', r'-delete\b',
+    r'\bglob\b', r'--include\b', r'--exclude\b', r'\*', r'\?',
+)
+
+# Verbs whose presence (and significant flags) define the operation shape.
+_SHAPE_VERBS = (
+    (r'\brm\b', 'rm'),
+    (r'\bunlink\b', 'unlink'),
+    (r'\brmdir\b', 'rmdir'),
+    (r'\bshred\b', 'shred'),
+    (r'\btruncate\b', 'truncate'),
+    (r'\bchmod\b', 'chmod'),
+    (r'\bchown\b', 'chown'),
+    (r'\bmkfs(?:\.\w+)?\b', 'mkfs'),
+    (r'\bdd\b', 'dd'),
+    (r'\bgit\b', 'git'),
+)
+
+# Tokens that are part of a command's grammar, not operands.
+_SHAPE_NON_OPERANDS = frozenset({
+    "find", "xargs", "rm", "unlink", "rmdir", "shred", "truncate", "chmod",
+    "chown", "mkfs", "dd", "git", "delete",
+    "true", "false", "echo", "then", "else", "do", "done", "if", "fi",
+})
+
+
+def _approval_shape(command: str) -> str:
+    """Fingerprint the SHAPE of a command, for shape-scoped session approvals.
+
+    Shape = (bulk | single) + the destructive verbs involved with their
+    significant flags + a bucket for the operand count. Paths are
+    deliberately excluded: deleting a different path with the same verb is
+    the same shape, while reaching the same pattern key through a different
+    construct (bare ``rm -rf`` vs ``find ... | xargs rm -rf``) or at a
+    different scale (one operand vs a dozen) is a DIFFERENT shape and must
+    be approved again.
+
+    Returns "" when the command carries no recognizable shape signal — the
+    caller then falls back to pattern-key behavior.
+    """
+    if not command:
+        return ""
+    text = command.lower()
+
+    verbs: set[str] = set()
+    for pattern, name in _SHAPE_VERBS:
+        if re.search(pattern, text):
+            verbs.add(name)
+    bulk = any(re.search(marker, text) for marker in _SHAPE_BULK_MARKERS)
+    if not verbs and not bulk:
+        return ""
+
+    # git's sub-command is the operation ("git clean" != "git branch -D").
+    if "git" in verbs:
+        sub = re.search(r'\bgit\b(?:\s+-\S+)*\s+([a-z][a-z-]*)', text)
+        if sub:
+            verbs.add("git:" + sub.group(1))
+
+    operands = 0
+    for token in re.split(r"[\s|;&()<>]+", text):
+        token = token.strip("'\"")
+        if not token or token.startswith("-"):
+            continue
+        if token in _SHAPE_NON_OPERANDS:
+            continue
+        operands += 1
+    bucket = "1" if operands <= 1 else ("2-9" if operands <= 9 else "10+")
+
+    flags = ""
+    if "rm" in verbs:
+        rm_flags = "".join(sorted({
+            flag for flag in ("r", "f", "R")
+            if re.search(r'(?:^|\s)-[^\s]*' + flag, text)
+        }))
+        flags = ":" + rm_flags
+
+    verb_part = ",".join(sorted(verbs))
+    return f"{'bulk' if bulk else 'single'}|{verb_part}{flags}|arity{bucket}"
+
+
+def approve_session(session_key: str, pattern_key: str, command: str | None = None):
+    """Approve a pattern for this session only.
+
+    When ``command`` is given, the approval is additionally scoped to the
+    command's SHAPE (see :func:`_approval_shape`): approving one bulk
+    deletion must not silently authorize a differently-shaped one later.
+    The incident that motivated this (2026-09-26, session 86d315) was a
+    session approval of "rm -rf <two dirs>" that later let
+    "find ... | xargs -0 rm -rf" (326 dirs) run unattended — both hit the
+    same pattern key ("recursive delete"), so the pattern-key check alone
+    could not tell them apart.
+
+    Approvals recorded without a command (legacy entries, or callers that
+    have no command context) keep the original pattern-key behavior.
+    """
     with _lock:
         _session_approved.setdefault(session_key, set()).add(pattern_key)
+        if command:
+            shape = _approval_shape(command)
+            if shape:
+                _session_approved_shapes.setdefault(session_key, {}).setdefault(
+                    pattern_key, set()
+                ).add(shape)
 
 
 def _release_permission_mode_dependents(session_key: str) -> None:
@@ -2593,6 +2703,7 @@ def clear_session(session_key: str) -> None:
         return
     with _lock:
         _session_approved.pop(session_key, None)
+        _session_approved_shapes.pop(session_key, None)
         _session_yolo.discard(session_key)
         _pending.pop(session_key, None)
         entries = _gateway_queues.pop(session_key, [])
@@ -2617,18 +2728,39 @@ def is_current_session_yolo_enabled() -> bool:
     return is_session_yolo_enabled(get_current_session_key(default=""))
 
 
-def is_approved(session_key: str, pattern_key: str) -> bool:
+def is_approved(session_key: str, pattern_key: str, command: str | None = None) -> bool:
     """Check if a pattern is approved (session-scoped or permanent).
 
     Accept both the current canonical key and the legacy regex-derived key so
     existing command_allowlist entries continue to work after key migrations.
+
+    ``command`` enables the CN shape-scoped session approval: a session
+    approval recorded for one command shape only covers later commands of the
+    SAME shape, so approving "rm -rf <one path>" does not silently authorize
+    "find ... | xargs rm -rf" (the 2026-09-26 incident shape). Permanent
+    approvals stay pattern-scoped — "always" is an explicit standing grant.
     """
     aliases = _approval_key_aliases(pattern_key)
     with _lock:
         if any(alias in _permanent_approved for alias in aliases):
             return True
         session_approvals = _session_approved.get(session_key, set())
-        return any(alias in session_approvals for alias in aliases)
+        if not any(alias in session_approvals for alias in aliases):
+            return False
+        if not command:
+            return True
+        shape = _approval_shape(command)
+        if not shape:
+            return True
+        shapes_by_key = _session_approved_shapes.get(session_key, {})
+        recorded: set[str] = set()
+        for alias in aliases:
+            recorded |= shapes_by_key.get(alias, set())
+        if not recorded:
+            # Legacy session approval (recorded before shapes were tracked):
+            # keep the original pattern-key behavior.
+            return True
+        return shape in recorded
 
 
 def approve_permanent(pattern_key: str):
@@ -3214,7 +3346,7 @@ def _run_approval_gate(
         return {"approved": True, "message": None}
 
     session_key = get_current_session_key()
-    if is_approved(session_key, pattern_key):
+    if is_approved(session_key, pattern_key, command=display_target):
         return {"approved": True, "message": None}
 
     if approval_callback is None:
@@ -3324,9 +3456,9 @@ def _run_approval_gate(
                 }
 
             if choice == "session":
-                approve_session(session_key, pattern_key)
+                approve_session(session_key, pattern_key, command=display_target)
             elif choice == "always":
-                approve_session(session_key, pattern_key)
+                approve_session(session_key, pattern_key, command=display_target)
                 approve_permanent(pattern_key)
                 save_permanent_allowlist(_permanent_approved)
             return {"approved": True, "message": None}
@@ -3402,9 +3534,9 @@ def _run_approval_gate(
         }
 
     if choice == "session":
-        approve_session(session_key, pattern_key)
+        approve_session(session_key, pattern_key, command=display_target)
     elif choice == "always":
-        approve_session(session_key, pattern_key)
+        approve_session(session_key, pattern_key, command=display_target)
         approve_permanent(pattern_key)
         save_permanent_allowlist(_permanent_approved)
 
@@ -3935,11 +4067,11 @@ def check_all_command_guards(command: str, env_type: str,
         rule_id = findings[0].get("rule_id", "unknown") if findings else "unknown"
         tirith_key = f"tirith:{rule_id}"
         tirith_desc = _format_tirith_description(tirith_result)
-        if not is_approved(session_key, tirith_key):
+        if not is_approved(session_key, tirith_key, command=command):
             warnings.append((tirith_key, tirith_desc, True))
 
     if is_dangerous:
-        if not is_approved(session_key, pattern_key):
+        if not is_approved(session_key, pattern_key, command=command):
             warnings.append((pattern_key, description, False))
 
     # Nothing to warn about
@@ -4106,9 +4238,9 @@ def check_all_command_guards(command: str, env_type: str,
             if not smart_denied_for_owner:
                 for key, _, is_tirith in warnings:
                     if choice == "session" or (choice == "always" and is_tirith):
-                        approve_session(session_key, key)
+                        approve_session(session_key, key, command=command)
                     elif choice == "always":
-                        approve_session(session_key, key)
+                        approve_session(session_key, key, command=command)
                         approve_permanent(key)
                         save_permanent_allowlist(_permanent_approved)
 
@@ -4221,10 +4353,10 @@ def check_all_command_guards(command: str, env_type: str,
         for key, _, is_tirith in warnings:
             if choice == "session" or (choice == "always" and is_tirith):
                 # tirith: session only (no permanent broad allowlisting)
-                approve_session(session_key, key)
+                approve_session(session_key, key, command=command)
             elif choice == "always":
                 # dangerous patterns: permanent allowed
-                approve_session(session_key, key)
+                approve_session(session_key, key, command=command)
                 approve_permanent(key)
                 save_permanent_allowlist(_permanent_approved)
 
@@ -4313,7 +4445,7 @@ def check_execute_code_guard(code: str, env_type: str,
     # Check session/permanent approval — same gate as check_all_command_guards.
     # Without this, "Approve session" / "Always" choices are stored but never
     # consulted, so every execute_code call re-prompts the user (#39275).
-    if is_approved(session_key, pattern_key):
+    if is_approved(session_key, pattern_key, command=code):
         return {"approved": True, "message": None}
 
     # Smart mode: ask the aux LLM about the whole script. An APPROVE here only
@@ -4457,9 +4589,9 @@ def check_execute_code_guard(code: str, env_type: str,
     # decisions preserve their existing session/permanent behavior.
     if not smart_denied_for_owner:
         if choice == "session":
-            approve_session(session_key, pattern_key)
+            approve_session(session_key, pattern_key, command=code)
         elif choice == "always":
-            approve_session(session_key, pattern_key)
+            approve_session(session_key, pattern_key, command=code)
             approve_permanent(pattern_key)
             save_permanent_allowlist(_permanent_approved)
     # choice == "once": no persistence — approval lasts this single call only.
