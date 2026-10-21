@@ -522,6 +522,10 @@ all = [
   "hermes-agent[google]",
   "hermes-agent[web]",
   "hermes-agent[youtube]",
+  # CN: MemPalace 记忆库——config.yaml 的 mcp_servers.mempalace 引用
+  # ``mempalace.mcp_server``，依赖必须在锁里，否则每次 sync 都会丢
+  # （2026-10-21, WSL 部署验证时发现：venv 重建后 MCP 连不上）。
+  "mempalace==3.11.0",
 ]
 
 [dependency-groups]
