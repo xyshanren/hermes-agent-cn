@@ -1784,6 +1784,41 @@ def main(
     atexit.register(_run_cleanup)  # interactive mode registers again in run() (idempotent)
     _install_single_query_signal_handlers(cli)
 
+    # CN: SIGUSR2 → dump every thread's stack to a log file, for diagnosing a
+    # wedged prompt: the CLI can return from a turn without the input loop
+    # coming back, leaving the tty in cooked mode with no reader (typed chars
+    # echo, Backspace prints ^?, Enter does nothing). The process is alive and
+    # idle in that state, so there is time to run ``kill -USR2 <pid>`` from
+    # another terminal and capture where the main thread actually is. Mirrors
+    # the gateway's handler in gateway/run.py (#70344); registering a signal
+    # handler costs nothing while idle — no thread, no timer, no polling.
+    # ``chain=False`` is deliberate: SIGUSR2 has no prior handler here, so
+    # chaining would fall through to SIG_DFL, whose default action for SIGUSR2
+    # is to *terminate* the process — killing the very session we are trying to
+    # inspect. (The gateway uses chain=True, but it runs under systemd
+    # Restart=on-failure; the CLI has no such safety net.)
+    # POSIX-only: SIGUSR2 doesn't exist on Windows.
+    try:
+        import faulthandler
+        import signal as _fh_signal
+        _fh_sigusr2 = getattr(_fh_signal, "SIGUSR2", None)
+        if _fh_sigusr2 is not None and hasattr(faulthandler, "register"):
+            from hermes_constants import get_hermes_home
+            _fh_log_dir = get_hermes_home() / "logs"
+            _fh_log_dir.mkdir(parents=True, exist_ok=True)
+            # Kept open for the process lifetime — faulthandler writes to the
+            # fd from the signal handler, so it must outlive this scope.
+            _fh_file = open(_fh_log_dir / "cli_faulthandler.log", "a", encoding="utf-8")
+            faulthandler.register(
+                _fh_sigusr2,
+                file=_fh_file,
+                all_threads=True,
+                chain=False,
+            )
+            logger.debug("SIGUSR2 stack dumps -> %s", _fh_log_dir / "cli_faulthandler.log")
+    except Exception:
+        logger.debug("Could not set up CLI faulthandler", exc_info=True)
+
     if query or image:
         _run_single_query_mode(cli, query, image, quiet, oneshot, stream_json=output_format == "stream-json")
         return
