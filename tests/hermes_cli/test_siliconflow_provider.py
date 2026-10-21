@@ -16,9 +16,11 @@ from hermes_cli.model_normalize import normalize_model_for_provider
 from hermes_cli.models import (
     CANONICAL_PROVIDERS,
     _PROVIDER_LABELS,
-    provider_group_for_slug,
     provider_model_ids,
 )
+# CN: provider_group_for_slug moved to models_catalog_static in the v0.22 bump
+# (upstream split hermes_cli/models.py into per-concern siblings).
+from hermes_cli.models_catalog_static import provider_group_for_slug
 
 
 def test_siliconflow_profiles_load():

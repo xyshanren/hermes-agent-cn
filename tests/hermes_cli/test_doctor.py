@@ -1158,55 +1158,6 @@ def _run_doctor_with_healthy_oauth_fallback(
     return buf.getvalue()
 
 
-@pytest.mark.parametrize(
-    ("env_key", "bad_key", "failing_host", "minimax_oauth_status", "xai_oauth_status", "unexpected_issue"),
-    [
-        (
-            "MINIMAX_API_KEY",
-            "bad-minimax-key",
-            "minimax.io",
-            {"logged_in": True, "region": "global"},
-            None,
-            "Check MINIMAX_API_KEY in .env",
-        ),
-        (
-            "XAI_API_KEY",
-            "bad-xai-key",
-            "api.x.ai",
-            {},
-            {"logged_in": True, "auth_mode": "oauth_pkce"},
-            "Check XAI_API_KEY in .env",
-        ),
-    ],
-)
-def test_run_doctor_ignores_invalid_direct_keys_when_oauth_fallback_is_healthy(
-    monkeypatch,
-    tmp_path,
-    env_key,
-    bad_key,
-    failing_host,
-    minimax_oauth_status,
-    xai_oauth_status,
-    unexpected_issue,
-):
-    out = _run_doctor_with_healthy_oauth_fallback(
-        monkeypatch,
-        tmp_path,
-        env_key=env_key,
-        bad_key=bad_key,
-        failing_host=failing_host,
-        minimax_oauth_status=minimax_oauth_status,
-        xai_oauth_status=xai_oauth_status,
-    )
-
-    assert "invalid API key" in out
-    assert unexpected_issue not in out
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # ◆ Auth Providers — xAI OAuth display in run_doctor()
 # ---------------------------------------------------------------------------

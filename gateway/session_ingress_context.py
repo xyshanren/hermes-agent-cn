@@ -37,18 +37,13 @@ def relay_passthrough_event(transport, forward, event):
 
 
 def _relay_connector(adapter, source):
-    from gateway.relay.ws_transport import WebSocketRelayTransport
-    transport = getattr(adapter, '_transport', None)
-    if (not isinstance(transport, WebSocketRelayTransport)
-            or not transport._gateway_id or not transport._upgrade_secret
-            or transport.auth_revoked or transport._closing or transport._ws is None
-            or transport.descriptor_for_platform(source.platform.value) is None
-            or transport._bot_id_for(source.platform.value) is None):
-        raise RuntimeStoreError('permission_denied')
-    identity = json.dumps([transport._url, transport._gateway_id, transport._identities],
-                          sort_keys=True, separators=(',', ':'))
-    connector = hmac.new(transport._upgrade_secret.encode(), identity.encode(), hashlib.sha256).hexdigest()
-    return transport, connector
+    """The authenticated connector identity for a relay-fronted ingress.
+
+    CN subtraction: the connector relay is not part of this build, so no adapter
+    can carry an authenticated relay transport. A relay-shaped ingress is
+    therefore refused rather than trusted on the adapter's word.
+    """
+    raise RuntimeStoreError('permission_denied')
 
 
 def _relay_seal(transport, source, provenance):

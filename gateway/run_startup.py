@@ -1071,7 +1071,7 @@ class GatewayStartupMixin:
 
     @staticmethod
     def _start_register_plugins_relay_hooks() -> None:
-        """Plugin discovery, relay registration and shell-hook/webhook registration. Never raises."""
+        """Plugin discovery and shell-hook/webhook registration. Never raises."""
         # Discover plugins before shell hooks (plugin block decisions win ties). Explicit: the gateway
         # lazily imports run_agent, so model_tools' discover_plugins() side-effect may not have run.
         with _log_suppressed(logging.WARNING, "plugin discovery failed at gateway startup", exc_info=True):
@@ -1079,20 +1079,6 @@ class GatewayStartupMixin:
             from hermes_cli.plugins_cmd_remove import sweep_pending_plugin_deletes
             sweep_pending_plugin_deletes()  # trees a previous life still held when they were uninstalled
             discover_plugins()
-        # Relay entrypoints share the effective profile opt-out, including when a
-        # deployment injects a URL. No URL or explicitly disabled -> no side effects.
-        try:
-            from gateway.relay import (
-                register_relay_adapter, relay_url, self_provision_relay, send_relay_policy
-            )
-            # Relay self-provision sets GATEWAY_RELAY_* in os.environ BEFORE registration reads them.
-            self_provision_relay()
-            if register_relay_adapter():
-                logger.info("relay adapter registered (connector at %s)", relay_url())
-                # Declare the relevance policy to the connector so the SAME behavior governs relay delivery.
-                send_relay_policy()
-        except Exception:
-            logger.warning("relay adapter registration failed at gateway startup", exc_info=True)
         GatewayStartupMixin._register_launch_profile_config_hooks()
 
     @staticmethod
@@ -1688,7 +1674,6 @@ class GatewayStartupMixin:
         if await self._abort_startup_if_shutdown_requested():
             return True
         self.delivery_router.adapters = self.adapters
-        self._wire_teams_pipeline_runtime()
         self._running = True
         self._install_plugin_message_injector()
         # A boot that could not start every configured platform is not a normal run: stamp ``degraded``

@@ -106,20 +106,3 @@ async def test_a_compressed_messaging_conversation_is_listed_under_its_lineage_r
     assert rows[0]['message_count'] == 1  # the tip's segment, as every picker row reads after compression
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('platform', ['irc', 'line', 'google_chat'])
-async def test_a_bundled_plugin_platform_conversation_is_listed_and_resumes(tmp_path, monkeypatch, platform):
-    """Plugin platforms are ``Platform`` pseudo-members that enum iteration never yields; the cold mount
-    resolves them by label, so the listing must offer the same rows."""
-    from gateway.session_controls import AuthorityConnection
-
-    authority, db = await _owner(tmp_path, monkeypatch)
-    _messaging_row(db, 'plugin-chat', '114', platform=platform)
-    native = AuthorityConnection(authority, object(), {'provider': 'local', 'user_id': 'native',
-                                                       'profile_id': str(tmp_path), 'instance_id': 'owner'},
-                                 operator=True)
-
-    listed = await native.dispatch({'id': 1, 'method': 'session.list', 'params': {'scope': 'stored'}})
-    assert 'plugin-chat' in {row['id'] for row in listed['result']['sessions']}, listed
-    resumed = await native.dispatch({'id': 2, 'method': 'session.resume', 'params': {'session_id': 'plugin-chat'}})
-    assert 'result' in resumed, resumed

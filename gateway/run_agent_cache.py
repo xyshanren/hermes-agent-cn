@@ -784,18 +784,9 @@ class GatewayAgentCacheMixin:
         def _s(v) -> str:
             return str(v or "")
 
-        discord_ids: tuple = ()
-        discord_tools = ""
-        if src.platform == Platform.DISCORD:
-            from gateway.session import _discord_tools_loaded
-            discord_tools = "1" if _discord_tools_loaded() else "0"
-            # message_id is not rendered (value nor presence): it arrives per-turn in the user message.
-            discord_ids = (
-                _s(src.guild_id), _s(src.parent_chat_id), _s(src.thread_id), _s(src.chat_id),
-            )
-        # Slack's capability-aware platform note is gated on _slack_tools_loaded() — the gate state must
-        # be in the key (same parity contract as the Discord gate above) so a config / MCP-registration
-        # flip re-renders once instead of serving a stale pinned note for the rest of the session.
+        # Slack's capability-aware platform note is gated on _slack_tools_loaded() — the gate
+        # state must be in the key so a config / MCP-registration flip re-renders once instead
+        # of serving a stale pinned note for the rest of the session.
         slack_tools = ""
         if src.platform == Platform.SLACK:
             from gateway.session import _slack_tools_loaded
@@ -809,7 +800,7 @@ class GatewayAgentCacheMixin:
             src.platform.value if src.platform else "",
             _s(src.chat_id), _s(src.thread_id), _s(src.chat_type), _s(src.chat_name), _s(src.chat_topic),
             _s(src.user_name), _s(src.user_id), _s(getattr(src, "profile", None)),
-            bool(context.shared_multi_user_session), discord_ids, discord_tools, slack_tools,
+            bool(context.shared_multi_user_session), slack_tools,
             tuple(p.value for p in context.connected_platforms),
             tuple(
                 (p.value, _s(getattr(hc, "name", "")), _s(getattr(hc, "chat_id", "")))

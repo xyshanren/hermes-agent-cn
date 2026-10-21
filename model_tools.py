@@ -355,18 +355,6 @@ def _rewrite_execute_code(td: dict[str, Any], available: set) -> Optional[dict[s
     return _fn_def(build_execute_code_schema(SANDBOX_ALLOWED_TOOLS & available, mode=_get_execution_mode()))
 
 
-def _discord_rewriter(schema_fn_name: str):
-    """Schema depends on the bot's privileged intents and the config action allowlist; None drops the tool."""
-    def _rewrite(td: dict[str, Any], available: set) -> Optional[dict[str, Any]]:
-        try:
-            from tools import discord_tool as _dt
-            dynamic = getattr(_dt, schema_fn_name)()
-        except Exception:
-            dynamic = None
-        return None if dynamic is None else _fn_def(dynamic)
-    return _rewrite
-
-
 def _rewrite_browser_navigate(td: dict[str, Any], available: set) -> Optional[dict[str, Any]]:
     """Static schema is toolset-neutral; name the lightweight retrieval tools only when they are present
     (#39797: a hard "prefer web_search" overrode the user's SOUL.md and was hallucinated when web was off)."""
@@ -463,8 +451,6 @@ def _compose_rewriters(*fns):
 
 _DYNAMIC_SCHEMA_REWRITERS = {
     "execute_code": _rewrite_execute_code,
-    "discord": _discord_rewriter("get_dynamic_schema_core"),
-    "discord_admin": _discord_rewriter("get_dynamic_schema_admin"),
     "browser_navigate": _rewrite_browser_navigate,
     "browser_cdp": _rewrite_browser_cdp,
     "browser_exec": _compose_rewriters(_rewrite_browser_exec, _rewrite_input_tool_for_vault),

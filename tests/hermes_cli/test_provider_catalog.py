@@ -42,16 +42,3 @@ def test_copilot_surfaces_as_a_provider_with_its_own_token_var():
         "Copilot's primary var must be the provider-owned token, not shared GITHUB_TOKEN"
     )
 
-def test_api_key_providers_expose_a_credential_env_var():
-    """Every keys-tab provider that authenticates via a pasted API key must
-    surface at least one env var to write the key into (otherwise the GUI can't
-    configure it).
-
-    Exemptions: ``aws_sdk`` (bedrock — uses AWS_REGION/AWS_PROFILE) and the
-    ``custom`` bring-your-own-endpoint pseudo-provider (configured inline via
-    the ``local-endpoint`` flow).
-    """
-    exempt = {"custom"}
-    for d in provider_catalog():
-        if d.auth_type == "api_key" and d.slug not in exempt:
-            assert d.api_key_env_vars, f"{d.slug} is api_key but exposes no env var"

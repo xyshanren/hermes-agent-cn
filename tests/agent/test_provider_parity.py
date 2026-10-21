@@ -88,8 +88,6 @@ def _make_agent(monkeypatch, provider, api_mode="chat_completions", base_url="ht
 
 # ── _build_api_kwargs tests ─────────────────────────────────────────────────
 
-class TestBuildApiKwargsOpenRouter:
-
     def test_includes_reasoning_in_extra_body(self, monkeypatch):
         agent = _make_agent(monkeypatch, "openrouter")
         agent.model = "anthropic/claude-sonnet-4-20250514"
@@ -331,9 +329,6 @@ class TestBuildApiKwargsKimiNoTemperatureOverride:
         assert "temperature" not in kwargs
 
 
-class TestBuildApiKwargsAIGateway:
-
-
     def test_includes_reasoning_in_extra_body(self, monkeypatch):
         agent = _make_agent(monkeypatch, "ai-gateway", base_url="https://ai-gateway.vercel.sh/v1", model="gpt-4o")
         messages = [{"role": "user", "content": "hi"}]
@@ -342,25 +337,6 @@ class TestBuildApiKwargsAIGateway:
         assert "reasoning" in extra
         assert extra["reasoning"]["enabled"] is True
 
-
-
-class TestBuildApiKwargsNousPortal:
-    def test_includes_nous_product_tags(self, monkeypatch):
-        from agent.portal_tags import nous_portal_tags
-        agent = _make_agent(
-            monkeypatch,
-            "nous",
-            base_url="https://inference-api.nousresearch.com/v1",
-            model="gpt-5",
-        )
-        messages = [{"role": "user", "content": "hi"}]
-        kwargs = agent._build_api_kwargs(messages)
-        extra = kwargs.get("extra_body", {})
-        assert extra.get("tags") == nous_portal_tags(session_id=agent.session_id)
-
-
-
-class TestBuildApiKwargsCustomEndpoint:
 
 
     def test_fireworks_tool_call_payload_strips_codex_only_fields(self, monkeypatch):

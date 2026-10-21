@@ -164,8 +164,6 @@ TOOLSETS = {
         "files, and (for orchestrators) list, unblock, and fan out tasks.",
         [t for t in _HERMES_CORE_TOOLS if t.startswith("kanban_")],
     ),
-    "discord": _ts("Discord read and participate tools (fetch messages, search members, create threads)", ["discord"]),
-    "discord_admin": _ts("Discord server management (list channels/roles, pin messages, assign roles)", ["discord_admin"]),
     "yuanbao": _ts("Yuanbao platform tools - group info, member queries, DM, stickers", _YUANBAO_TOOLS),
     "feishu_doc": _ts("Read Feishu/Lark document content", ["feishu_doc_read"]),
     "feishu_drive": _ts("Feishu/Lark document comment operations (list, reply, add)", _FEISHU_TOOLS[1:]),
@@ -203,16 +201,6 @@ TOOLSETS = {
     # Mirrors hermes-cli; `hermes tools` platform config filters it down and
     # _get_platform_tools() drops _DEFAULT_OFF_TOOLSETS unless user-enabled.
     "hermes-cron": _bundle("Default cron toolset - same core tools as hermes-cli; gated by `hermes tools`"),
-    "hermes-telegram": _bundle("Telegram bot toolset - full access for personal use (terminal has safety checks)"),
-    "hermes-discord": _bundle(
-        "Discord bot toolset - full access (terminal has safety checks via dangerous "
-        "command approval)",
-        ["discord", "discord_admin"],
-    ),
-    "hermes-whatsapp": _bundle("WhatsApp bot toolset - similar to Telegram (personal messaging, more trusted)"),
-    "hermes-slack": _bundle("Slack bot toolset - full access for workspace use (terminal has safety checks)"),
-    "hermes-signal": _bundle("Signal bot toolset - encrypted messaging platform (full access)"),
-    "hermes-bluebubbles": _bundle("BlueBubbles iMessage bot toolset - Apple iMessage via local BlueBubbles server"),
     "hermes-email": _bundle("Email bot toolset - interact with Hermes via email (IMAP/SMTP)"),
     "hermes-mattermost": _bundle("Mattermost bot toolset - self-hosted team messaging (full access)"),
     "hermes-matrix": _bundle("Matrix bot toolset - decentralized encrypted messaging (full access)"),

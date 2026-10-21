@@ -11,12 +11,3 @@ import importlib
 import pytest
 
 
-@pytest.mark.parametrize("platform, cls", [("signal", "SignalAdapter"), ("yuanbao", "YuanbaoAdapter")])
-def test_registry_factory_is_the_canonical_adapter_class(platform, cls):
-    from gateway.platform_registry import platform_registry
-    from hermes_cli.plugins import discover_plugins
-
-    discover_plugins()
-    entry = platform_registry.get(platform)
-    canonical = getattr(importlib.import_module(f"plugins.platforms.{platform}.adapter"), cls)
-    assert entry.adapter_factory is canonical, entry.adapter_factory.__module__

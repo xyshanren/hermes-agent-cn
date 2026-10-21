@@ -136,41 +136,6 @@ def test_whatsapp_mention_rejections_never_reach_the_bridge(whatsapp_bridge, cap
     assert "mention" in capsys.readouterr().err.lower()
     assert whatsapp_bridge.calls == []
 
-def test_whatsapp_mentions_ride_the_first_bridge_payload_only(whatsapp_bridge, tmp_path, capsys):
-    """Across chunked text and text+media, exactly one bridge payload carries the normalized,
-    deduplicated JIDs; a captioned single-media send carries them on the media payload; a bridge
-    without native-mention support fails closed instead of silently sending an unmentioned message."""
-    calls = whatsapp_bridge.calls
-    image = tmp_path / "photo.png"
-    image.write_bytes(b"\x89PNG\r\n\x1a\n")
-    long_message = "@15550000001 " + "word " * 1000
-
-    with pytest.raises(SystemExit) as exc:
-        send_cmd.cmd_send(_parse([
-            "--to", _GROUP, "--mention", "+1 (555) 000-0001", "--mention", "15550000001@s.whatsapp.net",
-            f"{long_message} MEDIA:{image}",
-        ]))
-    assert exc.value.code == 0
-    text_payloads = [payload for path, payload in calls if path == "send"]
-    assert len(text_payloads) >= 2 and calls[-1][0] == "send-media"
-    assert text_payloads[0]["mentions"] == ["15550000001@s.whatsapp.net"]
-    assert all("mentions" not in payload for _, payload in calls[1:])
-
-    calls.clear()
-    with pytest.raises(SystemExit) as exc:
-        send_cmd.cmd_send(_parse(["--to", _GROUP, "--mention", "15550000001", f"hello @15550000001 MEDIA:{image}"]))
-    assert exc.value.code == 0
-    assert [path for path, _ in calls] == ["send-media"]
-    assert calls[0][1]["mentions"] == ["15550000001@s.whatsapp.net"]
-
-    calls.clear()
-    whatsapp_bridge.state["supports_mentions"] = False
-    with pytest.raises(SystemExit) as exc:
-        send_cmd.cmd_send(_parse(["--to", _GROUP, "--mention", "15550000001", "hello @15550000001"]))
-    assert exc.value.code == 1
-    assert "does not support native mentions" in capsys.readouterr().err
-    assert calls == []
-
 # ---------------------------------------------------------------------------
 # --list
 # ---------------------------------------------------------------------------

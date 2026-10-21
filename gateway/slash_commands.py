@@ -226,10 +226,6 @@ class GatewaySlashCommandsMixin(
             return None, None
         return self._delivery_adapter_for(event.source), self._session_key_for_source(event.source)
 
-    def _telegramized_command_reply(self, event: MessageEvent, text: str) -> str:
-        from gateway.run import _telegramize_command_mentions
-        return _telegramize_command_mentions(text, getattr(getattr(event, "source", None), "platform", None))
-
     def _checkpoint_manager(self, source=None):
         """A CheckpointManager from a local session's frozen policy, else gateway config; None when disabled."""
         from gateway.run import _checkpoint_agent_kwargs, _load_gateway_config
@@ -623,15 +619,14 @@ class GatewaySlashCommandsMixin(
 
     async def _handle_help_command(self, event: MessageEvent) -> str:
         """Handle /help command - list available commands."""
-        return self._telegramized_command_reply(
-            event, _execute("help", options=self._catalog_options(event)).text)
+        return _execute("help", options=self._catalog_options(event)).text
 
     async def _handle_commands_command(self, event: MessageEvent) -> str:
         # Page size is a surface parameter (Telegram messages are shorter).
         page_size = 15 if event.source.platform == Platform.TELEGRAM else 20
         options = {"page_size": page_size, **self._catalog_options(event)}
         reply = _execute("commands", args=event.get_command_args(), options=options)
-        return self._telegramized_command_reply(event, reply.text)
+        return reply.text
 
     async def _handle_set_home_command(self, event: MessageEvent) -> str:
         """Handle /sethome command -- set the current chat as the platform's home channel."""

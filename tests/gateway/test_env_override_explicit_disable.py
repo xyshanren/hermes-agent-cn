@@ -23,19 +23,6 @@ CRED_ENV = {
         "WEIXIN_TOKEN": "wx_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e",
         "WEIXIN_ACCOUNT_ID": "acct_12345",
     },
-    "whatsapp_cloud": {
-        "WHATSAPP_CLOUD_PHONE_NUMBER_ID": "1234567890",
-        "WHATSAPP_CLOUD_ACCESS_TOKEN": "EAAB-test-access-token",
-    },
-    # flag-driven, not credential-driven: WHATSAPP_ENABLED=true must not beat an explicit YAML disable (#73289)
-    "whatsapp": {"WHATSAPP_ENABLED": "true"},
-    "email": {
-        "EMAIL_ADDRESS": "bot@example.com",
-        "EMAIL_PASSWORD": "app-password",
-        "EMAIL_IMAP_HOST": "imap.example.com",
-        "EMAIL_SMTP_HOST": "smtp.example.com",
-    },
-    "sms": {"TWILIO_ACCOUNT_SID": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
     "dingtalk": {"DINGTALK_CLIENT_ID": "ding-id", "DINGTALK_CLIENT_SECRET": "ding-secret"},
     "feishu": {"FEISHU_APP_ID": "cli_feishu", "FEISHU_APP_SECRET": "feishu-secret"},
     "wecom": {"WECOM_BOT_ID": "wecom-bot", "WECOM_SECRET": "wecom-secret"},
@@ -43,20 +30,13 @@ CRED_ENV = {
         "WECOM_CALLBACK_CORP_ID": "corp-id",
         "WECOM_CALLBACK_CORP_SECRET": "corp-secret",
     },
-    "bluebubbles": {
-        "BLUEBUBBLES_SERVER_URL": "http://127.0.0.1:1234",
-        "BLUEBUBBLES_PASSWORD": "bb-password",
-    },
     "qqbot": {"QQ_APP_ID": "qq-app", "QQ_CLIENT_SECRET": "qq-secret"},
     "yuanbao": {"YUANBAO_APP_ID": "yb-app", "YUANBAO_APP_SECRET": "yb-secret"},
-    # control: the pattern that always honored the explicit disable
-    "telegram": {"TELEGRAM_BOT_TOKEN": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"},
 }
 
+# CN subtraction: only the platforms this build ships.
 _PLATFORM_ENV_PREFIXES = (
-    "TELEGRAM_", "DISCORD_", "SLACK_", "WEIXIN_", "WHATSAPP_", "HASS_", "EMAIL_",
-    "TWILIO_", "DINGTALK_", "FEISHU_", "WECOM_", "BLUEBUBBLES_", "QQ_", "QQBOT_",
-    "YUANBAO_", "GATEWAY_RELAY", "SIGNAL_", "MATTERMOST_", "MATRIX_",
+    "WEIXIN_", "DINGTALK_", "FEISHU_", "WECOM_", "QQ_", "QQBOT_", "YUANBAO_",
 )
 
 def _isolate(monkeypatch, tmp_path, env):

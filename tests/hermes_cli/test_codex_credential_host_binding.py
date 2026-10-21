@@ -320,34 +320,6 @@ def _load_image_plugin():
     return module
 
 
-@pytest.mark.parametrize("key", [OPAQUE, JWT], ids=["opaque", "jwt"])
-def test_image_request_goes_to_the_pool_entry_gateway(monkeypatch, key):
-    """Image generation with a pool-selected gateway key and a ``model.base_url``-only gateway:
-    zero Authorization-bearing traffic to chatgpt.com."""
-    import httpx
-
-    home = _home(monkeypatch)
-    _write_config(home, base_url=GW)
-    _write_pool(home, key)
-    img = _load_image_plugin()
-    seen = []
-
-    def handler(request):
-        seen.append((str(request.url), request.headers.get("authorization", "")))
-        return httpx.Response(200, json={"data": [{"b64_json": "aGk="}]}, request=request)
-
-    real_client = httpx.Client
-    monkeypatch.setattr(httpx, "Client", lambda *a, **kw: real_client(
-        transport=httpx.MockTransport(handler), headers=kw.get("headers"), timeout=kw.get("timeout")))
-    monkeypatch.setattr(img, "save_b64_image", lambda b64, prefix="": home / "img.png")
-
-    result = img.OpenAICodexImageGenProvider().generate("a cat")
-
-    assert result["success"] is True, result
-    assert _authorized_hosts(seen) == {"codex-gw.example"}
-    assert seen[0][1] == f"Bearer {key}"
-
-
 # ── quota-restored probe + /usage (pool rows keep the canonical ChatGPT URL) ──────────────
 
 

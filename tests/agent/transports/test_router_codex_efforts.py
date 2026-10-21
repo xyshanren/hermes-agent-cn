@@ -62,38 +62,6 @@ class TestProfileContract:
     def test_unknown_model_is_none(self, seeded_catalog):
         assert seeded_catalog.supported_reasoning_efforts("some-byok-route") is None
 
-    def test_cold_cache_is_none_and_never_blocks(self, monkeypatch):
-        profile, mod = _router_plugin_module()
-        monkeypatch.setattr(mod, "_efforts_cache", None)
-        monkeypatch.setattr(mod, "_disk_checked", True)
-        monkeypatch.setattr(mod, "_warm_efforts_async", lambda: None)
-        assert profile.supported_reasoning_efforts("grok-4.6") is None
-
-    def test_parse_efforts_catalog_shapes(self):
-        _, mod = _router_plugin_module()
-        parsed = mod._parse_efforts([
-            {
-                "id": "grok-4.6",
-                "router": {"capabilities": {"reasoning": {
-                    "supported": True,
-                    "efforts": [{"value": "low"}, {"value": "high"}],
-                }}},
-            },
-            {
-                "id": "gpt-4.1",
-                "router": {"capabilities": {"reasoning": {"supported": False, "efforts": []}}},
-            },
-            # reasoning supported but vocabulary unpublished -> omitted (unknown)
-            {
-                "id": "mystery-model",
-                "router": {"capabilities": {"reasoning": {"supported": True, "efforts": []}}},
-            },
-            # no router metadata at all -> omitted
-            {"id": "bare-model"},
-        ])
-        assert parsed == {"grok-4.6": ["low", "high"], "gpt-4.1": []}
-
-
 class TestTransportClamp:
     def _kwargs(self, transport, model, reasoning_config=None):
         return transport.build_kwargs(
@@ -131,15 +99,6 @@ class TestTransportClamp:
         assert kw["reasoning"]["effort"] == "xhigh"
         kw = self._kwargs(transport, "some-byok-route", {"effort": "medium"})
         assert kw["reasoning"]["effort"] == "medium"
-
-    def test_cold_cache_keeps_default_behavior(self, transport, monkeypatch):
-        _, mod = _router_plugin_module()
-        monkeypatch.setattr(mod, "_efforts_cache", None)
-        monkeypatch.setattr(mod, "_disk_checked", True)
-        monkeypatch.setattr(mod, "_warm_efforts_async", lambda: None)
-        kw = self._kwargs(transport, "grok-4.6", {"effort": "xhigh"})
-        # Cold cache -> no declaration -> default codex vocabulary (xhigh ok).
-        assert kw["reasoning"]["effort"] == "xhigh"
 
     def test_other_providers_unaffected(self, transport, seeded_catalog):
         kw = transport.build_kwargs(
@@ -191,45 +150,3 @@ class TestHostResolvedProfile:
         assert kw["reasoning"]["effort"] == "xhigh"
 
 
-class TestCatalogIngestValidation:
-    def test_unrecognized_effort_levels_are_dropped_at_ingest(self):
-        _, mod = _router_plugin_module()
-        parsed = mod._parse_efforts([
-            {
-                "id": "future-model",
-                "router": {"capabilities": {"reasoning": {
-                    "supported": True,
-                    "efforts": [
-                        {"value": "low"},
-                        {"value": "hyperthink"},  # a new vendor tier
-                        {"value": "high"},
-                    ],
-                }}},
-            },
-            {
-                # every level unknown -> omitted entirely (unknown model), so
-                # the transport keeps its defaults instead of suppressing or
-                # passing garbage through.
-                "id": "alien-model",
-                "router": {"capabilities": {"reasoning": {
-                    "supported": True,
-                    "efforts": [{"value": "hyperthink"}, {"value": "galaxy"}],
-                }}},
-            },
-        ])
-        assert parsed == {"future-model": ["low", "high"]}
-
-    def test_fetch_models_dedupes_while_preserving_catalog_order(self, monkeypatch):
-        profile, mod = _router_plugin_module()
-        monkeypatch.setattr(mod, "_disk_path", lambda: None)
-        monkeypatch.setattr(
-            mod,
-            "_fetch_catalog_items",
-            lambda **_kwargs: [
-                {"id": "b"},
-                {"id": "a"},
-                {"id": "b"},
-                {"id": "c"},
-            ],
-        )
-        assert profile.fetch_models() == ["b", "a", "c"]

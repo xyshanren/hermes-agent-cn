@@ -755,37 +755,6 @@ def _hydrate_from_history(agent: Any, conversation_history: Optional[list[Any]])
                 agent._turns_since_memory = prior_user_turns % agent._memory_nudge_interval
 
 
-    messages.append(user_msg)
-    current_turn_user_idx = len(messages) - 1
-    agent._persist_user_message_idx = current_turn_user_idx
-
-    # Track user turns for memory flush and periodic nudge logic.
-    agent._user_turn_count += 1
-    # Copilot x-initiator: the first API call of this user turn is
-    # user-initiated; tool-loop follow-ups revert to "agent" (#3040).
-    agent._is_user_initiated_turn = True
-    # CN model_routing: re-evaluate routing rules on every user turn
-    # (the rules match this turn's message content — keywords, image
-    # presence, length). Cleared here so _apply_model_routing runs once
-    # per turn, not once per agent lifetime.
-    agent._routing_applied = False
-
-    # Reset the streaming context scrubber at the top of each turn.
-    scrubber = getattr(agent, "_stream_context_scrubber", None)
-    if scrubber is not None:
-        scrubber.reset()
-    # Reset the think scrubber for the same reason.
-    think_scrubber = getattr(agent, "_stream_think_scrubber", None)
-    if think_scrubber is not None:
-        think_scrubber.reset()
-
-    # Preserve the original user message (no nudge injection).
-    original_user_message = persist_user_message if persist_user_message is not None else user_message
-
-    # Track memory nudge trigger (turn-based, checked here).
-    should_review_memory = False
-
-
 def _tick_memory_nudge(agent: Any) -> bool:
     """Advance the turn-based memory nudge counter; ``True`` when the review should fire."""
     if (agent._memory_nudge_interval > 0
@@ -1157,6 +1126,11 @@ def build_turn_context(
     # Copilot x-initiator: the first API call of this user turn is user-initiated;
     # tool-loop follow-ups revert to "agent".
     agent._is_user_initiated_turn = True
+    # CN model_routing: re-evaluate routing rules on every user turn
+    # (the rules match this turn's message content — keywords, image
+    # presence, length). Cleared here so _apply_model_routing runs once
+    # per turn, not once per agent lifetime.
+    agent._routing_applied = False
 
     # Preserve the original user message (no nudge injection).
     original_user_message = persist_user_message if persist_user_message is not None else user_message

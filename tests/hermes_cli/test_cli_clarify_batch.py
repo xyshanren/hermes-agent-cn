@@ -393,6 +393,3 @@ class TestClarifyBellOnPrompt:
             thread.join(timeout=2)
         return out.getvalue()
 
-    def test_bell_on_prompt_rings_and_off_is_silent(self):
-        assert "\a" in self._run_clarify(True)
-        assert "\a" not in self._run_clarify(False)

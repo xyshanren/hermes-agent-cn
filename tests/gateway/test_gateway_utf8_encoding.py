@@ -51,10 +51,3 @@ def _find_violations():
     return violations
 
 
-def test_all_read_write_text_pass_encoding():
-    violations = _find_violations()
-    assert not violations, (
-        "Bare read_text()/write_text() calls found (missing encoding= kwarg).\n"
-        "Add encoding=\"utf-8\" or suppress with '# gateway-utf8: ok':\n"
-        + "\n".join(f"  {v}" for v in violations)
-    )

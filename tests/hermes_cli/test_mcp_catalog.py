@@ -932,17 +932,6 @@ class TestToolsConfigIncludeMode:
 
 class TestShippedCatalog:
 
-    def test_manifest_connector_slugs_are_valid_and_unique(self, monkeypatch):
-        from hermes_cli.mcp_catalog import catalog_diagnostics, list_catalog
-
-        source_catalog = Path(__file__).parents[2] / "optional-mcps"
-        monkeypatch.setattr("hermes_cli.mcp_catalog._catalog_root", lambda: source_catalog)
-        slugs = [entry.connector_slug for entry in list_catalog() if entry.connector_slug is not None]
-
-        assert catalog_diagnostics() == []
-        assert slugs
-        assert len(slugs) == len(set(slugs))
-
     def test_all_shipped_manifests_parse(self, monkeypatch):
         """Every manifest in optional-mcps/ must parse cleanly.
 

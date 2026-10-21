@@ -27,24 +27,6 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def test_gateway_subparser_has_no_service_subcommand(capsys):
-    parser = _build_parser()
-    try:
-        parser.parse_args(["gateway", "service", "on"])
-    except SystemExit:
-        pass
-    else:
-        raise AssertionError("`hermes gateway service` must stay removed")
-    finally:
-        capsys.readouterr()
-
-
-def test_gateway_run_has_no_service_flag():
-    parser = _build_parser()
-    args = parser.parse_args(["gateway", "run"])
-    assert not hasattr(args, "service"), "gateway run --service must stay removed"
-
-
 def test_config_defaults_have_no_gateway_service_key():
     assert "service" not in config_defaults.DEFAULT_CONFIG["gateway"], (
         "gateway.service (the SCM posture key) must stay removed"

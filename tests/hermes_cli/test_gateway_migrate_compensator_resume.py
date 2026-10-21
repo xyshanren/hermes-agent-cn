@@ -102,21 +102,3 @@ def test_the_compensator_reports_failure_when_no_gateway_comes_up(stranded, caps
     assert (stranded.root / gm.MANIFEST_NAME).exists(), "the manifest must survive for the next resume"
 
 
-def test_a_preflight_blocker_can_no_longer_trap_a_host_that_is_mid_migration(stranded, capsys):
-    """BLOCKER 3: the only documented recovery is 're-run, it resumes'. A blocker that appears
-    AFTER the units are gone (here: both profiles ending up on one bot token) used to make that
-    re-run exit 1 forever, with --standalone gone and no rollback command left."""
-    for name in ("coder", "ops"):
-        (stranded.root / "profiles" / name / ".env").write_text(
-            "TELEGRAM_BOT_TOKEN=111111:shared\n", encoding="utf-8")
-    plan = gm.build_migration_plan()
-    assert plan.blocked and plan.manifest is not None, "the premise: blocked AND mid-migration"
-
-    with pytest.raises(SystemExit) as exc:
-        gm.cmd_migrate(SimpleNamespace(multiplex=True, dry_run=False, yes=True))
-    assert exc.value.code == 0, "the blocked gate must not refuse a host that is already mid-migration"
-    out = capsys.readouterr().out
-    assert "resuming the migration recorded in" in out
-    assert "Preflight findings" in out, "the checks still RUN and are reported"
-    assert str(stranded.root / gm.MANIFEST_NAME) in out
-    assert "serves 3 profiles" in out and not (stranded.root / gm.MANIFEST_NAME).exists()

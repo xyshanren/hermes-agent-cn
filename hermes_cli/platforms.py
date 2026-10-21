@@ -4,16 +4,48 @@ from collections import OrderedDict
 from typing import NamedTuple
 
 
-# Sprint 16 档 A.1: CN 减法 — 海外平台默认从 get_all_platforms() 排除
-# Sprint 16 档 A.2 跟 11 个海外平台文件一起 `git rm`
+# CN 减法 (Cat 1 减法) — the platforms this build does NOT ship.
+#
+# The upstream adapters live under ``plugins/platforms/<name>/``; CN removed the
+# overseas ones in-tree, so the directories are gone. This set is the single
+# switch that keeps the removed platforms out of every user-facing enumeration
+# (CLI/TUI menus, the dashboard's messaging catalog, the config defaults) so
+# nothing offers a platform this build cannot connect to.
+#
+# The `Platform` enum in `gateway/config.py` still carries the upstream member
+# names: they are identifier constants used across the core's platform
+# branches, not registrations. Availability is decided here and by the
+# platform registry (a platform with no adapter is not offered).
 CN_DISABLED_PLATFORMS: frozenset[str] = frozenset({
+    "a2a",
+    "bluebubbles",
+    "buzz",
+    "discord",
+    "email",
+    "google_chat",
+    "homeassistant",
+    "irc",
+    "line",
+    "matrix",
+    "mattermost",
+    "msgraph_webhook",
+    "ntfy",
+    "photon",
+    "raft",
+    "signal",
+    "simplex",
+    "slack",
+    "sms",
+    "teams",
     "telegram",
     "whatsapp",
     "whatsapp_cloud",
-    "signal",
-    "bluebubbles",
-    "msgraph_webhook",
 })
+
+
+def platform_available(platform_id: str) -> bool:
+    """True when this build ships the platform (not in the CN subtraction set)."""
+    return platform_id.lower() not in CN_DISABLED_PLATFORMS
 
 
 class PlatformInfo(NamedTuple):
@@ -25,16 +57,6 @@ class PlatformInfo(NamedTuple):
 # Ordered so that TUI menus are deterministic.
 PLATFORMS: OrderedDict[str, PlatformInfo] = OrderedDict([
     ("cli",            PlatformInfo(label="🖥️  CLI",            default_toolset="hermes-cli")),
-    ("telegram",       PlatformInfo(label="📱 Telegram",        default_toolset="hermes-telegram")),
-    ("discord",        PlatformInfo(label="💬 Discord",         default_toolset="hermes-discord")),
-    ("slack",          PlatformInfo(label="💼 Slack",           default_toolset="hermes-slack")),
-    ("whatsapp",       PlatformInfo(label="📱 WhatsApp",        default_toolset="hermes-whatsapp")),
-    ("whatsapp_cloud", PlatformInfo(label="📱 WhatsApp Business (Cloud)", default_toolset="hermes-whatsapp")),
-    ("signal",         PlatformInfo(label="📡 Signal",          default_toolset="hermes-signal")),
-    ("bluebubbles",    PlatformInfo(label="💙 BlueBubbles",     default_toolset="hermes-bluebubbles")),
-    ("email",          PlatformInfo(label="📧 Email",           default_toolset="hermes-email")),
-    ("mattermost",     PlatformInfo(label="💬 Mattermost",      default_toolset="hermes-mattermost")),
-    ("matrix",         PlatformInfo(label="💬 Matrix",          default_toolset="hermes-matrix")),
     ("dingtalk",       PlatformInfo(label="💬 DingTalk",        default_toolset="hermes-dingtalk")),
     ("feishu",         PlatformInfo(label="🪽 Feishu",          default_toolset="hermes-feishu")),
     ("wecom",          PlatformInfo(label="💬 WeCom",           default_toolset="hermes-wecom")),
@@ -57,6 +79,8 @@ def platform_label(key: str, default: str = "") -> str:
     info = PLATFORMS.get(key)
     if info is not None:
         return info.label
+    if not platform_available(key):
+        return default
     try:
         from gateway.platform_registry import platform_registry
         entry = platform_registry.get(key)
@@ -68,12 +92,16 @@ def platform_label(key: str, default: str = "") -> str:
 
 
 def get_all_platforms() -> OrderedDict[str, PlatformInfo]:
-    """PLATFORMS plus plugin-registered platforms (appended after builtins) — use for menus."""
+    """PLATFORMS plus plugin-registered platforms (appended after builtins) — use for menus.
+
+    Platforms in the CN subtraction set are excluded: this build has no adapter
+    for them, so offering them would be a dangling entry.
+    """
     merged = OrderedDict(PLATFORMS)
     try:
         from gateway.platform_registry import platform_registry
         for entry in platform_registry.plugin_entries():
-            if entry.name not in merged:
+            if entry.name not in merged and platform_available(entry.name):
                 merged[entry.name] = PlatformInfo(_plugin_label(entry), f"hermes-{entry.name}")
     except Exception:
         pass

@@ -96,7 +96,9 @@ def _load_user_tier_overrides() -> dict[str, int]:
         return {}
 
     try:
-        import yaml  # type: ignore[import-untyped]
+        # upstream 删掉了 pyyaml 依赖; 走仓库共享的 ruamel 封装 (YAML 1.1 policy),
+        # API 与 pyyaml 的 safe_load / YAMLError 一致.
+        import hermes_yaml as yaml
     except ImportError:
         return {}
 

@@ -1,5 +1,4 @@
-"""Messaging-platform catalog and onboarding helpers: platform overrides/env discovery, WhatsApp
-and Telegram onboarding state.
+"""Messaging-platform catalog helpers: platform overrides and env discovery.
 """
 
 import logging
@@ -45,18 +44,12 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/msgraph-webhook",
         "required_env": (),
     },
-    "relay": {
-        "name": "Relay (experimental)",
-        "description": "Generic relay adapter fronted by the Hermes Relay connector.",
-        "docs_url": "", "required_env": (),
-    },
 }
 
 # Display order: well-known platforms surface first; unknown plugins fall to
 # the end alphabetically.
 _PLATFORM_ORDER: tuple[str, ...] = (
-    "telegram", "discord", "slack", "mattermost", "matrix", "whatsapp", "signal", "bluebubbles",
-    "email", "sms", "dingtalk", "feishu", "google_chat", "wecom", "wecom_callback",
+    "dingtalk", "feishu", "wecom", "wecom_callback",
     "weixin", "qqbot", "yuanbao", "api_server", "webhook",
 )
 
@@ -70,6 +63,7 @@ def _messaging_platform_catalog() -> tuple[dict[str, Any], ...]:
     platforms; the rest is derived from id/required_env.
     """
     from gateway.config import Platform
+    from hermes_cli.platforms import platform_available
 
     # Resolve plugin entries FIRST: plugin platforms leak into ``Platform.__members__`` as
     # pseudo-members once anything calls ``Platform("<plugin id>")``, and iterating the enum
@@ -93,6 +87,10 @@ def _messaging_platform_catalog() -> tuple[dict[str, Any], ...]:
         if pid in seen:
             continue
         seen.add(pid)
+        # CN subtraction: a platform this build does not ship has no adapter, so it must not
+        # appear as a configurable channel card ("registered but not implemented").
+        if not platform_available(pid):
+            continue
         entries.append(_build_catalog_entry(pid, plugin_map.get(pid)))
 
     order = {pid: idx for idx, pid in enumerate(_PLATFORM_ORDER)}
@@ -184,117 +182,3 @@ def _write_platform_enabled(platform_id: str, enabled: bool) -> None:
     write_platform_config_field(platform_id, "enabled", enabled)
 
 
-@dataclass
-class _WhatsAppOnboardingSession:
-    proc: subprocess.Popen | None
-    mode: str
-    allowed_users: str
-    session_path: str
-    expires_at: str
-    expires_at_ts: float
-    profile: str | None = None
-    status: str = "starting"
-    qr_payload: str | None = None
-    account_id: str | None = None
-    account_name: str | None = None
-    account_phone: str | None = None
-    error: str | None = None
-
-
-_whatsapp_onboarding_sessions: dict[str, _WhatsAppOnboardingSession] = {}
-
-
-def _whatsapp_session_path() -> Path:
-    from hermes_constants import get_hermes_dir
-    return get_hermes_dir("platforms/whatsapp/session", "whatsapp/session")
-
-
-_WHATSAPP_PAYLOAD_FIELDS = (
-    "status", "qr_payload", "expires_at", "mode", "allowed_users", "account_id", "account_name",
-    "account_phone", "error",
-)
-
-
-def _whatsapp_onboarding_payload(pairing_id: str, record: _WhatsAppOnboardingSession) -> dict[str, Any]:
-    return {"pairing_id": pairing_id, **{f: getattr(record, f) for f in _WHATSAPP_PAYLOAD_FIELDS}}
-
-
-def _restart_gateway_after_whatsapp_onboarding(profile: Optional[str] = None) -> dict[str, Any]:
-    from hermes_cli.web_server_gateway import _restart_gateway_after
-    return _restart_gateway_after(profile, what="WhatsApp onboarding", label="WhatsApp onboarding")
-
-
-_TELEGRAM_ONBOARDING_DEFAULT_URL = "https://setup.hermes-agent.nousresearch.com"
-_TELEGRAM_ONBOARDING_USER_AGENT = f"HermesDashboard/{get_version_info().base_version}"
-
-
-@dataclass
-class _TelegramOnboardingPairing:
-    poll_token: str
-    expires_at: str
-    expires_at_ts: float
-    bot_token: str | None = None
-    bot_username: str | None = None
-    owner_user_id: str | None = None
-
-
-_telegram_onboarding_pairings: dict[str, _TelegramOnboardingPairing] = {}
-_telegram_onboarding_lock = threading.RLock()
-
-
-def _telegram_onboarding_base_url() -> str:
-    return os.getenv("TELEGRAM_ONBOARDING_URL", _TELEGRAM_ONBOARDING_DEFAULT_URL).strip().rstrip("/")
-
-
-def _telegram_onboarding_error_message(error: str, fallback: str) -> str:
-    return {
-        "not_found": "Telegram pairing was not found. Start a new setup.",
-        "expired": "Telegram setup expired. Start a new setup.",
-        "claimed": "Telegram setup was already claimed. Start a new setup.",
-        "unauthorized": "Telegram setup service rejected this request.",
-        "telegram_manager_bot_token_not_configured": "Telegram setup service is not configured.",
-        "telegram_token_fetch_failed": "Telegram could not finish bot setup. Try again.",
-    }.get(error, fallback)
-
-
-_TELEGRAM_UNAVAILABLE = "Telegram setup service is unavailable. Try again shortly."
-_TELEGRAM_INVALID = "Telegram setup service returned an invalid response."
-
-
-def _telegram_onboarding_request_sync(
-    method: str, path: str, *, body: dict[str, Any] | None = None, bearer_token: str | None = None
-) -> dict[str, Any]:
-    import httpx
-    headers = {"Accept": "application/json", "User-Agent": _TELEGRAM_ONBOARDING_USER_AGENT}
-    request_kwargs: dict[str, Any] = {}
-    if body is not None:
-        headers["Content-Type"] = "application/json"
-        request_kwargs["json"] = body
-    if bearer_token:
-        headers["Authorization"] = f"Bearer {bearer_token}"
-    try:
-        with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
-            response = client.request(method, f"{_telegram_onboarding_base_url()}{path}", headers=headers, **request_kwargs)
-            response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        try:
-            parsed = exc.response.json()
-        except Exception:
-            parsed = {}
-        error = str(parsed.get("error") or parsed.get("status") or "")
-        detail = _telegram_onboarding_error_message(error, "Telegram setup service returned an error.")
-        if error in {"expired", "claimed"}:
-            status_code = 410
-        else:
-            status_code = 404 if exc.response.status_code == 404 else 502
-        raise HTTPException(status_code=status_code, detail=detail) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=_TELEGRAM_UNAVAILABLE) from exc
-
-    try:
-        parsed = response.json()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=_TELEGRAM_INVALID) from exc
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=502, detail=_TELEGRAM_INVALID)
-    return parsed

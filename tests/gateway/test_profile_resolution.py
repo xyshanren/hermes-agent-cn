@@ -241,57 +241,6 @@ class TestGatewayRunnerInjection:
         monkeypatch.setattr(runner, "_instantiate_adapter", lambda platform, config: None)
         assert runner._create_adapter(Platform.SIGNAL, PlatformConfig(enabled=True)) is None
 
-    @pytest.mark.asyncio
-    async def test_real_signal_factory_routes_inbound_group_event(self, monkeypatch):
-        """A factory-built Signal adapter (bundled plugin, via the registry) resolves
-        profile_routes for a real inbound envelope — the original bug was a bare
-        ``SignalAdapter(config)`` with no runner."""
-        from gateway.config import PlatformConfig
-        from hermes_cli.plugins import discover_plugins
-
-        discover_plugins()  # the gateway does this at startup; Signal is a plugin platform now
-
-        group_id = "test-signal-route"
-        monkeypatch.setenv("SIGNAL_GROUP_ALLOWED_USERS", group_id)
-        runner = object.__new__(GatewayRunner)
-        runner.config = GatewayConfig(
-            multiplex_profiles=True,
-            profile_routes=[
-                ProfileRoute(name="signal", platform="signal", profile="ops", chat_id=f"group:{group_id}"),
-            ],
-        )
-        adapter = runner._create_adapter(
-            Platform.SIGNAL,
-            PlatformConfig(enabled=True, extra={"http_url": "http://127.0.0.1:18080", "account": "+15555550123"}),
-        )
-        assert adapter is not None and adapter.gateway_runner is runner
-
-        captured = {}
-
-        async def capture_event(event):
-            captured["event"] = event
-
-        adapter.handle_message = capture_event
-        with patch(
-            "hermes_cli.profiles.profiles_to_serve",
-            return_value=[("default", Path("/profiles/default")), ("ops", Path("/profiles/ops"))],
-        ):
-            await adapter._handle_envelope({
-                "envelope": {
-                    "sourceNumber": "+15555550124",
-                    "sourceName": "Test Operator",
-                    "timestamp": 1700000000000,
-                    "dataMessage": {
-                        "message": "diagnose the cluster",
-                        "groupInfo": {"groupId": group_id, "groupName": "US East 7"},
-                    },
-                },
-            })
-        source = captured["event"].source
-        assert source.profile == "ops"
-        assert build_session_key(source, profile=source.profile).startswith("agent:ops:")
-
-
 # A concrete adapter we can instantiate without the full platform stack.
 # ``build_source`` only reads ``self.platform`` and ``self.gateway_runner``, so a
 # bare instance with those two attrs exercises the real BasePlatformAdapter

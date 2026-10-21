@@ -74,7 +74,10 @@ def peer_discover(args: dict, **_: Any) -> str:
 
     复用 plugins/platforms/a2a/tools.py:a2a_discover (0 重复实现, 跟 mavis 4 件套 1:1).
     """
-    from plugins.platforms.a2a.tools import a2a_discover
+    try:
+        from plugins.platforms.a2a.tools import a2a_discover
+    except ImportError:
+        return "Error: A2A plugin 不在 CN 分支 (Cat 1 减法已裁剪 plugins/platforms/a2a/)."
     return a2a_discover(args, **_)
 
 
@@ -88,7 +91,10 @@ def peer_call(args: dict, **_: Any) -> str:
     if not peer_name:
         return "Error: 'peer' is required (跟 a2a_call 'url' 1:1 配对)."
 
-    from plugins.platforms.a2a.tools import a2a_call
+    try:
+        from plugins.platforms.a2a.tools import a2a_call
+    except ImportError:
+        return "Error: A2A plugin 不在 CN 分支 (Cat 1 减法已裁剪 plugins/platforms/a2a/)."
     result = a2a_call(args, **_)
 
     # 持久化 user / assistant message (跟 mavis Cat 6 内生 1:1 配对)
@@ -158,7 +164,10 @@ def peer_run(args: dict, **_: Any) -> str:
     委派长时间任务给 peer (跨 Gateway 异步 RPC), 持久化 task_id.
     跟 cron/notepad.py 持久 notepad 1:1 配对 (Cat 6 内生 1:1 配对).
     """
-    from plugins.platforms.a2a.tools import a2a_orchestrate
+    try:
+        from plugins.platforms.a2a.tools import a2a_orchestrate
+    except ImportError:
+        return "Error: A2A plugin 不在 CN 分支 (Cat 1 减法已裁剪 plugins/platforms/a2a/)."
     result = a2a_orchestrate(args, **_)
 
     peer_name = str(args.get("peer") or args.get("peer_name") or "").strip()

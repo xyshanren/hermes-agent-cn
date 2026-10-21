@@ -82,42 +82,6 @@ def test_shared_bot_route_does_not_hijack_dedicated_secondary_bot(mux):
     assert via_primary.profile == "ops"
 
 
-def test_secondary_busy_followup_authorized_against_its_own_allowlist(mux):
-    """The busy-session handler of a secondary adapter must run under that profile's scope, so its
-    owner (absent from the default allowlist) is admitted (#103717)."""
-    from agent import secret_scope
-
-    seen = {}
-
-    async def _busy(event, session_key):
-        seen["scoped"] = secret_scope.current_secret_scope() is not None
-        return mux.runner._is_user_authorized(event.source)
-
-    mux.runner._handle_active_session_busy_message = _busy
-    source = SessionSource(platform=Platform.TELEGRAM, chat_id="72719239", chat_type="dm", user_id="72719239")
-    source._transport_adapter_ref = weakref.ref(mux.team_b)
-    handler = mux.runner._make_profile_busy_session_handler("team_b")
-    assert asyncio.run(handler(SimpleNamespace(source=source), "k")) is True
-    assert seen["scoped"] is True
-
-
-def test_mid_turn_authorization_reads_admitting_transport_allowlist(mux):
-    """Inside a routed satellite's turn (its scope has no allowlist) ``_is_user_authorized_for_source``
-    must admit the shared bot's owner without an ingress stamp — the seam /topic, sibling /stop, plugin
-    injection, voice and auto-resume now use."""
-    from gateway.run import _profile_runtime_scope
-
-    source = SessionSource(platform=Platform.TELEGRAM, chat_id="777", chat_type="dm", user_id="777", profile="ops")
-    source._transport_adapter_ref = weakref.ref(mux.primary)
-    with _profile_runtime_scope(mux.home / "profiles" / "ops"):
-        assert mux.runner._is_user_authorized(source) is False  # the bug the call sites had
-        assert mux.runner._is_user_authorized_for_source(source) is True
-    stranger = SessionSource(platform=Platform.TELEGRAM, chat_id="1", chat_type="dm", user_id="1", profile="ops")
-    stranger._transport_adapter_ref = weakref.ref(mux.primary)
-    with _profile_runtime_scope(mux.home / "profiles" / "ops"):
-        assert mux.runner._is_user_authorized_for_source(stranger) is False
-
-
 def test_shared_bot_satellite_resolves_primary_transport_for_restored_sources(mux):
     """A routed satellite with no bot of its own drains through the primary for restored/cached
     sources (no transport ref); a disconnected secondary that owns a credential stays fail-closed."""

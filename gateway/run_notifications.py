@@ -319,7 +319,7 @@ class GatewayNotificationsMixin(GatewayUpdateNotificationsMixin, GatewayNotifica
                             # P5(b): a DECLINE is not "editing unavailable". The
                             # send below re-delivers the whole response to the
                             # chat the connector just refused.
-                            from gateway.relay.egress import declined_send
+                            from gateway.egress_decline import declined_send
 
                             if declined_send(_edit_res):
                                 logger.warning(

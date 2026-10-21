@@ -554,31 +554,6 @@ class TestImagegenModelPicker:
         assert isinstance(config["image_gen"], dict)
         assert config["image_gen"]["model"] == IMAGEGEN_BACKENDS["fal"]["catalog_fn"]({})[1]
 
-    def test_plugin_picker_falls_back_when_default_is_missing_from_catalog(self):
-        """A stale cross-provider model must not become an unindexable row."""
-        from hermes_cli.tools_config import _configure_imagegen_model_for_plugin
-
-        catalog = {
-            "openai/gpt-5.4-image-2": {"strengths": "quality"},
-            "google/gemini-3-pro-image": {"strengths": "fallback"},
-        }
-        config = {"image_gen": {"model": "gpt-image-2-medium"}}
-        with (
-            patch(
-                "hermes_cli.tools_config._plugin_image_gen_catalog",
-                return_value=(catalog, "also-missing"),
-            ),
-            patch("hermes_cli.tools_config._prompt_choice", return_value=0),
-        ):
-            _configure_imagegen_model_for_plugin("openrouter", config)
-
-        assert config["image_gen"]["model"] == "openai/gpt-5.4-image-2"
-
-
-
-
-
-
 def test_get_effective_configurable_toolsets_dedupes_bundled_plugins():
     """A plugin toolset whose key is also a CONFIGURABLE_TOOLSETS entry must not
     be listed twice — otherwise `hermes tools` → "reconfigure existing" shows
@@ -731,24 +706,6 @@ def test_exactly_one_image_row_is_active_for_a_managed_selection(monkeypatch):
         config = {"image_gen": {"provider": "nous", "model": model}}
         active = [r["name"] for r in rows if tools_config._is_provider_active(r, config)]
         assert active == [_managed_image_row()["name"]], (model, active)
-
-
-def test_gui_model_catalog_for_the_managed_row_spans_every_managed_gateway(monkeypatch):
-    from hermes_cli import tools_config
-    from hermes_cli.web_routers.tools import _resolve_toolset_model_plugin, _toolset_model_catalog
-    from plugins.image_gen.krea import KREA_MODEL_IDS
-    from tools.image_generation_catalog import FAL_MODELS
-
-    paid = NousPortalAccountInfo(logged_in=True, source="jwt", fresh=False, paid_service_access=True)
-    monkeypatch.setattr(
-        tools_config, "get_nous_subscription_features",
-        lambda *args, **kwargs: SimpleNamespace(features={}, account_info=paid))
-    plugin = _resolve_toolset_model_plugin("image_gen", _managed_image_row())
-    catalog, default_model = _toolset_model_catalog("image_gen", plugin, {})
-
-    assert default_model in catalog and default_model in FAL_MODELS
-    assert KREA_MODEL_IDS <= set(catalog)
-    assert not any(mid.startswith("fal-ai/krea/") for mid in catalog), "Krea 2 must appear once, natively"
 
 
 def test_pool_only_account_is_offered_fal_models_only(monkeypatch):

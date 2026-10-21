@@ -70,7 +70,6 @@ _USER_BOUNDARY_END_REASONS = ("session_reset", "user_exit", "session_switch", "n
 # Bounds one stall-notify send so a wedged transport can't block the watcher; on timeout the next tick retries.
 _STALL_NOTIFY_SEND_TIMEOUT_SECONDS = 15.0
 _GATEWAY_PROXY_SSE_BUFFER_MAX_CHARS = 16 * 1024 * 1024
-_TELEGRAM_COMMAND_MENTION_RE = re.compile(r"(?<![\w:/])/([A-Za-z0-9][A-Za-z0-9_-]*)")
 _GATEWAY_HYGIENE_PLATFORM = "gateway_hygiene"
 
 _TELEGRAM_NOISY_STATUS_RE = re.compile(
@@ -791,7 +790,7 @@ def _approval_send_outcome(future, timeout: float) -> str:
     #   * `ambiguous: True` (lost ack, mid-write drop) was flattened into a
     #     DEFINITE failure, which re-sends a card that may well have posted.
     # I fixed the text-marker path and tested only the text-marker path.
-    from gateway.relay.egress import declined_send
+    from gateway.egress_decline import declined_send
 
     _raw = getattr(result, "raw_response", None)
     if isinstance(_raw, dict) and _raw.get("ambiguous"):
@@ -872,21 +871,6 @@ def _resolve_gateway_display_bool(
     if value is None:
         return bool(default)
     return bool(value)
-
-
-def _telegramize_command_mentions(text: str, platform: Any) -> str:
-    """Rewrite slash-command mentions to Telegram-valid names (lowercase/digits/underscore); no-op elsewhere."""
-    platform_value = getattr(platform, "value", platform)
-    if platform_value != "telegram":
-        return text
-
-    from hermes_cli.commands_platforms import _sanitize_telegram_name
-
-    def _replace(match: re.Match[str]) -> str:
-        sanitized = _sanitize_telegram_name(match.group(1))
-        return f"/{sanitized}" if sanitized else match.group(0)
-
-    return _TELEGRAM_COMMAND_MENTION_RE.sub(_replace, text)
 
 
 # Auto-continue interrupted turns only while fresh, else stale tool-tail/resume_pending markers revive an old
@@ -2867,12 +2851,6 @@ def _platform_config_key(platform: Platform) -> str:
     return "cli" if platform == Platform.LOCAL else platform.value
 
 
-def _teams_pipeline_plugin_enabled() -> bool:
-    """Return True when the standalone Teams pipeline plugin is enabled."""
-    enabled = cfg_get(_load_gateway_config(), "plugins", "enabled", default=[])
-    return isinstance(enabled, list) and ("teams_pipeline" in enabled or "teams-pipeline" in enabled)
-
-
 def _gateway_config_home() -> Path:
     """Return the Hermes home that gateway config reads should use."""
     override = get_hermes_home_override()
@@ -3574,29 +3552,6 @@ class GatewayRunner(
                 logger.debug("SessionDB close error during handle sweep: %s", exc)
 
         self._session_db_handle_cache.close_all(_close)
-
-    def _wire_teams_pipeline_runtime(self) -> None:
-        """Bind the Teams meeting pipeline runtime to Graph webhook ingress (no-op if adapter/plugin off)."""
-        if Platform.MSGRAPH_WEBHOOK not in self.adapters:
-            return
-        if not _teams_pipeline_plugin_enabled():
-            logger.debug("Teams pipeline plugin is disabled; skipping runtime wiring")
-            return
-        try:
-            from plugins.teams_pipeline.runtime import bind_gateway_runtime
-        except Exception as exc:
-            logger.warning("Teams pipeline runtime import failed: %s", exc)
-            return
-        try:
-            bound = bind_gateway_runtime(self)
-        except Exception as exc:
-            logger.warning("Teams pipeline runtime wiring failed: %s", exc)
-            return
-        if bound:
-            logger.info("Teams pipeline runtime bound to msgraph webhook ingress")
-        elif self._teams_pipeline_runtime_error:
-            logger.warning(
-                "Teams pipeline runtime unavailable: %s", self._teams_pipeline_runtime_error)
 
     def _warn_if_docker_media_delivery_is_risky(self) -> None:
         """Warn when Docker-backed gateways lack an explicit export mount: MEDIA delivery runs in the

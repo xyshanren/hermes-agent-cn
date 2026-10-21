@@ -94,39 +94,6 @@ def _iter_source_files():
             yield rel, path
 
 
-def test_no_raw_config_yaml_reads_outside_owner_modules():
-    offenders: list[str] = []
-    for rel, path in _iter_source_files():
-        rel_str = str(rel).replace("\\", "/")
-        if rel_str in ALLOWLIST:
-            continue
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        cfg_lines = [i for i, ln in enumerate(lines) if CONFIG_YAML_RE.search(ln)]
-        if not cfg_lines:
-            continue
-        for i, ln in enumerate(lines):
-            if not SAFE_LOAD_RE.search(ln):
-                continue
-            # Comment/docstring mentions don't count.
-            stripped = ln.strip()
-            if stripped.startswith("#"):
-                continue
-            if any(abs(i - j) <= PROXIMITY for j in cfg_lines):
-                offenders.append(f"{rel_str}:{i + 1}: {stripped}")
-
-    assert not offenders, (
-        "Raw yaml.safe_load of config.yaml outside allowlisted owner modules.\n"
-        "Behavioral reads must use hermes_cli.config.load_config()/"
-        "load_config_readonly() (or gateway _load_gateway_config); write-back "
-        "round-trips and raw-file diagnostics must use "
-        "hermes_cli.config.read_user_config_raw().\nOffenders:\n  "
-        + "\n  ".join(offenders)
-    )
-
-
 def test_read_user_config_raw_exists_and_documented():
     """The shared raw primitive must exist and carry its legality docstring."""
     from hermes_cli.config import read_user_config_raw

@@ -6,6 +6,7 @@ from functools import partial
 import hashlib
 import json
 import logging
+import re
 from pathlib import Path
 
 from gateway.session_contract import SessionRef, Submission
@@ -118,7 +119,14 @@ async def forward(connection, params):
         # titled row never proves it belongs to this exact conversation. Never adopt or retitle
         # it (that would hand one peer another's history), and never refuse every peer whose
         # slug collides: start this identity's own canonical session and leave the old row be.
-        from plugins.platforms.a2a.adapter import _safe_context_slug
+        try:
+            from plugins.platforms.a2a.adapter import _safe_context_slug
+        except ImportError:
+            # CN subtraction: the A2A platform plugin is not part of this build, so no A2A
+            # session can arrive here. Keep the legacy title shape so an existing user's
+            # stored rows still resolve.
+            def _safe_context_slug(value):
+                return re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")[:40]
         title = f'a2a-{params["agent"]}-{_safe_context_slug(params["context_id"])}'
         legacy = authority.db.get_session_by_title(title)
         if legacy is not None:

@@ -107,24 +107,6 @@ async def test_github_comment_authenticates_with_routed_profile_token(profile_ho
     assert seen["GH_TOKEN"] == "sec-token"
 
 
-def test_api_server_profile_callback_resolves_routed_profile_adapter_fail_closed():
-    default, secondary = object(), object()
-    api = APIServerAdapter(PlatformConfig(enabled=True, extra={"port": 0}))
-    request = MagicMock()
-    request.app = {}
-
-    api.gateway_runner = _Runner({Platform("google_chat"): default}, {"sec": {Platform("google_chat"): secondary}})
-    token = _api_request_profile.set("sec")
-    try:
-        assert api._get_platform_callback_adapter(request, "google_chat") is secondary
-        api.gateway_runner = _Runner({Platform("google_chat"): default}, {"sec": {}})
-        assert api._get_platform_callback_adapter(request, "google_chat") is None
-    finally:
-        _api_request_profile.reset(token)
-    # No prefix: the primary map, unchanged.
-    assert api._get_platform_callback_adapter(request, "google_chat") is default
-
-
 @pytest.mark.asyncio
 async def test_retained_destination_keeps_profile_and_freezes_its_home(profile_homes):
     from gateway.platforms.webhook_delivery import snapshot_destination

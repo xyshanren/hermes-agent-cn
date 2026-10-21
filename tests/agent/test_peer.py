@@ -23,14 +23,74 @@ import pytest
 # 5 命令测试 (peer_discover / peer_call / peer_list / peer_history / peer_run)
 # ============================================================
 
+
+# CN subtraction: the A2A platform plugin is not part of this build, so the
+# delegation contract is exercised against a STUB a2a module injected into
+# sys.modules. The peer layer imports it lazily inside each command, so a
+# stubbed module is exactly what the layer sees.
+def _stub_a2a_tools(**attrs):
+    """Install a stub ``plugins.platforms.a2a.tools`` module; return it.
+
+    The whole ``plugins.platforms.a2a`` package chain is stubbed: the import
+    machinery walks the parents, so stubbing only the leaf is not enough.
+    """
+    import types
+    import plugins.platforms
+
+    a2a_pkg = types.ModuleType("plugins.platforms.a2a")
+    tools_mod = types.ModuleType("plugins.platforms.a2a.tools")
+    for name, value in attrs.items():
+        setattr(tools_mod, name, value)
+    a2a_pkg.tools = tools_mod
+    setattr(plugins.platforms, "a2a", a2a_pkg)
+    sys.modules["plugins.platforms.a2a"] = a2a_pkg
+    sys.modules["plugins.platforms.a2a.tools"] = tools_mod
+    return tools_mod
+
+
+def _a2a_stub_context(**attrs):
+    """Context manager that stubs the a2a tools module and restores sys.modules."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _cm():
+        import plugins.platforms
+
+        saved_modules = {k: sys.modules.get(k) for k in ("plugins.platforms.a2a", "plugins.platforms.a2a.tools")}
+        saved_attr = getattr(plugins.platforms, "a2a", None)
+        module = _stub_a2a_tools(**attrs)
+        try:
+            yield module
+        finally:
+            for key, value in saved_modules.items():
+                if value is None:
+                    sys.modules.pop(key, None)
+                else:
+                    sys.modules[key] = value
+            if saved_attr is None:
+                try:
+                    delattr(plugins.platforms, "a2a")
+                except AttributeError:
+                    pass
+            else:
+                setattr(plugins.platforms, "a2a", saved_attr)
+    return _cm()
+
+
 def test_peer_discover_delegates_to_a2a_discover():
     """peer_discover 100% 复用 a2a_discover (Cat 4 借鉴, 0 重复实现)."""
     import agent.peer as peer
 
-    with patch("plugins.platforms.a2a.tools.a2a_discover", return_value="discover-result") as m:
+    calls = []
+
+    def _fake_discover(args, **_):
+        calls.append(args)
+        return "discover-result"
+
+    with _a2a_stub_context(a2a_discover=_fake_discover):
         result = peer.peer_discover({"url": "http://localhost:9999"})
     assert result == "discover-result"
-    assert m.call_count == 1
+    assert len(calls) == 1
 
 
 def test_peer_call_persists_user_and_assistant_messages(tmp_path, monkeypatch):
@@ -39,13 +99,19 @@ def test_peer_call_persists_user_and_assistant_messages(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
 
-    with patch("plugins.platforms.a2a.tools.a2a_call", return_value="assistant-reply-text") as m:
+    calls = []
+
+    def _fake_call(args, **_):
+        calls.append(args)
+        return "assistant-reply-text"
+
+    with _a2a_stub_context(a2a_call=_fake_call):
         result = peer.peer_call(
             {"peer": "alpha", "message": "user-hello"},
         )
 
     assert result == "assistant-reply-text"
-    assert m.call_count == 1
+    assert len(calls) == 1
 
     chat_path = tmp_path / "peers" / "alpha" / "chat.jsonl"
     assert chat_path.exists()
@@ -72,7 +138,7 @@ def test_peer_call_error_result_does_not_persist_assistant(tmp_path, monkeypatch
     import agent.peer as peer
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    with patch("plugins.platforms.a2a.tools.a2a_call", return_value="Error: upstream 500"):
+    with _a2a_stub_context(a2a_call=lambda args, **_: "Error: upstream 500"):
         result = peer.peer_call({"peer": "alpha", "message": "hi"})
 
     assert result.startswith("Error")
@@ -142,14 +208,17 @@ def test_peer_run_delegates_to_a2a_orchestrate_persists_last_task(tmp_path, monk
     import agent.peer as peer
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    with patch(
-        "plugins.platforms.a2a.tools.a2a_orchestrate",
-        return_value="task-id-abc-123",
-    ) as m:
+    calls = []
+
+    def _fake_orchestrate(args, **_):
+        calls.append(args)
+        return "task-id-abc-123"
+
+    with _a2a_stub_context(a2a_orchestrate=_fake_orchestrate):
         result = peer.peer_run({"peer": "alpha", "message": "long-task"})
 
     assert result == "task-id-abc-123"
-    assert m.call_count == 1
+    assert len(calls) == 1
     last_task = (tmp_path / "peers" / "alpha" / "last_task.txt").read_text(encoding="utf-8")
     assert last_task == "task-id-abc-123"
 
@@ -187,10 +256,7 @@ def test_route_to_peer_runs_via_peer_run_and_stamps_routing_out(tmp_path, monkey
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     routing_out: dict = {}
 
-    with patch(
-        "plugins.platforms.a2a.tools.a2a_orchestrate",
-        return_value="task-xyz",
-    ):
+    with _a2a_stub_context(a2a_orchestrate=lambda args, **_: "task-xyz"):
         result = peer.route_to_peer(routing_out, target_peer="alpha", task="do-thing")
 
     assert result == "task-xyz"
@@ -203,7 +269,7 @@ def test_route_to_peer_accepts_none_routing_out(tmp_path, monkeypatch):
     import agent.peer as peer
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    with patch("plugins.platforms.a2a.tools.a2a_orchestrate", return_value="task-ok"):
+    with _a2a_stub_context(a2a_orchestrate=lambda args, **_: "task-ok"):
         result = peer.route_to_peer(None, target_peer="alpha", task="do-thing")
     assert result == "task-ok"
 
@@ -217,7 +283,8 @@ def test_register_peer_tools_registers_5_tools():
     import agent.peer as peer
 
     fake_ctx = MagicMock()
-    peer.register_peer_tools(fake_ctx)
+    with _a2a_stub_context(a2a_discover=lambda args, **_: "discover-result"):
+        peer.register_peer_tools(fake_ctx)
 
     # 5 ctx.register_tool 调用 (1:1 配对 v0.21 5 工具)
     assert fake_ctx.register_tool.call_count == 5

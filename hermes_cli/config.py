@@ -38,6 +38,11 @@ from hermes_cli.colors import Colors, color
 from hermes_cli import managed_scope
 from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
 from hermes_cli.secret_prompt import masked_secret_prompt
+# Route-identity canonicalization for the provider base_url matching helpers below
+# (TLS settings / extra headers / context length). Upstream moved these helpers to
+# hermes_cli.config_providers; this module still keeps local copies, so the import
+# is needed here too.
+from hermes_cli.route_identity import normalize_route_base_url
 # Managed-mode, container and HERMES_UID/GID policy live in hermes_constants (import-safe);
 # re-exported here so existing callers/patch targets keep working.
 from hermes_constants import (
@@ -184,11 +189,6 @@ _RAW_CONFIG_CACHE: dict[str, tuple[int, ...]] = {}
 # flows directly). Also the set reload_env() may remove from os.environ.
 _EXTRA_ENV_KEYS = frozenset({
     "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN",
-    "DISCORD_HOME_CHANNEL", "DISCORD_HOME_CHANNEL_NAME",
-    "TELEGRAM_HOME_CHANNEL", "TELEGRAM_HOME_CHANNEL_NAME",
-    "SLACK_HOME_CHANNEL", "SLACK_HOME_CHANNEL_NAME",
-    "SIGNAL_ACCOUNT", "SIGNAL_HTTP_URL", "SIGNAL_ALLOWED_USERS", "SIGNAL_GROUP_ALLOWED_USERS",
-    "SIGNAL_HOME_CHANNEL", "SIGNAL_HOME_CHANNEL_NAME", "SMS_HOME_CHANNEL", "SMS_HOME_CHANNEL_NAME",
     "DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET", "DINGTALK_HOME_CHANNEL", "DINGTALK_HOME_CHANNEL_NAME",
     "FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_ENCRYPT_KEY", "FEISHU_VERIFICATION_TOKEN",
     "FEISHU_HOME_CHANNEL", "FEISHU_HOME_CHANNEL_NAME", "YUANBAO_HOME_CHANNEL", "YUANBAO_HOME_CHANNEL_NAME",
@@ -198,22 +198,14 @@ _EXTRA_ENV_KEYS = frozenset({
     "WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN", "WEIXIN_BASE_URL", "WEIXIN_CDN_BASE_URL",
     "WEIXIN_HOME_CHANNEL", "WEIXIN_HOME_CHANNEL_NAME", "WEIXIN_DM_POLICY", "WEIXIN_GROUP_POLICY",
     "WEIXIN_ALLOWED_USERS", "WEIXIN_GROUP_ALLOWED_USERS", "WEIXIN_ALLOW_ALL_USERS",
-    "BLUEBUBBLES_SERVER_URL", "BLUEBUBBLES_PASSWORD", "BLUEBUBBLES_HOME_CHANNEL", "BLUEBUBBLES_HOME_CHANNEL_NAME",
     "QQ_APP_ID", "QQ_CLIENT_SECRET", "QQBOT_HOME_CHANNEL", "QQBOT_HOME_CHANNEL_NAME",
     "QQ_HOME_CHANNEL", "QQ_HOME_CHANNEL_NAME",  # legacy aliases (pre-rename, still read for back-compat)
     "QQ_ALLOWED_USERS", "QQ_GROUP_ALLOWED_USERS", "QQ_ALLOW_ALL_USERS", "QQ_MARKDOWN_SUPPORT",
     "QQ_STT_API_KEY", "QQ_STT_BASE_URL", "QQ_STT_MODEL",
-    "IRC_SERVER", "IRC_PORT", "IRC_NICKNAME", "IRC_CHANNEL", "IRC_USE_TLS", "IRC_SERVER_PASSWORD",
-    "IRC_NICKSERV_PASSWORD", "TERMINAL_ENV", "TERMINAL_SSH_KEY", "TERMINAL_SSH_PORT",
     # Deprecated (replaced by display.tool_progress) but STILL READ by the gateway as a
     # back-compat fallback. The boolean HERMES_TOOL_PROGRESS variant is unsupported (its only
     # consumer, the v3->4 migration, is below the v12 support floor); doctor flags it as ignored.
     "HERMES_TOOL_PROGRESS_MODE",
-    "WHATSAPP_MODE", "WHATSAPP_ENABLED",
-    "MATTERMOST_HOME_CHANNEL", "MATTERMOST_HOME_CHANNEL_NAME", "MATTERMOST_REPLY_MODE",
-    "MATRIX_PASSWORD", "MATRIX_ENCRYPTION", "MATRIX_DEVICE_ID", "MATRIX_HOME_ROOM",
-    "MATRIX_REQUIRE_MENTION", "MATRIX_FREE_RESPONSE_ROOMS", "MATRIX_AUTO_THREAD", "MATRIX_DM_AUTO_THREAD",
-    "MATRIX_RECOVERY_KEY",
     # ACP (Agent Client Protocol) keys — profile-isolable so profiles can use different backends.
     "HERMES_ACP_AUTH_METHOD", "HERMES_ACP_AUTO_APPROVE", "HERMES_COPILOT_ACP_COMMAND",
     "HERMES_COPILOT_ACP_ARGS", "COPILOT_CLI_PATH", "COPILOT_ACP_BASE_URL"})
@@ -862,9 +854,9 @@ _ENV_CONFIG_KEYS = frozenset({
     'TOOL_GATEWAY_DOMAIN', 'TOOL_GATEWAY_SCHEME',
     'TOOL_GATEWAY_USER_TOKEN', 'TAVILY_API_KEY', 'PERPLEXITY_API_KEY', 'API_SERVER_KEY',
     'BROWSERBASE_API_KEY', 'BROWSERBASE_PROJECT_ID', 'BROWSER_USE_API_KEY',
-    'FAL_KEY', 'TELEGRAM_BOT_TOKEN', 'DISCORD_BOT_TOKEN',
+    'FAL_KEY',
     'TERMINAL_SSH_HOST', 'TERMINAL_SSH_USER', 'TERMINAL_SSH_KEY',
-    'SUDO_PASSWORD', 'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN',
+    'SUDO_PASSWORD',
     'GITHUB_TOKEN', 'HONCHO_API_KEY'})
 
 

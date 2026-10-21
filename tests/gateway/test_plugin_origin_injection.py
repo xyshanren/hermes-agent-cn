@@ -127,50 +127,6 @@ async def _settle(runner, adapter, rounds: int = 200):
 
 
 @pytest.mark.asyncio
-async def test_origin_creates_session_in_own_profile_and_replies_to_origin(gateway):
-    """No session at the origin: the plugin's profile gets a fresh session, the turn runs under that
-    profile's home and secrets, the reply goes back to the origin chat, and a human follow-up in the
-    same chat continues the SAME session (A -> B -> A: beta in between, alpha's scope comes back)."""
-    runner, alpha, beta = gateway.runner, gateway.adapters["alpha"], gateway.adapters["beta"]
-    ctx_alpha, mgr_alpha = _context(gateway.homes["alpha"])
-    ctx_beta, mgr_beta = _context(gateway.homes["beta"])
-    with patch("hermes_cli.plugins._known_plugin_managers", return_value=[mgr_alpha, mgr_beta]):
-        await _publish(runner)
-        assert ctx_alpha.inject_message("Kick off the review", origin=_origin("100")) is True
-        await _settle(runner, alpha)
-        assert ctx_beta.inject_message("Beta's own post", origin=_origin("200")) is True
-        await _settle(runner, beta)
-        assert ctx_alpha.inject_message("Second post", origin=_origin("101")) is True
-        await _settle(runner, alpha)
-
-    first, middle, last = gateway.turns
-    assert (first.home, first.marker) == (gateway.homes["alpha"], "alpha")
-    assert (middle.home, middle.marker) == (gateway.homes["beta"], "beta")
-    assert (last.home, last.marker) == (gateway.homes["alpha"], "alpha")
-    assert first.message.endswith("Kick off the review") and first.history == []
-    assert alpha.sent == [("100", "reply-1"), ("101", "reply-3")]
-    assert beta.sent == [("200", "reply-2")]
-    # The reply is sent after the handler returns: it must still run in the plugin's profile scope.
-    assert alpha.send_scopes == [(gateway.homes["alpha"], "alpha")] * 2
-    assert beta.send_scopes == [(gateway.homes["beta"], "beta")]
-    assert gateway.adapters["default"].sent == []
-
-    entry = runner.session_store._entries["agent:alpha:telegram:group:100:7"]
-    assert entry.session_id == first.session_id
-    assert not any(key.startswith(("agent:main:", "agent:beta:")) and ":100:" in key
-                   for key in runner.session_store._entries)
-
-    # A human reply in the same chat keys into the plugin-created session. A secondary adapter's
-    # intake task runs inside its profile scope (it is spawned from connect() under that scope).
-    reply = alpha.build_source(chat_id="100", chat_type="group", thread_id="7", user_id="u1")
-    async with gateway_run._async_profile_runtime_scope(gateway.homes["alpha"]):
-        await alpha.handle_message(MessageEvent(text="thanks", message_type=MessageType.TEXT, source=reply))
-    await _settle(runner, alpha)
-    assert gateway.turns[-1].session_id == first.session_id
-    assert alpha.sent[-1] == ("100", "reply-4")
-
-
-@pytest.mark.asyncio
 async def test_origin_cannot_reach_another_profile(gateway):
     """A plugin in ``alpha`` cannot start a session in ``beta``: not by naming the profile, not
     through a chat the gateway routes to ``beta``. Refusal is synchronous and nothing is created."""

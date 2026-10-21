@@ -48,14 +48,6 @@ def _load(tmp_path, *, config_yaml="", env=None, dotenv=""):
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
-def test_unconfigured_profile_imports_no_platform_adapter(tmp_path):
-    result = _load(tmp_path)
-    assert result["enabled"] == []
-    assert result["adapters"] == [], f"unconfigured adapters imported at config load: {result['adapters']}"
-    # Still registered (deferred): a later lookup by name imports it on demand.
-    assert {"discord", "telegram", "google_chat", "slack"} <= set(result["registered"])
-
-
 @pytest.mark.parametrize("case", ["env", "dotenv", "manifest_env", "yaml_sibling"])
 def test_configured_platform_still_enabled_and_only_it_is_imported(tmp_path, case):
     kwargs, want, module = {

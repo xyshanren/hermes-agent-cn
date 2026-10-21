@@ -52,30 +52,6 @@ def test_nvidia_cloud_base_url_applies_billing_origin_header(mock_openai):
 
 
 @patch("agent.process_bootstrap.OpenAI")
-def test_opencode_go_applies_attribution_via_profile_fallback(mock_openai):
-    """OpenCode (Zen/Go) attributes traffic by header like OpenRouter does.
-    Without profile.default_headers the relay only sees the OpenAI SDK's
-    generic User-Agent and Hermes Agent traffic shows up unattributed."""
-    mock_openai.return_value = MagicMock()
-    agent = AIAgent(
-        api_key="test-key",
-        base_url="https://opencode.ai/zen/go/v1",
-        model="glm-5",
-        provider="opencode-go",
-        quiet_mode=True,
-        skip_context_files=True,
-        skip_memory=True,
-    )
-
-    agent._apply_client_headers_for_base_url("https://opencode.ai/zen/go/v1")
-
-    headers = agent._client_kwargs["default_headers"]
-    assert headers["HTTP-Referer"] == "https://hermes-agent.nousresearch.com"
-    assert headers["X-Title"] == "Hermes Agent"
-    assert headers["User-Agent"] == f"HermesAgent/{get_version_info().base_version}"
-
-
-@patch("agent.process_bootstrap.OpenAI")
 def test_routed_client_preserves_openai_sdk_custom_headers(mock_openai):
     mock_openai.return_value = MagicMock()
     routed_client = SimpleNamespace(

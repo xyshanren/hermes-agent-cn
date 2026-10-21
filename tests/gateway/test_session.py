@@ -58,49 +58,6 @@ class TestSessionSourceRoundtrip:
 class TestBuildSessionContextPrompt:
 
 
-    def test_discord_prompt_stable_across_message_id(self):
-        """The cached system prompt must NOT vary with the triggering message_id.
-
-        message_id changes every turn; baking it into the Discord IDs block
-        busts the gateway agent-cache signature and rebuilds the AIAgent on
-        every message (destroying prompt caching). The volatile id is injected
-        per-turn into the user message instead — the cached block only carries
-        a static pointer.
-        """
-        from unittest.mock import patch
-        import gateway.session as _gs
-
-        config = GatewayConfig(
-            platforms={
-                Platform.DISCORD: PlatformConfig(enabled=True, token="fake-d...oken"),
-            },
-        )
-
-        def _prompt_for(msg_id):
-            source = SessionSource(
-                platform=Platform.DISCORD,
-                chat_id="chan-1",
-                chat_name="Server",
-                chat_type="group",
-                user_name="alice",
-                guild_id="guild-123",
-                message_id=msg_id,
-            )
-            ctx = build_session_context(source, config)
-            return build_session_context_prompt(ctx)
-
-        # Force the Discord IDs block on (it only emits when discord tools load).
-        with patch.object(_gs, "_discord_tools_loaded", return_value=True):
-            # Snowflake-length ids: short ones like "1001" collide with the
-            # runner's uid-keyed scratch path that the prompt embeds.
-            ids = ("1286745390127748101", "1286745390127748202", "1286745390127748303")
-            p1, p2, p3 = (_prompt_for(i) for i in ids)
-
-        assert p1 == p2 == p3, "system prompt must be stable across message_id"
-        assert not any(i in p1 for i in ids)
-
-
-
     def test_slack_tools_loaded_scope_failure_fails_closed(self, monkeypatch):
         """A bound scope whose SLACK_BOT_TOKEN read fails must fail closed --
         never borrow the ambient env token (another profile's). Pre-fix the

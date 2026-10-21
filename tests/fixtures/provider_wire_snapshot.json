@@ -4761,377 +4761,6 @@
    }
   }
  },
- "commandcode": {
-  "api_mode": "chat_completions",
-  "base_url": "https://api.commandcode.ai/provider/v1",
-  "high": {
-   "extra_body": {
-    "thinking": {
-     "type": "enabled"
-    }
-   },
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "reasoning_content": " ",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "deepseek/deepseek-v4-pro",
-   "reasoning_effort": "high",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "model": "deepseek/deepseek-v4-pro",
-  "off": {
-   "extra_body": {
-    "thinking": {
-     "type": "disabled"
-    }
-   },
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "reasoning_content": " ",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "deepseek/deepseek-v4-pro",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "extra_body": {
-    "thinking": {
-     "type": "enabled"
-    }
-   },
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "reasoning_content": " ",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "deepseek/deepseek-v4-pro",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  }
- },
- "commandcode-anthropic": {
-  "api_mode": "chat_completions",
-  "base_url": "https://api.commandcode.ai/provider/v1",
-  "high": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "claude-sonnet-4-6",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "model": "claude-sonnet-4-6",
-  "off": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "claude-sonnet-4-6",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "claude-sonnet-4-6",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  }
- },
  "copilot": {
   "api_mode": "codex_responses",
   "base_url": "https://api.githubcopilot.com",
@@ -5474,187 +5103,6 @@
    ]
   }
  },
- "deepinfra": {
-  "api_mode": "chat_completions",
-  "base_url": "https://api.deepinfra.com/v1/openai",
-  "high": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "reasoning_content": " ",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "deepseek-ai/DeepSeek-V4",
-   "reasoning_effort": "high",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "model": "deepseek-ai/DeepSeek-V4",
-  "off": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "reasoning_content": " ",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "deepseek-ai/DeepSeek-V4",
-   "reasoning_effort": "none",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "reasoning_content": " ",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "deepseek-ai/DeepSeek-V4",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  }
- },
  "deepseek": {
   "api_mode": "chat_completions",
   "base_url": "https://api.deepseek.com/v1",
@@ -5827,184 +5275,6 @@
     }
    ],
    "model": "deepseek-v4-pro",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  }
- },
- "fireworks": {
-  "api_mode": "chat_completions",
-  "base_url": "https://api.fireworks.ai/inference/v1",
-  "high": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "accounts/fireworks/models/kimi-k2p6",
-   "reasoning_effort": "high",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "model": "accounts/fireworks/models/kimi-k2p6",
-  "off": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "accounts/fireworks/models/kimi-k2p6",
-   "reasoning_effort": "none",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "accounts/fireworks/models/kimi-k2p6",
    "timeout": 1800.0,
    "tools": [
     {
@@ -6253,7 +5523,7 @@
      "role": "user"
     }
    ],
-   "model": "zai-org/GLM-5.1-FP8",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -6276,7 +5546,7 @@
     }
    ]
   },
-  "model": "zai-org/GLM-5.1-FP8",
+  "model": "test-model",
   "off": {
    "messages": [
     {
@@ -6311,7 +5581,7 @@
      "role": "user"
     }
    ],
-   "model": "zai-org/GLM-5.1-FP8",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -6368,7 +5638,7 @@
      "role": "user"
     }
    ],
-   "model": "zai-org/GLM-5.1-FP8",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -6429,7 +5699,7 @@
      "role": "user"
     }
    ],
-   "model": "Qwen/Qwen3.5-72B-Instruct",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -6452,7 +5722,7 @@
     }
    ]
   },
-  "model": "Qwen/Qwen3.5-72B-Instruct",
+  "model": "test-model",
   "off": {
    "messages": [
     {
@@ -6487,7 +5757,7 @@
      "role": "user"
     }
    ],
-   "model": "Qwen/Qwen3.5-72B-Instruct",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -6544,7 +5814,7 @@
      "role": "user"
     }
    ],
-   "model": "Qwen/Qwen3.5-72B-Instruct",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -7307,185 +6577,6 @@
    ]
   }
  },
- "meta-ai": {
-  "api_mode": "codex_responses",
-  "base_url": "https://api.meta.ai/v1",
-  "high": {
-   "include": [
-    "reasoning.encrypted_content"
-   ],
-   "input": [
-    {
-     "content": "list files",
-     "role": "user",
-     "type": "message"
-    },
-    {
-     "arguments": "{\"command\": \"ls\"}",
-     "call_id": "call_1",
-     "name": "terminal",
-     "type": "function_call"
-    },
-    {
-     "call_id": "call_1",
-     "output": "a.txt\nb.txt",
-     "type": "function_call_output"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user",
-     "type": "message"
-    }
-   ],
-   "instructions": "You are a test agent.",
-   "model": "muse-spark-1.2",
-   "parallel_tool_calls": true,
-   "prompt_cache_key": "pck_f6d11aab44ec88459ba6fe2e",
-   "prompt_cache_retention": "24h",
-   "reasoning": {
-    "effort": "high",
-    "summary": "auto"
-   },
-   "store": false,
-   "timeout": 1800.0,
-   "tool_choice": "auto",
-   "tools": [
-    {
-     "description": "Run a shell command.",
-     "name": "terminal",
-     "parameters": {
-      "properties": {
-       "command": {
-        "type": "string"
-       }
-      },
-      "required": [
-       "command"
-      ],
-      "type": "object"
-     },
-     "strict": false,
-     "type": "function"
-    }
-   ]
-  },
-  "model": "muse-spark-1.2",
-  "off": {
-   "include": [],
-   "input": [
-    {
-     "content": "list files",
-     "role": "user",
-     "type": "message"
-    },
-    {
-     "arguments": "{\"command\": \"ls\"}",
-     "call_id": "call_1",
-     "name": "terminal",
-     "type": "function_call"
-    },
-    {
-     "call_id": "call_1",
-     "output": "a.txt\nb.txt",
-     "type": "function_call_output"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user",
-     "type": "message"
-    }
-   ],
-   "instructions": "You are a test agent.",
-   "model": "muse-spark-1.2",
-   "parallel_tool_calls": true,
-   "prompt_cache_key": "pck_f6d11aab44ec88459ba6fe2e",
-   "prompt_cache_retention": "24h",
-   "reasoning": {
-    "effort": "none"
-   },
-   "store": false,
-   "timeout": 1800.0,
-   "tool_choice": "auto",
-   "tools": [
-    {
-     "description": "Run a shell command.",
-     "name": "terminal",
-     "parameters": {
-      "properties": {
-       "command": {
-        "type": "string"
-       }
-      },
-      "required": [
-       "command"
-      ],
-      "type": "object"
-     },
-     "strict": false,
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "include": [
-    "reasoning.encrypted_content"
-   ],
-   "input": [
-    {
-     "content": "list files",
-     "role": "user",
-     "type": "message"
-    },
-    {
-     "arguments": "{\"command\": \"ls\"}",
-     "call_id": "call_1",
-     "name": "terminal",
-     "type": "function_call"
-    },
-    {
-     "call_id": "call_1",
-     "output": "a.txt\nb.txt",
-     "type": "function_call_output"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user",
-     "type": "message"
-    }
-   ],
-   "instructions": "You are a test agent.",
-   "model": "muse-spark-1.2",
-   "parallel_tool_calls": true,
-   "prompt_cache_key": "pck_f6d11aab44ec88459ba6fe2e",
-   "prompt_cache_retention": "24h",
-   "reasoning": {
-    "effort": "medium",
-    "summary": "auto"
-   },
-   "store": false,
-   "timeout": 1800.0,
-   "tool_choice": "auto",
-   "tools": [
-    {
-     "description": "Run a shell command.",
-     "name": "terminal",
-     "parameters": {
-      "properties": {
-       "command": {
-        "type": "string"
-       }
-      },
-      "required": [
-       "command"
-      ],
-      "type": "object"
-     },
-     "strict": false,
-     "type": "function"
-    }
-   ]
-  }
- },
  "minimax": {
   "api_mode": "anthropic_messages",
   "base_url": "https://api.minimax.io/anthropic",
@@ -8038,184 +7129,6 @@
    ]
   }
  },
- "nebius-token-factory": {
-  "api_mode": "chat_completions",
-  "base_url": "https://api.tokenfactory.nebius.com/v1",
-  "high": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "Qwen/Qwen3.5-397B-A17B-fast",
-   "reasoning_effort": "high",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "model": "Qwen/Qwen3.5-397B-A17B-fast",
-  "off": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "Qwen/Qwen3.5-397B-A17B-fast",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "Qwen/Qwen3.5-397B-A17B-fast",
-   "reasoning_effort": "medium",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  }
- },
  "nous": {
   "api_mode": "chat_completions",
   "base_url": "https://inference-api.nousresearch.com/v1",
@@ -8224,13 +7137,7 @@
     "reasoning": {
      "effort": "high",
      "enabled": true
-    },
-    "session_id": "wire-snapshot",
-    "tags": [
-     "product=hermes-agent",
-     "client=hermes-client-v<VERSION>",
-     "conversation=wire-snapshot"
-    ]
+    }
    },
    "messages": [
     {
@@ -8323,12 +7230,10 @@
   "model": "anthropic/claude-opus-5.5",
   "off": {
    "extra_body": {
-    "session_id": "wire-snapshot",
-    "tags": [
-     "product=hermes-agent",
-     "client=hermes-client-v<VERSION>",
-     "conversation=wire-snapshot"
-    ]
+    "reasoning": {
+     "effort": "none",
+     "enabled": false
+    }
    },
    "messages": [
     {
@@ -8423,13 +7328,7 @@
     "reasoning": {
      "effort": "medium",
      "enabled": true
-    },
-    "session_id": "wire-snapshot",
-    "tags": [
-     "product=hermes-agent",
-     "client=hermes-client-v<VERSION>",
-     "conversation=wire-snapshot"
-    ]
+    }
    },
    "messages": [
     {
@@ -8520,187 +7419,10 @@
    ]
   }
  },
- "novita": {
-  "api_mode": "chat_completions",
-  "base_url": "https://api.novita.ai/openai/v1",
-  "high": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "moonshotai/kimi-k2.5",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "model": "moonshotai/kimi-k2.5",
-  "off": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "moonshotai/kimi-k2.5",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "moonshotai/kimi-k2.5",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  }
- },
  "nvidia": {
   "api_mode": "chat_completions",
   "base_url": "https://integrate.api.nvidia.com/v1",
   "high": {
-   "max_tokens": 16384,
    "messages": [
     {
      "content": "You are a test agent.",
@@ -8734,7 +7456,7 @@
      "role": "user"
     }
    ],
-   "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -8757,9 +7479,8 @@
     }
    ]
   },
-  "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+  "model": "test-model",
   "off": {
-   "max_tokens": 16384,
    "messages": [
     {
      "content": "You are a test agent.",
@@ -8793,7 +7514,7 @@
      "role": "user"
     }
    ],
-   "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -8817,7 +7538,6 @@
    ]
   },
   "unset": {
-   "max_tokens": 16384,
    "messages": [
     {
      "content": "You are a test agent.",
@@ -8851,7 +7571,7 @@
      "role": "user"
     }
    ],
-   "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+   "model": "test-model",
    "timeout": 1800.0,
    "tools": [
     {
@@ -9488,7 +8208,6 @@
     }
    ],
    "model": "kimi-k2.5",
-   "reasoning_effort": "high",
    "timeout": 1800.0,
    "tools": [
     {
@@ -9513,11 +8232,6 @@
   },
   "model": "kimi-k2.5",
   "off": {
-   "extra_body": {
-    "thinking": {
-     "type": "disabled"
-    }
-   },
    "extra_headers": {
     "x-opencode-session": "wire-snapshot"
    },
@@ -9828,7 +8542,10 @@
   "base_url": "https://openrouter.ai/api/v1",
   "high": {
    "extra_body": {
-    "session_id": "wire-snapshot"
+    "reasoning": {
+     "effort": "high",
+     "enabled": true
+    }
    },
    "messages": [
     {
@@ -9916,13 +8633,15 @@
      },
      "type": "function"
     }
-   ],
-   "verbosity": "high"
+   ]
   },
   "model": "anthropic/claude-opus-5.5",
   "off": {
    "extra_body": {
-    "session_id": "wire-snapshot"
+    "reasoning": {
+     "effort": "none",
+     "enabled": false
+    }
    },
    "messages": [
     {
@@ -10014,7 +8733,10 @@
   },
   "unset": {
    "extra_body": {
-    "session_id": "wire-snapshot"
+    "reasoning": {
+     "effort": "medium",
+     "enabled": true
+    }
    },
    "messages": [
     {
@@ -10389,185 +9111,188 @@
    ]
   }
  },
- "router": {
-  "api_mode": "codex_responses",
-  "base_url": "https://api.router.com/v1",
+ "siliconflow": {
+  "api_mode": "chat_completions",
+  "base_url": "https://api.siliconflow.com/v1",
   "high": {
-   "include": [
-    "reasoning.encrypted_content"
-   ],
-   "input": [
+   "messages": [
+    {
+     "content": "You are a test agent.",
+     "role": "system"
+    },
     {
      "content": "list files",
-     "role": "user",
-     "type": "message"
+     "role": "user"
     },
     {
-     "arguments": "{\"command\": \"ls\"}",
-     "call_id": "call_1",
-     "name": "terminal",
-     "type": "function_call"
+     "content": "",
+     "reasoning_content": " ",
+     "role": "assistant",
+     "tool_calls": [
+      {
+       "function": {
+        "arguments": "{\"command\": \"ls\"}",
+        "name": "terminal"
+       },
+       "id": "call_1",
+       "type": "function"
+      }
+     ]
     },
     {
-     "call_id": "call_1",
-     "output": "a.txt\nb.txt",
-     "type": "function_call_output"
+     "content": "a.txt\nb.txt",
+     "role": "tool",
+     "tool_call_id": "call_1"
     },
     {
      "content": "thanks, now summarize",
-     "role": "user",
-     "type": "message"
+     "role": "user"
     }
    ],
-   "instructions": "You are a test agent.",
-   "model": "openai/gpt-5.5",
-   "parallel_tool_calls": true,
-   "prompt_cache_key": "pck_f6d11aab44ec88459ba6fe2e",
-   "reasoning": {
-    "effort": "high",
-    "summary": "auto"
-   },
-   "store": false,
+   "model": "deepseek-ai/DeepSeek-V4-Pro",
    "timeout": 1800.0,
-   "tool_choice": "auto",
    "tools": [
     {
-     "description": "Run a shell command.",
-     "name": "terminal",
-     "parameters": {
-      "properties": {
-       "command": {
-        "type": "string"
-       }
-      },
-      "required": [
-       "command"
-      ],
-      "type": "object"
+     "function": {
+      "description": "Run a shell command.",
+      "name": "terminal",
+      "parameters": {
+       "properties": {
+        "command": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "command"
+       ],
+       "type": "object"
+      }
      },
-     "strict": false,
      "type": "function"
     }
    ]
   },
-  "model": "openai/gpt-5.5",
+  "model": "deepseek-ai/DeepSeek-V4-Pro",
   "off": {
-   "include": [],
-   "input": [
+   "messages": [
+    {
+     "content": "You are a test agent.",
+     "role": "system"
+    },
     {
      "content": "list files",
-     "role": "user",
-     "type": "message"
+     "role": "user"
     },
     {
-     "arguments": "{\"command\": \"ls\"}",
-     "call_id": "call_1",
-     "name": "terminal",
-     "type": "function_call"
+     "content": "",
+     "reasoning_content": " ",
+     "role": "assistant",
+     "tool_calls": [
+      {
+       "function": {
+        "arguments": "{\"command\": \"ls\"}",
+        "name": "terminal"
+       },
+       "id": "call_1",
+       "type": "function"
+      }
+     ]
     },
     {
-     "call_id": "call_1",
-     "output": "a.txt\nb.txt",
-     "type": "function_call_output"
+     "content": "a.txt\nb.txt",
+     "role": "tool",
+     "tool_call_id": "call_1"
     },
     {
      "content": "thanks, now summarize",
-     "role": "user",
-     "type": "message"
+     "role": "user"
     }
    ],
-   "instructions": "You are a test agent.",
-   "model": "openai/gpt-5.5",
-   "parallel_tool_calls": true,
-   "prompt_cache_key": "pck_f6d11aab44ec88459ba6fe2e",
-   "reasoning": {
-    "effort": "none"
-   },
-   "store": false,
+   "model": "deepseek-ai/DeepSeek-V4-Pro",
    "timeout": 1800.0,
-   "tool_choice": "auto",
    "tools": [
     {
-     "description": "Run a shell command.",
-     "name": "terminal",
-     "parameters": {
-      "properties": {
-       "command": {
-        "type": "string"
-       }
-      },
-      "required": [
-       "command"
-      ],
-      "type": "object"
+     "function": {
+      "description": "Run a shell command.",
+      "name": "terminal",
+      "parameters": {
+       "properties": {
+        "command": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "command"
+       ],
+       "type": "object"
+      }
      },
-     "strict": false,
      "type": "function"
     }
    ]
   },
   "unset": {
-   "include": [
-    "reasoning.encrypted_content"
-   ],
-   "input": [
+   "messages": [
+    {
+     "content": "You are a test agent.",
+     "role": "system"
+    },
     {
      "content": "list files",
-     "role": "user",
-     "type": "message"
+     "role": "user"
     },
     {
-     "arguments": "{\"command\": \"ls\"}",
-     "call_id": "call_1",
-     "name": "terminal",
-     "type": "function_call"
+     "content": "",
+     "reasoning_content": " ",
+     "role": "assistant",
+     "tool_calls": [
+      {
+       "function": {
+        "arguments": "{\"command\": \"ls\"}",
+        "name": "terminal"
+       },
+       "id": "call_1",
+       "type": "function"
+      }
+     ]
     },
     {
-     "call_id": "call_1",
-     "output": "a.txt\nb.txt",
-     "type": "function_call_output"
+     "content": "a.txt\nb.txt",
+     "role": "tool",
+     "tool_call_id": "call_1"
     },
     {
      "content": "thanks, now summarize",
-     "role": "user",
-     "type": "message"
+     "role": "user"
     }
    ],
-   "instructions": "You are a test agent.",
-   "model": "openai/gpt-5.5",
-   "parallel_tool_calls": true,
-   "prompt_cache_key": "pck_f6d11aab44ec88459ba6fe2e",
-   "reasoning": {
-    "effort": "medium",
-    "summary": "auto"
-   },
-   "store": false,
+   "model": "deepseek-ai/DeepSeek-V4-Pro",
    "timeout": 1800.0,
-   "tool_choice": "auto",
    "tools": [
     {
-     "description": "Run a shell command.",
-     "name": "terminal",
-     "parameters": {
-      "properties": {
-       "command": {
-        "type": "string"
-       }
-      },
-      "required": [
-       "command"
-      ],
-      "type": "object"
+     "function": {
+      "description": "Run a shell command.",
+      "name": "terminal",
+      "parameters": {
+       "properties": {
+        "command": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "command"
+       ],
+       "type": "object"
+      }
      },
-     "strict": false,
      "type": "function"
     }
    ]
   }
  },
- "solstice": {
+ "siliconflow-cn": {
   "api_mode": "chat_completions",
-  "base_url": "https://generativelanguage.googleapis.com/v1alpha",
+  "base_url": "https://api.siliconflow.cn/v1",
   "high": {
    "messages": [
     {
@@ -10580,6 +9305,7 @@
     },
     {
      "content": "",
+     "reasoning_content": " ",
      "role": "assistant",
      "tool_calls": [
       {
@@ -10602,7 +9328,7 @@
      "role": "user"
     }
    ],
-   "model": "gemini-3.1-pro",
+   "model": "deepseek-ai/DeepSeek-V4-Pro",
    "timeout": 1800.0,
    "tools": [
     {
@@ -10625,7 +9351,7 @@
     }
    ]
   },
-  "model": "gemini-3.1-pro",
+  "model": "deepseek-ai/DeepSeek-V4-Pro",
   "off": {
    "messages": [
     {
@@ -10638,6 +9364,7 @@
     },
     {
      "content": "",
+     "reasoning_content": " ",
      "role": "assistant",
      "tool_calls": [
       {
@@ -10660,7 +9387,7 @@
      "role": "user"
     }
    ],
-   "model": "gemini-3.1-pro",
+   "model": "deepseek-ai/DeepSeek-V4-Pro",
    "timeout": 1800.0,
    "tools": [
     {
@@ -10695,6 +9422,7 @@
     },
     {
      "content": "",
+     "reasoning_content": " ",
      "role": "assistant",
      "tool_calls": [
       {
@@ -10717,7 +9445,7 @@
      "role": "user"
     }
    ],
-   "model": "gemini-3.1-pro",
+   "model": "deepseek-ai/DeepSeek-V4-Pro",
    "timeout": 1800.0,
    "tools": [
     {
@@ -11279,198 +10007,10 @@
    ]
   }
  },
- "upstage": {
-  "api_mode": "chat_completions",
-  "base_url": "https://api.upstage.ai/v1",
-  "high": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "solar-pro3",
-   "reasoning_effort": "high",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "model": "solar-pro3",
-  "off": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "solar-pro3",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  },
-  "unset": {
-   "messages": [
-    {
-     "content": "You are a test agent.",
-     "role": "system"
-    },
-    {
-     "content": "list files",
-     "role": "user"
-    },
-    {
-     "content": "",
-     "role": "assistant",
-     "tool_calls": [
-      {
-       "function": {
-        "arguments": "{\"command\": \"ls\"}",
-        "name": "terminal"
-       },
-       "id": "call_1",
-       "type": "function"
-      }
-     ]
-    },
-    {
-     "content": "a.txt\nb.txt",
-     "role": "tool",
-     "tool_call_id": "call_1"
-    },
-    {
-     "content": "thanks, now summarize",
-     "role": "user"
-    }
-   ],
-   "model": "solar-pro3",
-   "reasoning_effort": "medium",
-   "timeout": 1800.0,
-   "tools": [
-    {
-     "function": {
-      "description": "Run a shell command.",
-      "name": "terminal",
-      "parameters": {
-       "properties": {
-        "command": {
-         "type": "string"
-        }
-       },
-       "required": [
-        "command"
-       ],
-       "type": "object"
-      }
-     },
-     "type": "function"
-    }
-   ]
-  }
- },
  "vertex": {
   "api_mode": "chat_completions",
   "base_url": "https://aiplatform.googleapis.com/v1/projects/p/locations/global/endpoints/openapi",
   "high": {
-   "extra_body": {
-    "extra_body": {
-     "google": {
-      "thinking_config": {
-       "include_thoughts": true,
-       "thinking_level": "high"
-      }
-     }
-    }
-   },
    "messages": [
     {
      "content": "You are a test agent.",
@@ -11529,16 +10069,6 @@
   },
   "model": "gemini-3-pro",
   "off": {
-   "extra_body": {
-    "extra_body": {
-     "google": {
-      "thinking_config": {
-       "include_thoughts": false,
-       "thinking_level": "low"
-      }
-     }
-    }
-   },
    "messages": [
     {
      "content": "You are a test agent.",

@@ -392,51 +392,6 @@ class TestProviderStickyKeys:
             reset_conversation_context(conversation)
             reset_affinity_scope(affinity)
 
-    def test_declared_scope_pins_the_sticky_key(self):
-        scope = declared_conversation_scope(_agent(RUN_1, None, CHAT_KEY))
-        token = set_affinity_scope(scope)
-        try:
-            first = _sticky_key(RUN_1)
-            second = _sticky_key(RUN_2)
-        finally:
-            reset_affinity_scope(token)
-
-        assert first == second == scope
-
-    def test_without_a_declaration_the_conversation_id_still_wins(self):
-        """Delegate trees keep sharing their parent's sticky key."""
-        conversation = set_conversation_context("parent-root")
-        try:
-            assert get_affinity_scope() is None
-            assert _sticky_key("delegate-child") == "parent-root"
-        finally:
-            reset_conversation_context(conversation)
-
-    def test_grok_conv_id_follows_the_declared_scope(self):
-        scope = declared_conversation_scope(_agent(RUN_1, None, CHAT_KEY))
-        token = set_affinity_scope(scope)
-        try:
-            headers = _grok_headers(RUN_1)
-            headers_next = _grok_headers(RUN_2)
-        finally:
-            reset_affinity_scope(token)
-
-        assert headers["x-grok-conv-id"] == headers_next["x-grok-conv-id"] == scope
-
-    def test_nous_sticky_key_follows_the_declared_scope(self):
-        from providers import get_provider_profile
-
-        scope = declared_conversation_scope(_agent(RUN_1, None, CHAT_KEY))
-        token = set_affinity_scope(scope)
-        try:
-            body = get_provider_profile("nous").build_extra_body(session_id=RUN_1)
-            body_next = get_provider_profile("nous").build_extra_body(session_id=RUN_2)
-        finally:
-            reset_affinity_scope(token)
-
-        assert body["session_id"] == body_next["session_id"] == scope
-
-
 class TestConversationGenerationRotates:
     """The declared key must not outlive the conversation it names.
 

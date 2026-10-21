@@ -422,13 +422,10 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             return ["<unavailable>"]
         return active
 
-    @staticmethod
-    def _relay_wake_url_or_none():
-        from gateway.relay import relay_wake_url
-        try:
-            return relay_wake_url()
-        except Exception:
-            return None
+    # CN subtraction: the connector relay is not part of this build, so there is no wake URL
+    # that could re-arm a dormant gateway. Without one the idle watcher must NOT arm — a
+    # dormant gateway nobody can wake would strand every session.
+    _RELAY_WAKE_URL: Optional[str] = None
 
     def _scale_to_zero_should_arm(self) -> bool:
         """Whether to start the idle watcher (D1/D11/§3.4(1))."""
@@ -436,7 +433,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         return should_arm(
             enabled=scale_to_zero_enabled(),
             relay_only_or_absent=messaging_is_relay_only_or_absent(self._scale_to_zero_active_messaging_platforms()),
-            wake_url=self._relay_wake_url_or_none(),
+            wake_url=self._RELAY_WAKE_URL,
         )
 
     def _log_scale_to_zero_not_armed_reason(self) -> None:
@@ -450,7 +447,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                 "scale-to-zero: NOT armed despite opt-in — relay_only_or_absent=%s (enabled platforms=%s), "
                 "wake_url=%s. Need relay-only messaging + a registered wake URL.",
                 messaging_is_relay_only_or_absent(active), active or "none",
-                "set" if self._relay_wake_url_or_none() else "MISSING",
+                "set" if self._RELAY_WAKE_URL else "MISSING",
             )
         except Exception:
             logger.debug("scale-to-zero: not-armed reason logging failed", exc_info=True)

@@ -168,55 +168,6 @@ class TestA2AClientToolsInCliProcess:
     """The issue's exact repro: a CLI/TUI process, no gateway startup."""
 
 
-    def test_a2a_toolset_resolves_without_materializing_the_platform(self):
-        from hermes_cli.plugins import PluginManager
-        from toolsets import resolve_toolset
-
-        mgr = PluginManager()
-        mgr.discover_and_load()
-
-        a2a = mgr._plugins.get("platforms/a2a")  # bundled platforms key by category path (#27548)
-        assert a2a is not None, "bundled a2a platform plugin was not discovered"
-
-        # The whole point of the deferral is preserved: the inbound adapter is
-        # still not imported in a CLI process.
-        assert a2a.deferred is True
-
-        # ...but the outbound client tools are now reachable. Before the fix
-        # this was [] until a gateway/web process called all_entries().
-        assert set(resolve_toolset("a2a")) == A2A_CLIENT_TOOLS
-
-    def test_a2a_appears_in_the_hermes_tools_checklist(self):
-        """`a2a` is in _DEFAULT_OFF_TOOLSETS, so it must be tickable.
-
-        Every other member of that set (video_gen,
-        x_search, ...) renders a checkbox; a2a rendered nothing, so the
-        documented opt-in path had nothing to tick.
-        """
-        from hermes_cli.plugins import discover_plugins, get_plugin_toolsets
-
-        # get_plugin_toolsets() reads the process-wide manager, which is what
-        # the `hermes tools` checklist does.
-        discover_plugins()
-
-        assert "a2a" in {key for key, _, _ in get_plugin_toolsets()}
-
-    def test_platform_bundle_includes_the_client_tools(self):
-        """``hermes-a2a`` sessions get the client tools too.
-
-        The bundle path read the tool registry behind a deliberately cheap
-        ``is_registered()`` check, so a deferred platform's own tools were
-        dropped from its bundle as well.
-        """
-        from hermes_cli.plugins import PluginManager
-        from toolsets import resolve_toolset
-
-        mgr = PluginManager()
-        mgr.discover_and_load()
-
-        assert A2A_CLIENT_TOOLS.issubset(set(resolve_toolset("hermes-a2a")))
-
-
 # ── the general mechanism ──────────────────────────────────────────────────
 
 

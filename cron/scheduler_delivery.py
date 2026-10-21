@@ -511,17 +511,12 @@ def _iter_home_target_platforms():
 
 
 def _relay_fronted_delivery_platforms(connected: set) -> set:
-    """Logical platforms deliverable through a connected relay. ``get_connected_platforms()`` only
-    sees native platforms; fronted ones come from the same ``GATEWAY_RELAY_PLATFORMS`` stamp
-    fire-time routing uses (validation symmetric with routing). No relay -> empty set."""
-    if "relay" not in connected:
-        return set()
-    try:
-        from gateway.relay import relay_fronted_platforms
-        return relay_fronted_platforms()
-    except Exception:
-        logger.debug("relay fronted-platform lookup failed", exc_info=True)
-        return set()
+    """Logical platforms deliverable through a connected relay.
+
+    CN subtraction: the connector relay is not part of this build, so nothing is
+    relay-fronted and the set is always empty.
+    """
+    return set()
 
 
 def cron_delivery_targets() -> list[dict]:
@@ -1175,16 +1170,8 @@ def _resolve_target_transport(
         pconfig = transport.config
         runtime_adapter = transport.adapter
     else:
-        # Relay-fronted platforms have NO standalone fallback (the connector owns the credential),
-        # so surface that instead of the native configured/enabled gate, which misdiagnoses them.
-        from gateway.relay import relay_fronted_platforms
-        if platform_name in relay_fronted_platforms():
-            return None, (
-                f"platform '{platform_name}' is relay-fronted and has no "
-                "live gateway transport; start the gateway (its ticker "
-                "owns relay-fronted delivery and will fire the job on "
-                "schedule)"
-            )
+        # CN subtraction: the connector relay is not part of this build, so there is no
+        # relay-fronted platform to explain. Fall through to the native configured/enabled gate.
         pconfig = config.platforms.get(platform)
         runtime_adapter = None
 

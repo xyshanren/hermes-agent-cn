@@ -35,23 +35,6 @@ def _make_runner():
 # The BlueBubbles adapter does no sender gate of its own, so with its platform
 # allowlist unset GATEWAY_ALLOWED_USERS is the only enforcement on that path.
 @pytest.mark.parametrize(
-    ("platform", "env_var"),
-    [(Platform.EMAIL, "EMAIL_ALLOWED_USERS"), (Platform.BLUEBUBBLES, "GATEWAY_ALLOWED_USERS")],
-)
-def test_bare_localpart_entry_admits_no_foreign_domain(monkeypatch, platform, env_var):
-    # conftest's hermetic env blanks the EMAIL_/GATEWAY_ vars but not BlueBubbles' own.
-    for key in ("BLUEBUBBLES_ALLOWED_USERS", "BLUEBUBBLES_ALLOW_ALL_USERS"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv(env_var, "alice,bob@corp.example")
-    runner = _make_runner()
-
-    assert runner._is_user_authorized(_source(platform, "alice@evil.example")) is False
-    assert runner._is_user_authorized(_source(platform, "bob@evil.example")) is False
-    # Positive control: a qualified entry still admits its exact sender.
-    assert runner._is_user_authorized(_source(platform, "bob@corp.example")) is True
-
-
-@pytest.mark.parametrize(
     ("platform", "user_id"),
     [
         (Platform.WHATSAPP, "15550000001@s.whatsapp.net"),

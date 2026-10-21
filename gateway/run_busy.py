@@ -1612,7 +1612,7 @@ class GatewayBusySessionMixin:
                 # a code-only decline has no marker colon in its rendered text,
                 # and an ambiguous result must not be treated as a definite
                 # refusal.
-                from gateway.relay.egress import declined_send
+                from gateway.egress_decline import declined_send
 
                 _confirm_err = getattr(button_result, "error", None)
                 if declined_send(button_result):

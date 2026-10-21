@@ -1452,69 +1452,6 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             Platform._member_map_.pop("PSEUDOFAKE", None)
 
 
-    def test_telegram_onboarding_apply_reports_restart_failure_after_save(
-        self, monkeypatch
-    ):
-        from hermes_cli.config import load_config, load_env
-
-        with _web_server_messaging._telegram_onboarding_lock:
-            _web_server_messaging._telegram_onboarding_pairings.clear()
-
-        def fake_request(method, path, *, body=None, bearer_token=None):
-            if method == "POST":
-                return {
-                    "pairing_id": "pair-restart-fails",
-                    "poll_token": "poll-secret",
-                    "suggested_username": "hermes_pair_restart_fails_bot",
-                    "deep_link": "https://t.me/newbot/HermesSetupBot/hermes_pair_restart_fails_bot",
-                    "qr_payload": "https://t.me/newbot/HermesSetupBot/hermes_pair_restart_fails_bot",
-                    "expires_at": "2027-05-18T00:00:00.000Z",
-                }
-            assert method == "GET"
-            assert path == "/v1/telegram/pairings/pair-restart-fails"
-            assert bearer_token == "poll-secret"
-            return {
-                "status": "ready",
-                "bot_username": "hermes_pair_restart_fails_bot",
-                "owner_user_id": 123456789,
-                "token": "123456:SECRET",
-            }
-
-        monkeypatch.setattr(_web_server_messaging, "_telegram_onboarding_request_sync", fake_request)
-        _web_server_gateway._ACTION_PROCS.pop("gateway-restart", None)
-
-        def fail_spawn_action(subcommand, name):
-            # The default home is named explicitly: a bare child would re-read the sticky active_profile.
-            assert subcommand == ["-p", "default", "gateway", "restart"]
-            assert name == "gateway-restart"
-            raise RuntimeError("supervisor unavailable")
-
-        monkeypatch.setattr(_web_server_gateway, "_spawn_hermes_action", fail_spawn_action)
-
-        start = self.client.post("/api/messaging/telegram/onboarding/start", json={})
-        assert start.status_code == 200
-        ready = self.client.get("/api/messaging/telegram/onboarding/pair-restart-fails")
-        assert ready.status_code == 200
-        assert ready.json()["status"] == "ready"
-
-        applied = self.client.post(
-            "/api/messaging/telegram/onboarding/pair-restart-fails/apply",
-            json={"allowed_user_ids": ["123456789"]},
-        )
-
-        assert applied.status_code == 200
-        applied_data = applied.json()
-        assert applied_data["ok"] is True
-        assert applied_data["needs_restart"] is True
-        assert applied_data["restart_started"] is False
-        assert "supervisor unavailable" in applied_data["restart_error"]
-        assert "token" not in applied_data
-        env = load_env()
-        assert env["TELEGRAM_BOT_TOKEN"] == "123456:SECRET"
-        assert env["TELEGRAM_ALLOWED_USERS"] == "123456789"
-        assert load_config()["platforms"]["telegram"]["enabled"] is True
-
-
     def test_unauthenticated_api_blocked(self):
         """API requests without the session token should be rejected."""
         from starlette.testclient import TestClient
@@ -2109,51 +2046,6 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             response = self.client.put("/api/env", json={"key": key, "value": stale})
             assert response.status_code == 400
             assert load_env()[key] == rotated
-
-    def test_messaging_and_custom_endpoint_reject_stale_previews(self):
-        """Invariant: preview rejection runs before any mutation (messaging clear+set),
-        and custom-endpoint display strings (``${KEY_ENV}`` / legacy plaintext preview)
-        are refused even after the entry rotated underneath them."""
-        from hermes_cli.config import load_config, load_env, save_config, save_env_value
-
-        key = "DISCORD_BOT_TOKEN"
-        real = "discord-live-secret-abcdef1234567890"
-        save_env_value(key, real)
-        response = self.client.put(
-            "/api/messaging/platforms/discord",
-            json={"clear_env": [key], "env": {key: redact_key(real)}},
-        )
-        assert response.status_code == 400
-        assert load_env()[key] == real
-
-        save_env_value("OLD_ENDPOINT_KEY", "old-secret-1234567890")
-        save_env_value("NEW_ENDPOINT_KEY", "new-secret-0987654321")
-        cfg = load_config()
-        cfg["providers"] = {
-            "env-preview": {"name": "Env Preview", "base_url": "https://env-preview.example.com/v1",
-                            "model": "m", "key_env": "OLD_ENDPOINT_KEY", "models": {"m": {}}},
-            "legacy-preview": {"name": "Legacy Preview", "base_url": "https://legacy-preview.example.com/v1",
-                               "model": "m", "api_key": "legacy-secret-A-1234567890", "models": {"m": {}}},
-        }
-        save_config(cfg)
-        endpoints = {e["id"]: e for e in self.client.get("/api/providers/custom-endpoints").json()["endpoints"]}
-        assert endpoints["env-preview"]["api_key_preview"] == "${OLD_ENDPOINT_KEY}"
-        assert endpoints["legacy-preview"]["api_key_preview"].startswith("«redacted")
-
-        cfg = load_config()
-        cfg["providers"]["env-preview"]["key_env"] = "NEW_ENDPOINT_KEY"
-        cfg["providers"]["legacy-preview"]["api_key"] = "legacy-secret-B-0987654321"
-        save_config(cfg)
-        for endpoint_id, base_url in (("env-preview", "https://env-preview.example.com/v1"),
-                                      ("legacy-preview", "https://legacy-preview.example.com/v1")):
-            response = self.client.post("/api/providers/custom-endpoints", json={
-                "id": endpoint_id, "name": "x", "base_url": base_url, "model": "m",
-                "api_key": endpoints[endpoint_id]["api_key_preview"],
-            })
-            assert response.status_code == 400
-        providers = load_config()["providers"]
-        assert providers["env-preview"]["key_env"] == "NEW_ENDPOINT_KEY"
-        assert providers["legacy-preview"]["api_key"] == "legacy-secret-B-0987654321"
 
     def test_activating_an_endpoint_carries_its_credential_either_way(self):
         """Activate must work for both key_env and pre-#69449 plaintext entries."""
@@ -2949,44 +2841,6 @@ class TestNewEndpoints:
 
 
     # --- New profiles endpoints: active / description / model / describe-auto ---
-
-
-    def test_discord_toolsets_read_and_write_discord_platform(self):
-        """Platform-restricted toolsets must not be saved as successful CLI no-ops."""
-        from hermes_cli.config import load_config
-
-        listing = {t["name"]: t for t in self.client.get("/api/tools/toolsets").json()}
-        assert listing["discord"]["platform"] == "discord"
-        assert listing["discord"]["platform_label"] == "Discord"
-        assert listing["discord"]["enabled"] is False
-
-        resp = self.client.put("/api/tools/toolsets/discord", json={"enabled": True})
-        assert resp.status_code == 200
-        assert resp.json() == {
-            "ok": True,
-            "name": "discord",
-            "platform": "discord",
-            "enabled": True,
-            # Install-on-enable: no provider post_setup pending for discord.
-            "post_setup_started": None,
-        }
-
-        config = load_config()
-        assert "discord" in config["platform_toolsets"]["discord"]
-        assert "discord" not in config["platform_toolsets"].get("cli", [])
-
-        listing = {t["name"]: t for t in self.client.get("/api/tools/toolsets").json()}
-        assert listing["discord"]["enabled"] is True
-        assert listing["discord_admin"]["enabled"] is False
-
-        resp = self.client.put(
-            "/api/tools/toolsets/discord_admin", json={"enabled": True}
-        )
-        assert resp.status_code == 200
-        config = load_config()
-        assert {"discord", "discord_admin"} <= set(
-            config["platform_toolsets"]["discord"]
-        )
 
 
     def test_get_toolset_config_returns_provider_matrix(self):

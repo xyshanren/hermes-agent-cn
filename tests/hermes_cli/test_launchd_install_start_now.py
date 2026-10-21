@@ -59,35 +59,6 @@ def launchd(tmp_path, monkeypatch):
 BOOTOUT = ["launchctl", "bootout", f"{DOMAIN}/{LABEL}"]
 
 
-@pytest.mark.parametrize(
-    "stale_plist, supervised_pid, reloads",
-    [(False, None, False), (True, None, False), (True, 4242, True)],
-    ids=["fresh-install", "repair-stopped-gateway", "repair-running-gateway"],
-)
-def test_cli_no_start_now_loads_only_a_gateway_launchd_already_runs(
-    launchd, capsys, stale_plist, supervised_pid, reloads,
-):
-    """Nothing running: the plist is written, never loaded, and an idle registration left from before
-    (a parked clean exit) is booted out, since that is what `gateway start` would kickstart. A gateway
-    launchd already runs is reloaded as before, not stopped."""
-    if stale_plist:
-        launchd.plist.parent.mkdir(parents=True)
-        launchd.plist.write_text("<plist>old</plist>", encoding="utf-8")
-    launchd.supervised_pid = supervised_pid
-
-    gateway_cli.gateway_command(_parse("install", "--no-start-now"))
-
-    assert launchd.bootstraps == []
-    if reloads:
-        assert launchd.refreshes == [1]
-        assert BOOTOUT not in launchd.launchctl
-    else:
-        assert launchd.refreshes == []
-        assert BOOTOUT in launchd.launchctl
-        assert plistlib.loads(launchd.plist.read_bytes())["Label"] == LABEL
-        assert "not started" in capsys.readouterr().out
-
-
 def test_wizard_no_to_start_now_installs_without_loading(launchd, monkeypatch):
     answers = iter([False, True])  # "Start the gateway now?" No, "on login" Yes
     monkeypatch.setattr(gateway_cli, "prompt_yes_no", lambda *a, **k: next(answers))

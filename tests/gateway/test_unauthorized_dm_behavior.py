@@ -84,42 +84,6 @@ def _make_runner(platform: Platform, config: GatewayConfig):
     return runner, adapter
 
 
-def test_whatsapp_lid_user_matches_phone_allowlist_via_modern_session_mapping(
-    monkeypatch, tmp_path,
-):
-    """Modern ``platforms/`` installs store bridge mappings under
-    ``platforms/whatsapp/session`` — the LID→phone resolution (and therefore
-    the allowlist match) must work there too, not just the legacy layout.
-    Regression guard for the silently-dropped-LID-sender bug (#36664)."""
-    _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("WHATSAPP_ALLOWED_USERS", "15550000001")
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-
-    session_dir = tmp_path / "platforms" / "whatsapp" / "session"
-    session_dir.mkdir(parents=True)
-    (session_dir / "lid-mapping-15550000001.json").write_text(
-        '"900000000000001"', encoding="utf-8",
-    )
-    (session_dir / "lid-mapping-900000000000001_reverse.json").write_text(
-        '"15550000001"', encoding="utf-8",
-    )
-
-    runner, _adapter = _make_runner(
-        Platform.WHATSAPP,
-        GatewayConfig(platforms={Platform.WHATSAPP: PlatformConfig(enabled=True)}),
-    )
-
-    source = SessionSource(
-        platform=Platform.WHATSAPP,
-        user_id="900000000000001@lid",
-        chat_id="900000000000001@lid",
-        user_name="tester",
-        chat_type="dm",
-    )
-
-    assert runner._is_user_authorized(source) is True
-
-
 @pytest.mark.parametrize(
     "allowlist, expected",
     [
@@ -293,51 +257,6 @@ async def test_unauthorized_whatsapp_dm_can_be_ignored(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_signal_with_allowlist_ignores_unauthorized_dm(monkeypatch):
-    """When SIGNAL_ALLOWED_USERS is set, unauthorized DMs are silently dropped.
-
-    This is the primary regression test for #9337: before the fix, Signal
-    would send pairing codes to ANY sender even when a strict allowlist was
-    configured, spamming personal contacts with cryptic bot messages.
-    """
-    _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("SIGNAL_ALLOWED_USERS", "+15550000001")  # allowlist set
-
-    config = GatewayConfig(
-        platforms={Platform.SIGNAL: PlatformConfig(enabled=True)},
-    )
-    runner, adapter = _make_runner(Platform.SIGNAL, config)
-
-    result = await runner._handle_message(
-        _make_event(Platform.SIGNAL, "+15559999999", "+15559999999")  # not in allowlist
-    )
-
-    assert result is None
-    runner.pairing_store.generate_code.assert_not_called()
-    adapter.send.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_telegram_with_allowlist_ignores_unauthorized_dm(monkeypatch):
-    """Same behavior for Telegram: allowlist ⟹ ignore unauthorized DMs."""
-    _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("TELEGRAM_ALLOWED_USERS", "111111111")
-
-    config = GatewayConfig(
-        platforms={Platform.TELEGRAM: PlatformConfig(enabled=True)},
-    )
-    runner, adapter = _make_runner(Platform.TELEGRAM, config)
-
-    result = await runner._handle_message(
-        _make_event(Platform.TELEGRAM, "999999999", "999999999")
-    )
-
-    assert result is None
-    runner.pairing_store.generate_code.assert_not_called()
-    adapter.send.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_global_allowlist_ignores_unauthorized_dm(monkeypatch):
     """GATEWAY_ALLOWED_USERS also triggers the 'ignore' behavior."""
     _clear_auth_env(monkeypatch)
@@ -355,24 +274,6 @@ async def test_global_allowlist_ignores_unauthorized_dm(monkeypatch):
     assert result is None
     runner.pairing_store.generate_code.assert_not_called()
     adapter.send.assert_not_awaited()
-
-
-def test_allowlist_authorized_user_returns_ignore_for_unauthorized(monkeypatch):
-    """_get_unauthorized_dm_behavior returns 'ignore' when allowlist is set.
-
-    We test the resolver directly.  The full _handle_message path for
-    authorized users is covered by the integration tests in this module.
-    """
-    _clear_auth_env(monkeypatch)
-    monkeypatch.setenv("SIGNAL_ALLOWED_USERS", "+15550000001")
-
-    config = GatewayConfig(
-        platforms={Platform.SIGNAL: PlatformConfig(enabled=True)},
-    )
-    runner, _adapter = _make_runner(Platform.SIGNAL, config)
-
-    behavior = runner._get_unauthorized_dm_behavior(Platform.SIGNAL)
-    assert behavior == "ignore"
 
 
 def test_get_unauthorized_dm_behavior_no_allowlist_returns_pair(monkeypatch):

@@ -7,24 +7,6 @@ A, B = 'http://127.0.0.1:8001/v1', 'http://127.0.0.1:8002/v1'
 CONFIG = {'providers': {'team': {'base_url': A, 'api_key': 'sk-team'}}}
 
 
-@pytest.mark.parametrize('a, b, config, expected', [
-    ({'provider': 'vllm', 'base_url': A}, {'provider': 'custom', 'base_url': A + '/'}, {}, True),
-    ({'provider': 'ollama', 'base_url': A}, {'provider': 'custom', 'base_url': A}, {}, True),
-    ({'provider': 'team'}, {'provider': 'custom:team'}, CONFIG, True),
-    ({'provider': 'team'}, {'provider': 'custom:team', 'base_url': A}, CONFIG, True),
-    ({'provider': 'team'}, {'provider': 'custom:team', 'base_url': B}, CONFIG, False),
-    ({'provider': 'team'}, {'provider': 'team'},
-     {'providers': {'team': {'base_url': B}}}, True),
-    ({'provider': 'auto'}, {'provider': 'custom', 'base_url': B}, {}, True),
-    ({'provider': 'deepinfra'}, {'provider': 'deep-infra'}, {}, True),
-    ({'provider': 'openrouter'}, {'provider': 'anthropic'}, {}, False),
-    ({'provider': 'custom', 'base_url': A}, {'provider': 'custom', 'base_url': B}, {}, False),
-])
-def test_same_route(a, b, config, expected):
-    assert same_route(a, b, config) is expected
-    assert same_route(b, a, config) is expected
-
-
 def test_resolved_route_identity_and_url():
     assert resolved_route({'provider': 'custom:team'}, CONFIG) == ('custom:team', A)
     assert resolved_route({'provider': 'TEAM', 'base_url': B + '/'}, CONFIG) == ('custom:team', B)

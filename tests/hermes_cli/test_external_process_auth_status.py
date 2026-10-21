@@ -41,84 +41,6 @@ def _clean_copilot_env(tmp_path, monkeypatch):
 # --- get_auth_status dispatches on auth_type, not slug ----------------------
 
 
-def test_get_auth_status_dispatches_external_process_by_auth_type(
-    tmp_path, monkeypatch, _clean_copilot_env
-):
-    fake = tmp_path / ("copilot.exe" if os.name == "nt" else "copilot")
-    fake.write_text("", encoding="utf-8")
-    fake.chmod(0o755)
-    monkeypatch.setenv("HERMES_COPILOT_ACP_COMMAND", str(fake))
-    # Point HOME somewhere empty so on-disk credential stores don't leak in.
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    status = get_auth_status("copilot-acp")
-
-    # The external_process status shape, not the {"logged_in": False}
-    # fallthrough — proves the dispatcher reached the right branch.
-    assert status.get("provider") == "copilot-acp"
-    assert status.get("configured") is True
-    assert status.get("resolved_command") == str(fake)
-    assert "auth_verified" in status
-
-
-def test_external_process_status_finds_user_local_cli_outside_backend_path(
-    tmp_path, monkeypatch, _clean_copilot_env
-):
-    """Desktop SSH inventory must discover a CLI installed in the user's local bin."""
-    local_bin = tmp_path / ".local" / "bin"
-    local_bin.mkdir(parents=True)
-    cli = local_bin / "copilot"
-    cli.write_text("", encoding="utf-8")
-    cli.chmod(0o755)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", str(tmp_path / "backend-bin"))
-
-    status = get_external_process_provider_status("copilot-acp")
-
-    assert status["configured"] is True
-    assert status["resolved_command"] == str(cli)
-    assert resolve_external_process_provider_credentials("copilot-acp")["command"] == str(cli)
-
-
-@pytest.mark.platforms("windows")
-def test_external_process_status_finds_user_profile_local_cli_as_native_path(
-    tmp_path, monkeypatch, _clean_copilot_env
-):
-    """The Windows user-local hit is one native path, not a mixed-separator join."""
-    local_bin = tmp_path / ".local" / "bin"
-    local_bin.mkdir(parents=True)
-    cli = local_bin / "copilot.exe"
-    cli.write_text("", encoding="utf-8")
-    monkeypatch.setenv("PATH", str(tmp_path / "backend-bin"))
-
-    status = get_external_process_provider_status("copilot-acp")
-    resolved = status["resolved_command"]
-
-    assert status["configured"] is True
-    assert "/" not in resolved and os.path.samefile(resolved, cli)
-    assert resolve_external_process_provider_credentials("copilot-acp")["command"] == resolved
-
-
-def test_external_process_status_resolves_relative_configured_path_from_cwd(
-    tmp_path, monkeypatch, _clean_copilot_env
-):
-    """An operator's relative command path keeps resolving against the launch cwd."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    cli = bin_dir / ("copilot.exe" if os.name == "nt" else "copilot")
-    cli.write_text("", encoding="utf-8")
-    cli.chmod(0o755)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("PATH", str(tmp_path / "backend-bin"))
-    monkeypatch.setenv("HERMES_COPILOT_ACP_COMMAND", os.path.join(".", "bin", cli.name))
-
-    status = get_external_process_provider_status("copilot-acp")
-
-    assert status["configured"] is True
-    assert status["resolved_command"] == str(cli)
-    assert resolve_external_process_provider_credentials("copilot-acp")["command"] == str(cli)
-
-
 @pytest.mark.platforms("posix")
 @pytest.mark.parametrize("preferred", ["claude-prefix", "user-local", "path", "explicit"])
 def test_external_process_claude_resolution_preserves_precedence(
@@ -299,19 +221,6 @@ def test_explicit_filter_drops_unverified_external_process_row(tmp_path, monkeyp
 # --- Accounts-tab cli_command ------------------------------------------------
 
 
-
-
-def test_cli_command_reflects_configured_executable(tmp_path, monkeypatch, _clean_copilot_env):
-    from hermes_cli.web_server_oauth import _external_process_cli_command
-
-    fake = tmp_path / ("copilot.exe" if os.name == "nt" else "copilot")
-    fake.write_text("", encoding="utf-8")
-    fake.chmod(0o755)
-    monkeypatch.setenv("HERMES_COPILOT_ACP_COMMAND", str(fake))
-
-    rendered = _external_process_cli_command("copilot-acp", "copilot login")
-
-    assert rendered == f"{fake} login"
 
 
 def test_cli_command_untouched_for_non_external_providers(_clean_copilot_env):

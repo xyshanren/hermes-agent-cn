@@ -39,24 +39,6 @@ def _surfaces() -> str:
     return out.getvalue()
 
 
-def test_duplicate_singleton_secret_named_identically_by_doctor_status_and_preflight(homes):
-    default, worker = homes
-    (default / ".env").write_text(f"TELEGRAM_BOT_TOKEN={SECRET}\nOPENAI_API_KEY=sk-shared\n", encoding="utf-8")
-    (worker / ".env").write_text(f"TELEGRAM_BOT_TOKEN={SECRET}\nOPENAI_API_KEY=sk-shared\n", encoding="utf-8")
-
-    findings = gm.duplicate_credential_findings()
-    assert len(findings) == 1
-    line = findings[0]
-    assert "'default'" in line and "'worker'" in line and "TELEGRAM_BOT_TOKEN" in line
-    assert gm.MIGRATE_COMMAND in line
-    # Same helper, same words: the preflight blocker IS the doctor/status finding.
-    assert gm.build_migration_plan().blockers == findings
-    out = _surfaces()
-    assert out.count(line) == 2  # once from doctor, once from gateway status
-    # Absence: the value (or a hash a user could mistake for it) never reaches any surface.
-    assert SECRET not in out and "shared-secret" not in out and "sk-shared" not in out
-
-
 def test_distinct_tokens_and_shared_non_singleton_keys_are_not_findings(homes):
     default, worker = homes
     (default / ".env").write_text(f"TELEGRAM_BOT_TOKEN={SECRET}\nOPENAI_API_KEY=sk-shared\n", encoding="utf-8")

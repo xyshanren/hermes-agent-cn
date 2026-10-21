@@ -106,45 +106,6 @@ def test_ambient_context_propagates_via_thread_context_helper():
 
 
 
-def test_nous_sticky_key_matches_conversation_tag():
-    """Sticky routing key must resolve like the ``conversation=`` tag does.
-
-    The load-bearing case is the auxiliary call sites (compression, titles,
-    vision, MoA slots): they pass no ``session_id`` at all, so before this
-    resolution they carried the conversation tag but NO Portal sticky key and
-    routed independently of their conversation.
-
-    The explicit-argument case matters for installs that opt out of the
-    default ``compression.in_place: true`` (#38763) and therefore still rotate
-    ``agent.session_id`` at compaction, and for delegate-subagent trees that
-    should tag as the parent conversation.
-    """
-    from agent.portal_tags import (
-        conversation_tag,
-        reset_conversation_context,
-        set_conversation_context,
-    )
-    from providers import get_provider_profile
-
-    profile = get_provider_profile("nous")
-    token = set_conversation_context("root-conversation")
-    try:
-        # Rotated segment id passed explicitly — root still wins, both places.
-        body = profile.build_extra_body(session_id="segment-after-compaction")
-        assert body["session_id"] == "root-conversation"
-        assert conversation_tag("root-conversation") in body["tags"]
-
-        # Auxiliary call sites pass no session_id but inherit the context.
-        aux = profile.build_extra_body()
-        assert aux["session_id"] == "root-conversation"
-    finally:
-        reset_conversation_context(token)
-
-
-
-
-
-
 def test_compress_context_preserves_ambient_context(monkeypatch):
     """In-turn compaction inherits the turn's root and restores it untouched."""
     import agent.conversation_compression as cc

@@ -211,41 +211,6 @@ class TestUpdateCommandPlatformGate:
     """
 
 
-    @pytest.mark.asyncio
-    async def test_allows_plugin_platform_via_registry_fallback(self, monkeypatch):
-        """A plugin-migrated platform (DISCORD) is no longer in
-        ``_UPDATE_ALLOWED_PLATFORMS`` but must still pass the gate via
-        the registry's ``allow_update_command=True`` flag.
-
-        This test is the empirical guarantee that removing DISCORD from
-        the hardcoded frozenset does not regress the /update command for
-        Discord users.
-        """
-
-        # Make sure the plugin registry is populated so the fallback fires.
-        from hermes_cli.plugins import PluginManager
-        PluginManager().discover_and_load(force=True)
-        from gateway.platform_registry import platform_registry
-        discord_entry = platform_registry.get("discord")
-        assert discord_entry is not None
-        assert discord_entry.allow_update_command is True
-
-        runner = _make_runner()
-        event = _make_event(platform=Platform.DISCORD)
-        monkeypatch.setenv("HERMES_MANAGED", "")
-
-        with patch("subprocess.Popen"):
-            result = await runner._handle_update_command(event)
-
-        # The gate must NOT have rejected us — anything other than the
-        # ``platform_not_messaging`` rejection string is acceptable here.
-        # Later steps may legitimately return success ("Starting Hermes
-        # update…") or fail for environment reasons.
-        assert "only available from messaging platforms" not in result
-
-
-
-
 # ---------------------------------------------------------------------------
 # _send_update_notification
 # ---------------------------------------------------------------------------

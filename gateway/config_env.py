@@ -34,16 +34,14 @@ _EXPLICIT_DISABLE_WARNED: set = set()
 
 # Env var(s) whose presence drives a CORE platform's env-enable branch, named in the explicit-disable
 # WARNING. Plugin platforms declare theirs as ``PlatformEntry.env_enable_credentials``.
-_ENV_ENABLE_CREDENTIALS: dict = {
-    Platform.RELAY: ("GATEWAY_RELAY_URL",),
-}
+# CN subtraction: the connector relay was the only core platform with an env-enable row and it is
+# not part of this build, so the table is empty — every remaining platform is a plugin platform.
+_ENV_ENABLE_CREDENTIALS: dict = {}
 
 
 def _enable_credential_names(platform: Platform) -> tuple:
-    """WARNING credential names: the core row, else the platform entry's declaration. The entry is
+    """WARNING credential names: the platform entry's declaration. The entry is
     already materialized (its own env step is what is warning), so the lookup never imports."""
-    if platform in _ENV_ENABLE_CREDENTIALS:
-        return _ENV_ENABLE_CREDENTIALS[platform]
     from gateway.platform_registry import platform_registry
     entry = platform_registry.get(platform.value)
     names = tuple(getattr(entry, "env_enable_credentials", ()) or ())
@@ -297,53 +295,6 @@ def _enable_plugin_platforms_from_env(config: GatewayConfig, entries: list) -> N
             logger.debug("Plugin platform enable pass failed for %s: %s", entry.name, e)
 
 
-def _relay(config: GatewayConfig) -> None:
-    """Relay (connector-fronted, EXPERIMENTAL): enabled by GATEWAY_RELAY_URL or gateway.relay_url;
-    the URL is mirrored into extra["relay_url"] for the connected-checker.
-
-    Relay-exclusive: the GATEWAY_RELAY_URL env stamp means the connector owns every platform
-    connection; a directly-connected adapter would be a second unmanaged ingress (duplicate
-    deliveries, split sessions, a socket disarming scale-to-zero). So the env stamp disables all
-    other messaging platforms — even explicitly enabled ones — except non-messaging surfaces (local,
-    api_server, webhook; same set as the scale-to-zero arm gate). relay_url from YAML only keeps the
-    additive behavior. Opt out with GATEWAY_RELAY_ALLOW_DIRECT_PLATFORMS=true.
-    """
-    relay_url_env = getenv("GATEWAY_RELAY_URL").strip()
-    existing_relay = config.platforms.get(Platform.RELAY)
-    relay_url_yaml = str(existing_relay.extra.get("relay_url") or "").strip() if existing_relay else ""
-    relay_url_val = relay_url_env or relay_url_yaml
-    if relay_url_val:
-        relay_config = _enable_from_env(config, Platform.RELAY)
-        relay_config.extra["relay_url"] = relay_url_val.rstrip("/")
-        # An opted-out relay does not own this profile's native connections.
-        if not relay_config.enabled:
-            return
-
-    if not relay_url_env or is_truthy_value(getenv("GATEWAY_RELAY_ALLOW_DIRECT_PLATFORMS")):
-        return
-    skip = {Platform.RELAY, Platform.LOCAL, Platform.API_SERVER, Platform.WEBHOOK}
-    for platform, platform_config in config.platforms.items():
-        if platform in skip or not platform_config.enabled:
-            continue
-        if platform_config.extra.get("_enabled_explicit"):
-            logger.warning(
-                "Relay connector is configured via GATEWAY_RELAY_URL; "
-                "disabling directly-connected platform '%s' even though "
-                "it is explicitly enabled in this profile's configuration. "
-                "All messaging goes through the connector on this "
-                "deployment. Set GATEWAY_RELAY_ALLOW_DIRECT_PLATFORMS=true "
-                "to keep direct platforms alongside the relay.",
-                platform.value,
-            )
-        else:
-            logger.info(
-                "Relay connector is configured via GATEWAY_RELAY_URL; "
-                "disabling directly-connected platform '%s'.",
-                platform.value,
-            )
-        platform_config.enabled = False
-
-
 def _scrub_explicit_markers(config: GatewayConfig) -> None:
     for platform_config in config.platforms.values():
         platform_config.extra.pop("_enabled_explicit", None)
@@ -353,8 +304,8 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     """Apply environment variable overrides to *config*.
 
     Order: plugin platforms' declared env rows, then the core-only rows (api_server, webhook,
-    msgraph_webhook; each touches only its own platform), then the registry enable pass, relay
-    disabling (needs every platform's final ``enabled``), and the marker scrub, which must be last.
+    msgraph_webhook; each touches only its own platform), then the registry enable pass and the
+    marker scrub, which must be last.
     """
     entries = _configured_plugin_entries(config)
     _apply_plugin_env_overrides(config, entries + _bundled_env_fallbacks(config, entries))
@@ -362,5 +313,4 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     _webhook(config)
     _msgraph_webhook(config)
     _enable_plugin_platforms_from_env(config, entries)
-    _relay(config)
     _scrub_explicit_markers(config)

@@ -51,7 +51,9 @@ def _load_user_model_overrides() -> dict[str, dict[str, Any]]:
         return {}
 
     try:
-        import yaml  # type: ignore[import-untyped]
+        # upstream 删掉了 pyyaml 依赖; 走仓库共享的 ruamel 封装 (YAML 1.1 policy),
+        # API 与 pyyaml 的 safe_load / YAMLError 一致.
+        import hermes_yaml as yaml
     except ImportError:
         # yaml 不是硬依赖 (CN 端 minimal install 可能没装), silently 0 加载
         return {}

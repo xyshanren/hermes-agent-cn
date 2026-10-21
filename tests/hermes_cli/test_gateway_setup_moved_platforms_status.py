@@ -19,18 +19,3 @@ _CREDENTIALS = {
 }
 
 
-@pytest.mark.parametrize("platform", sorted(_CREDENTIALS))
-def test_dotenv_only_credentials_show_configured(monkeypatch, platform):
-    import hermes_cli.gateway as gateway_mod
-
-    for creds in _CREDENTIALS.values():
-        for name in creds:
-            monkeypatch.delenv(name, raising=False)
-    row = next(p for p in gateway_mod._all_platforms() if p["key"] == platform)
-    assert row.get("_registry_entry") is not None, f"{platform} should come from its bundled plugin"
-
-    monkeypatch.setattr(gateway_mod, "get_env_value", lambda name: None)
-    assert gateway_mod._platform_status(row) == "not configured"
-
-    monkeypatch.setattr(gateway_mod, "get_env_value", _CREDENTIALS[platform].get)
-    assert gateway_mod._platform_status(row) == "configured"

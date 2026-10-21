@@ -75,14 +75,3 @@ def test_an_out_of_tree_external_process_provider_resolves_end_to_end(fake_cli, 
     assert (runtime["provider"], runtime["base_url"], runtime["source"]) == ("acme-acp", "acp://acme", "process")
 
 
-def test_copilot_acp_launch_details_are_unchanged(fake_cli, monkeypatch):
-    from hermes_cli.auth import resolve_external_process_provider_credentials
-    from hermes_cli.runtime_provider import resolve_runtime_provider
-
-    creds = resolve_external_process_provider_credentials("copilot-acp")
-    assert Path(creds["command"]) == fake_cli / ("copilot.exe" if os.name == "nt" else "copilot")
-    assert (creds["args"], creds["api_key"], creds["base_url"]) == (["--acp", "--stdio"], "copilot-acp", "acp://copilot")
-
-    monkeypatch.setenv("COPILOT_CLI_PATH", str(fake_cli / ("custom-acme.exe" if os.name == "nt" else "custom-acme")))
-    assert resolve_external_process_provider_credentials("copilot-acp")["command"] == str(fake_cli / ("custom-acme.exe" if os.name == "nt" else "custom-acme"))
-    assert resolve_runtime_provider(requested="copilot-acp", target_model="x")["base_url"] == "acp://copilot"

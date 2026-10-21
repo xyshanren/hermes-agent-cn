@@ -44,13 +44,3 @@ class TestContextRouteMismatchNamedCustomProvider:
             is True
         )
 
-    def test_catalog_provider_rejects_non_default_runtime_url(self):
-        assert (
-            _context_route_mismatch(
-                None,
-                "http://127.0.0.1:8080/v1",
-                "openrouter",
-                "openrouter",
-            )
-            is True
-        )

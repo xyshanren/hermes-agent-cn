@@ -447,38 +447,6 @@ def _arm_runner(monkeypatch, platform_states, *, enabled=True, wake_url="https:/
     return r
 
 
-def test_arm_true_for_relay_only_with_disabled_placeholders(monkeypatch):
-    """The F25 regression test: relay ENABLED, every other platform present but
-    DISABLED (the real load_gateway_config() shape). Must arm — the disabled
-    placeholders must NOT count as live direct-socket platforms."""
-    from gateway.platforms.base import Platform
-
-    r = _arm_runner(
-        monkeypatch,
-        {
-            Platform.TELEGRAM: False,
-            Platform.DISCORD: False,
-            Platform.SLACK: False,
-            Platform.MATRIX: False,
-            Platform.RELAY: True,
-        },
-    )
-    assert r._scale_to_zero_should_arm() is True
-
-
-def test_no_arm_when_a_direct_platform_is_actually_enabled(monkeypatch):
-    """A genuinely-enabled direct-socket platform (real Discord token) DOES disarm —
-    the filter must not over-broaden to 'ignore everything but relay'."""
-    from gateway.platforms.base import Platform
-
-    r = _arm_runner(
-        monkeypatch,
-        {Platform.DISCORD: True, Platform.RELAY: True},
-    )
-    assert r._scale_to_zero_should_arm() is False
-
-
-
 # ── the self-suspend step: fires only after a clean quiesce, in order ─────────
 #
 # The gateway owns the suspend (Fly Proxy autostop is inbound-only/job-blind and
@@ -569,51 +537,6 @@ async def test_self_suspend_noop_with_no_lever(monkeypatch):
 # False on EVERY hosted instance — silently disarming scale-to-zero. The gate
 # must only count messaging platforms (excluding LOCAL/API_SERVER/WEBHOOK,
 # mirroring _connect_platforms' messaging_platforms exclusion set).
-
-
-def test_arm_true_with_api_server_enabled(monkeypatch):
-    from gateway.platforms.base import Platform
-
-    r = _arm_runner(
-        monkeypatch,
-        {
-            Platform.RELAY: True,
-            Platform.API_SERVER: True,
-            Platform.TELEGRAM: False,
-        },
-    )
-    assert r._scale_to_zero_should_arm() is True
-
-
-def test_arm_true_with_all_non_messaging_surfaces_enabled(monkeypatch):
-    from gateway.platforms.base import Platform
-
-    r = _arm_runner(
-        monkeypatch,
-        {
-            Platform.RELAY: True,
-            Platform.API_SERVER: True,
-            Platform.WEBHOOK: True,
-            Platform.LOCAL: True,
-        },
-    )
-    assert r._scale_to_zero_should_arm() is True
-
-
-def test_direct_platform_still_disarms_alongside_api_server(monkeypatch):
-    """The messaging-only filter must not over-broaden: a genuinely enabled
-    direct-socket platform still disarms even with api_server also enabled."""
-    from gateway.platforms.base import Platform
-
-    r = _arm_runner(
-        monkeypatch,
-        {
-            Platform.RELAY: True,
-            Platform.API_SERVER: True,
-            Platform.DISCORD: True,
-        },
-    )
-    assert r._scale_to_zero_should_arm() is False
 
 
 # ── supervised watchers must NOT count as live background work (staging bug) ──

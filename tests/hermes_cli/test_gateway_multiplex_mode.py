@@ -80,19 +80,6 @@ def test_unset_flag_multiplexes_a_quiet_fleet_and_stays_standalone_beside_a_live
     assert mode.resolve_multiplex_mode(load_gateway_config()).source == "guard"
 
 
-def test_preflight_blocker_and_single_profile_keep_the_unset_default_standalone(fleet):
-    root, _services, _pids = fleet
-    # coder reuses the default's bot token -> the migration preflight's duplicate-credential blocker.
-    (root / "profiles/coder/.env").write_text("TELEGRAM_BOT_TOKEN=111111:default-token\n", encoding="utf-8")
-    decision = mode.resolve_multiplex_mode(load_gateway_config())
-    assert decision.source == "guard" and "profile_routes" in decision.reason
-
-    for sub in ("profiles/coder", "profiles/ops"):
-        shutil.rmtree(root / sub)
-    decision = mode.resolve_multiplex_mode(load_gateway_config())
-    assert decision == mode.MultiplexDecision(False, "guard", mode.SINGLE_PROFILE_REASON)
-
-
 def test_standalone_named_profile_leaves_nothing_to_multiplex(fleet):
     """A sole named profile that opts itself out via `gateway.standalone: true` is not
     served, so the host still has a single profile to serve: guard, not multiplex."""

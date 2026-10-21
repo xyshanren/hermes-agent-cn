@@ -927,7 +927,7 @@ def _parse_model_info(model_id: str, raw: dict[str, Any], provider_id: str) -> M
         return tuple(mods) if isinstance(mods, list) else ()
     def _cost(key: str) -> Optional[float]:
         return float(cost[key]) if cost.get(key) is not None else None
-    return ModelInfo(
+    model_info = ModelInfo(
         id=model_id, name=raw.get("name", "") or model_id, family=raw.get("family", "") or "", provider_id=provider_id,
         **{k: bool(raw.get(k, False)) for k in ("reasoning", "tool_call", "attachment", "temperature", "structured_output", "open_weights")},
         input_modalities=_mods("input"), output_modalities=_mods("output"),

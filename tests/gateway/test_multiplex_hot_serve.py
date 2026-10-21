@@ -497,64 +497,6 @@ async def test_transient_start_failure_is_retried_on_next_reconcile(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_transient_secret_hydrate_failure_retries_through_real_start_path(tmp_path, monkeypatch):
-    """End to end through the real ``_start_one_profile_adapters``: the failure is raised inside
-    it at ``hydrate_profile_secret_sources`` (the network-dependent step of
-    ``_load_secondary_profile_config``), not at a mocked seam. The boot failure leaves the
-    profile served-but-unsigned; the next reconcile runs the real config load, profile scope,
-    adapter creation and connect to success."""
-    from types import SimpleNamespace
-
-    runner, home = _runner(tmp_path, monkeypatch)
-    del runner._start_one_profile_adapters  # instance stub off: exercise the real method
-    runner._register_config_hooks = lambda *a, **kw: None
-    runner._configure_profile_adapter = lambda *a: None
-    runner._sync_voice_mode_state_to_adapter = lambda *a: None
-    runner._restore_secondary_completion_ledgers = lambda *a: None
-    runner._adapter_credential_claim = lambda *a: None
-    runner._adapter_listener_claim = lambda *a: None
-    runner._busy_text_modes_by_profile = {}
-    runner._busy_input_modes_by_profile = {}
-    connected = []
-
-    async def _connect(adapter, platform):
-        connected.append(platform)
-        return True
-
-    async def _noop_added(profiles):
-        pass
-
-    runner._create_adapter = lambda platform, config: SimpleNamespace(platform=platform)
-    runner._connect_initial_adapter_with_timeout = _connect
-    runner._after_profiles_added = _noop_added
-
-    from hermes_cli import env_loader
-    hydrate_calls = []
-    real_hydrate = env_loader.hydrate_profile_secret_sources
-
-    def _flaky(home_arg):
-        hydrate_calls.append(str(home_arg))
-        if len(hydrate_calls) == 1:
-            raise OSError("secret backend unreachable")
-        return real_hydrate(home_arg)
-
-    monkeypatch.setattr(env_loader, "hydrate_profile_secret_sources", _flaky)
-
-    gamma_dir = _mkprofile(home, "gamma", "DISCORD_BOT_TOKEN=gamma-token\n")
-    with patch("hermes_cli.profiles.get_active_profile_name", return_value="default"):
-        await runner._start_secondary_profile_adapters()
-        assert connected == []
-        assert "gamma" not in runner._served_profile_signatures
-        assert _served_record(home) == ["default", "gamma"]
-
-        result = await runner.reconcile_served_profiles()
-        assert result["rescanned"] == ["gamma"]
-        assert connected == [Platform.DISCORD]
-        assert runner._profile_adapters["gamma"][Platform.DISCORD].platform == Platform.DISCORD
-        assert runner._served_profile_signatures["gamma"] == profile_serve_signature(gamma_dir)
-
-
-@pytest.mark.asyncio
 async def test_hot_added_profile_cannot_double_claim_a_live_secondary_token(tmp_path, monkeypatch):
     """Boot's duplicate-credential guard sees every profile at once; a hot add must see the LIVE
     secondaries' claims too, or the new profile starts a second poller on alpha's bot."""

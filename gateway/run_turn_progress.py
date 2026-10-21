@@ -410,7 +410,7 @@ class GatewayTurnProgressMixin:
     async def _task_card_send_or_edit_fallback(self, st) -> None:
         ctx = self._ctx
         text = st.fallback_text()
-        from gateway.relay.egress import declined_send
+        from gateway.egress_decline import declined_send
 
         if st.publication_suppressed:
             return
@@ -466,7 +466,7 @@ class GatewayTurnProgressMixin:
             # fallback below sends the same task text to the same chat, which
             # turns a refused card into delivered plain text. Stop the lane
             # without re-delivering; the refusal is already logged.
-            from gateway.relay.egress import declined_send
+            from gateway.egress_decline import declined_send
 
             if declined_send(result):
                 # TERMINAL, and stored SEPARATELY from native_failed. Reusing

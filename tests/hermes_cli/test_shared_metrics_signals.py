@@ -500,28 +500,6 @@ def _settle_disabled() -> None:
             thread.join(10)
 
 
-def test_settings_skills_plugins_transitions_only_count_moves_from_and_back_to_default():
-    old = {"skills": {"disabled": ["my-private-skill"]}, "plugins": {"disabled": []}}
-    new = {
-        "memory": {"memory_enabled": False}, "compression": {"enabled": "false"}, "curator": {"enabled": True},
-        "display": {"show_reasoning": False, "skin": "mono"},  # a value change on a non-bool: never a row
-        "skills": {"disabled": ["my-private-skill", "arxiv"], "platform_disabled": {"telegram": ["totally-custom"]}},
-        "plugins": {"disabled": ["disk-cleanup", "telegram", "some-private-plugin"]},
-    }
-    got = set(disabled_metrics.config_transitions(old, new))
-    assert got == {
-        ("memory", "memory.memory_enabled", "disabled"), ("compression", "compression.enabled", "disabled"),
-        ("setting", "display.show_reasoning", "disabled"),
-        ("skill", "arxiv", "disabled"), ("skill", "custom", "disabled"),
-        ("plugin", "disk-cleanup", "disabled"), ("platform", "telegram", "disabled"),
-        ("plugin", "custom", "disabled"),
-    }
-    back = set(disabled_metrics.config_transitions(new, old))
-    assert ("memory", "memory.memory_enabled", "re_enabled") in back and ("skill", "arxiv", "re_enabled") in back
-    assert all(contract.counter_dimensions_are_valid(contract.FEATURE_DISABLED_METRIC, {
-        "event": e, "kind": k, "name": n, "surface": "cli_config"}) for k, n, e in got | back)
-
-
 def test_toolset_transitions_use_the_real_resolver():
     from hermes_cli.tools_config import _get_platform_tools
 

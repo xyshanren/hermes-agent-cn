@@ -78,7 +78,7 @@ class LocalSessionAdapter(BasePlatformAdapter):
             # A structured decline releases the wait at once and skips the plain-text re-ask
             # (an ordinary failure would fall back to a send() that ACKs, and the turn would
             # wait the whole clarify timeout).
-            from gateway.relay.egress import EGRESS_DECLINE_CODE
+            from gateway.egress_decline import EGRESS_DECLINE_CODE
             return SendResult(success=False, error=error, error_kind='forbidden',
                               raw_response={'success': False, 'code': EGRESS_DECLINE_CODE, 'error': error})
         # Local sessions keep the base prompt: a choice question also captures typed text.

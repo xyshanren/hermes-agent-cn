@@ -349,11 +349,11 @@ from typing import Optional
 from hermes_cli.subcommands.cron import build_cron_parser
 from hermes_cli.subcommands.gateway import build_gateway_parser
 from hermes_cli.subcommands.profile import build_profile_parser
+from hermes_cli.subcommands.routing import build_routing_parser
 from hermes_cli.subcommands.model import build_model_parser
 from hermes_cli.subcommands.setup import build_setup_parser
 
 from hermes_cli.subcommands.whatsapp import build_whatsapp_parser, build_whatsapp_cloud_parser
-from hermes_cli.subcommands.slack import build_slack_parser
 from hermes_cli.subcommands.login import build_login_parser
 from hermes_cli.subcommands.logout import build_logout_parser
 from hermes_cli.subcommands.auth import build_auth_parser
@@ -803,9 +803,6 @@ from hermes_cli.main_agent_cmds import (
     cmd_skills,
     cmd_tools,
 )
-from hermes_cli.main_platform_setup import (
-    cmd_slack,
-)
 from hermes_cli.process_identity import is_desktop_owned_backend as _is_desktop_owned_backend
 from hermes_cli.main_dashboard import (
     _attach_to_host_backend,
@@ -822,6 +819,8 @@ from hermes_cli.main_dashboard import (
 from hermes_cli.main_dashboard import (  # frozen updater surface: update_cmd*.py resolve these via _m()
     _respawn_dashboard_processes,
 )
+from hermes_cli.main_routing_patches import cmd_routing_patches
+from hermes_cli.main_routing_patches import _fmt_unix as _fmt_unix  # re-export: CN import surface
 from hermes_cli.main_provider_setup import (
     _GENERIC_API_KEY_PROVIDERS,
     _aux_config_menu,
@@ -1886,7 +1885,6 @@ cmd_debug = _forward_command("cmd_debug", "hermes_cli.debug", "run_debug", doc='
 cmd_skin = _forward_command("cmd_skin", "hermes_cli.skin_cmd", "skin_command", doc='Skin management (list / use / set).')
 cmd_import = _forward_command("cmd_import", "hermes_cli.backup", "run_import", forward_return=True, doc='Restore a Hermes backup from a zip file.')
 cmd_dashboard_register = _forward_command("cmd_dashboard_register", "hermes_cli.dashboard_register", "cmd_dashboard_register", doc='Register a self-hosted dashboard OAuth client with Nous Portal.')
-cmd_gateway_enroll = _forward_command("cmd_gateway_enroll", "hermes_cli.gateway_enroll", "cmd_gateway_enroll", doc='Enroll a self-hosted gateway with a relay connector.')
 cmd_prompt_size = _forward_command("cmd_prompt_size", "hermes_cli.prompt_size", "cmd_prompt_size", doc='Show a byte/char breakdown of the system prompt + tool schemas.')
 cmd_pairing = _forward_command("cmd_pairing", "hermes_cli.pairing", "pairing_command")
 cmd_plugins = _forward_command("cmd_plugins", "hermes_cli.plugins_cmd", "plugins_command")
@@ -3394,7 +3392,7 @@ def _build_cli_parser():
     build_migrate_parser(subparsers)
     build_codex_runtime_parser(subparsers)
     build_gateway_parser(
-        subparsers, cmd_gateway=cmd_gateway, cmd_proxy=cmd_proxy, cmd_gateway_enroll=cmd_gateway_enroll
+        subparsers, cmd_gateway=cmd_gateway, cmd_proxy=cmd_proxy
     )
 
     # LSP is optional — a registration failure must not break the CLI.
@@ -3407,7 +3405,6 @@ def _build_cli_parser():
     build_setup_parser(subparsers, cmd_setup=cmd_setup)
     build_whatsapp_parser(subparsers, cmd_whatsapp=cmd_whatsapp)
     build_whatsapp_cloud_parser(subparsers, cmd_whatsapp_cloud=cmd_whatsapp_cloud)
-    build_slack_parser(subparsers, cmd_slack=cmd_slack)
 
     from hermes_cli.send_cmd import register_send_subparser
     register_send_subparser(subparsers)
@@ -3471,6 +3468,8 @@ def _build_cli_parser():
     build_uninstall_parser(subparsers, cmd_uninstall=cmd_uninstall)
     build_acp_parser(subparsers, cmd_acp=cmd_acp)
     build_profile_parser(subparsers, cmd_profile=cmd_profile)
+    # routing command — routing-rule patch management (CAND-080 layer 1.1 CLI)
+    build_routing_parser(subparsers, cmd_routing_patches=cmd_routing_patches)
     build_completion_parser(subparsers, cmd_completion=cmd_completion, parser=parser)
     build_dashboard_parser(
         subparsers,

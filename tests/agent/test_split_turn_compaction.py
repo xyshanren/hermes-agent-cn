@@ -305,59 +305,6 @@ def _gateway_reply(text: str, *, own: bool = False, discord_id: str | None = Non
         return GatewayRunner._prepend_inbound_reply_context(event, source, text)
 
 
-@pytest.mark.parametrize(
-    "gateway_kwargs",
-    [{}, {"own": True}, {"discord_id": "42"}],
-    ids=["reply", "own-reply", "discord-note"],
-)
-def test_reply_pointer_does_not_count_toward_the_request_size(gateway_kwargs: dict[str, Any]) -> None:
-    """A short reply to a long answer must still split, and the snapshot must keep the request
-    rather than the quote: past the cap it drops the gateway ``[Replying to: …]`` pointer
-    before eliding.
-    """
-    request = _gateway_reply(_ACTIVE_REQUEST, **gateway_kwargs)
-    assert len(request) > _ACTIVE_TASK_MAX_CHARS
-    assert _authored_request_text(request) == _ACTIVE_REQUEST
-    # Past the cap the deterministic snapshot must drop the quote, not elide the request away.
-    snapshot = ContextCompressor._latest_user_task_snapshot([{"role": "user", "content": request}])
-    assert _ACTIVE_REQUEST in (snapshot or "")
-    compressor = _make_compressor()
-    compressor.tail_token_budget = 1_000
-    messages = _oversized_active_turn(request, 30)
-    active_user_idx = 3
-
-    cut = compressor._find_tail_cut_by_tokens(messages, compressor._protect_head_size(messages))
-    assert cut > active_user_idx
-
-    with patch.object(compressor, "_generate_summary", return_value=None):
-        compressed = compressor.compress(messages, current_tokens=90_000)
-    assert len(compressed) < len(messages)
-    _assert_tool_pairs_are_complete(compressed)
-    actionable = _actionable_user_text(compressed)
-    assert actionable.count(_ACTIVE_REQUEST) == 1
-
-
-def test_restated_reply_keeps_splitting_on_later_compactions() -> None:
-    """After the first split the request is restated behind the replay header; later passes
-    must keep splitting and restate it once.
-
-    ``protect_first_n=3`` (the default) keeps the restated row standalone, so the second
-    pass anchors on it instead of on the summary carrier.
-    """
-    compressor = _make_compressor(protect_first_n=3)
-    compressor.tail_token_budget = 1_000
-    messages = _oversized_active_turn(_gateway_reply(_ACTIVE_REQUEST), 30)
-    for cycle in range(3):
-        with patch.object(compressor, "_generate_summary", return_value=None):
-            compressed = compressor.compress(messages, current_tokens=90_000)
-        # One cycle adds 30 tool groups (60 rows); a refused split reclaims only a handful.
-        assert len(messages) - len(compressed) >= 30, f"cycle {cycle}: split refused"
-        _assert_tool_pairs_are_complete(compressed)
-        messages = list(compressed)
-        for index in range(30):
-            messages.extend(_tool_group(100 * (cycle + 1) + index))
-
-
 def test_a_long_active_request_still_splits_and_survives_verbatim() -> None:
     """A long but token-bounded request (e.g. a /goal continuation prompt) must not pin the turn.
 

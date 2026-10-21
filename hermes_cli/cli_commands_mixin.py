@@ -837,16 +837,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
             return _cp(f"  {_t('handoff.config_load_failed', error=exc)}")
         pcfg = gw_config.platforms.get(platform)
         if not pcfg or not pcfg.enabled:
-            # Relay aliasing: a relay-fronted gateway has only a RELAY block yet /handoff discord
-            # is deliverable. UX pre-check only — the gateway watcher re-checks before dispatch.
-            relay_fronts = False
-            with suppress(Exception):
-                from gateway.relay import relay_platform_identities
-                relay_cfg = gw_config.platforms.get(Platform.RELAY)
-                if relay_cfg and relay_cfg.enabled:
-                    relay_fronts = platform_name in {p for p, _ in relay_platform_identities()}
-            if not relay_fronts:
-                return _cp(f"  {_t('handoff.platform_not_enabled', platform=platform_name)}")
+            return _cp(f"  {_t('handoff.platform_not_enabled', platform=platform_name)}")
         home = gw_config.get_home_channel(platform)
         if not home or not home.chat_id:
             return _cp(f"  {_t('handoff.no_home_channel', platform=platform_name)}",

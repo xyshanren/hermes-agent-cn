@@ -52,28 +52,6 @@ def _install_platform_plugin(home, monkeypatch, *, dir_name, platform, catalog_n
     return lambda: platform_registry.unregister(platform)
 
 
-def test_platform_names_are_published_or_proven_by_the_installer_record(tmp_path, monkeypatch):
-    home = tmp_path / ".hermes"
-    monkeypatch.setenv("HERMES_HOME", str(home))
-    cleanup = [
-        _install_platform_plugin(home, monkeypatch, dir_name="vk", platform="vk", catalog_name="vk-platform"),
-        # A URL install claiming a catalog name everywhere it can (tree sidecar, manifest name) stays anonymous.
-        _install_platform_plugin(tmp_path / "other", monkeypatch, dir_name="x", platform="sneaky"),
-    ]
-    try:
-        assert contract.adapter_platform("telegram") == "telegram"
-        assert contract.adapter_platform("irc") == "irc"  # bundled plugins/platforms/irc
-        assert contract.adapter_platform("vk") == "vk-platform"
-        assert contract.adapter_platform("sneaky") == "plugin"
-        assert contract.adapter_platform("my-private-bridge") == "plugin"
-        assert contract.gateway_platform({"platform": "vk", "surface": "gateway"}, "gateway") == "vk-platform"
-        assert "vk-platform" in contract.GATEWAY_PLATFORMS
-    finally:
-        for undo in cleanup:
-            undo()
-        catalog._catalog_platform_owner.cache_clear()
-
-
 def test_every_gateway_row_is_contract_valid_and_disabled_config_records_nothing(marks, monkeypatch):
     class Adapter:
         platform = "telegram"

@@ -15,20 +15,6 @@ def _entries():
     return platform_registry.all_entries()
 
 
-def test_every_static_plugin_platform_declares_its_env_bridge():
-    """A static ``Platform`` member served by a bundled plugin must carry its env rows: without them
-    its env-only setup (``TELEGRAM_BOT_TOKEN`` in .env) would silently stop enabling the platform."""
-    _entries()
-    missing = []
-    for member in Platform:
-        if member.value in _CORE_ONLY:
-            continue
-        entry = platform_registry.get(member.value)
-        if entry is None or not entry.env_overrides or not entry.env_enable_credentials:
-            missing.append(member.value)
-    assert missing == []
-
-
 def test_env_override_secrets_stay_in_terminal_secret_blocklist():
     """The terminal tool's adapter-secret blocklist is built at import time and cannot load adapters,
     so every secret a plugin's env rows read must already be declared where that policy looks."""

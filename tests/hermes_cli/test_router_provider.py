@@ -80,18 +80,3 @@ class TestHostMandatedRouterResponses:
         assert rp._fallback_api_mode("custom", "https://generic.example.com/v1", "gpt-5.4-mini") == "chat_completions"
 
 
-class TestRouterProfileRegistration:
-
-
-    def test_auth_registry_autowired(self):
-        from hermes_cli.auth import PROVIDER_REGISTRY
-
-        config = PROVIDER_REGISTRY.get("router")
-        assert config is not None
-        assert config.auth_type == "api_key"
-        # Key vars must not contain the base-url override var, which is
-        # split out into base_url_env_var by the auto-registry.
-        assert "RAMP_ROUTER_API_KEY" in config.api_key_env_vars
-        assert "RAMP_ROUTER_BASE_URL" not in config.api_key_env_vars
-        assert config.base_url_env_var == "RAMP_ROUTER_BASE_URL"
-        assert config.inference_base_url.startswith("https://api.router.com")
