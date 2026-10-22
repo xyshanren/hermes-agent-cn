@@ -369,7 +369,7 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
 
     async def _run(self) -> None:
         """Top-level reconnecting supervisor coroutine. Browserbase tears down the CDP
-        socket whenever a short-lived client (agent-browser's per-command CDP client)
+        socket whenever a short-lived client (a per-call browser_cdp or harness CDP connection)
         disconnects, so on drop we reset per-session ids, re-attach, and keep going.
         A failure before the first successful attach is fatal for ``start()``."""
         reconnect_failures, last_success_at, backoff = 0, 0.0, 0.5

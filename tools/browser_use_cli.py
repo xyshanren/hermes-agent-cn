@@ -666,6 +666,19 @@ def _reload_if_republished(env: dict, generation: int) -> None:
     _reload_daemons([daemon])
 
 
+def _pending_dialogs(task_id: Optional[str]) -> dict:
+    """Native dialogs the task's CDP supervisor is holding open (``browser_dialog`` answers them), page text
+    redacted like every other browser output."""
+    from agent.redact import redact_sensitive_text
+    from tools.browser_supervisor import SUPERVISOR_REGISTRY
+    supervisor = SUPERVISOR_REGISTRY.get(task_id or "default")
+    snapshot = supervisor.snapshot() if supervisor is not None else None
+    if snapshot is None or not snapshot.active or not snapshot.pending_dialogs:
+        return {}
+    return {"pending_dialogs": [{k: redact_sensitive_text(v, force=True) if isinstance(v, str) else v
+                                 for k, v in d.to_dict().items()} for d in snapshot.pending_dialogs]}
+
+
 def _take_real_profile_note(route_key: str) -> dict:
     """The fallback note for the first result this route returns after falling back, then nothing."""
     if route_key not in _real_profile_fallback or route_key in _real_profile_note_delivered:
@@ -770,6 +783,7 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     if session:
         result["session"] = session
     result.update(_take_real_profile_note(route_key))
+    result.update(_pending_dialogs(task_id))
     stderr = redact_sensitive_text((proc.stderr or "").strip(), force=True)
     if len(stderr) > _STDERR_CAP_CHARS:
         stderr = stderr[:_STDERR_CAP_CHARS] + "\n… (stderr truncated)"
