@@ -305,7 +305,7 @@ def _native_screenshot_result(result: dict[str, Any], path: str) -> Optional[dic
         if not _should_use_native_vision_fast_path():
             return None
         # History-reuse cap: this data URL bakes into the tool result and is re-sent every later turn —
-        # same policy as the vision_analyze / browser_vision native embeds.
+        # same policy as the vision_analyze native embed.
         data_url = _resize_image_for_vision(Path(path), mime_type="image/png",
                                             max_base64_bytes=resolve_embed_target_bytes(),
                                             max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True)
@@ -701,7 +701,7 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     if verdict.blocked:
         return tool_error(verdict.blocked)
     # One endpoint per call: any private URL sends the whole call to the local sidecar. A call with no URL
-    # literal stays on the route the previous call took (browser_navigate's _last_session_key twin).
+    # literal stays on the route the previous call took.
     route_key = _backend_cache_key(task_id, session)
     local_sidecar = verdict.local_sidecar if _URL_RE.search(code) else _exec_route_is_sidecar.get(route_key, False)
 
