@@ -47,13 +47,16 @@ def _confirm_prompt(prompt: str) -> bool:
 
 
 def _not_found(session_id) -> int:
-    print(f"No session '{session_id}'. Run: hermes sessions list to find the id.")
+    from agent.i18n import t
+
+    print(t("sessions.session_not_found", session_id=session_id))
     return 1
 
 
 def _print_dry_run_preview(candidates, filters) -> None:
+    from agent.i18n import t
     from hermes_cli.session_filters import describe_filters
-    print(f"Would export {len(candidates)} session(s) ({describe_filters(filters)}).")
+    print(t("sessions.export_would", count=len(candidates), filters=describe_filters(filters)))
     for row in candidates[:100]:
         print(f"  {row.get('id')}  {row.get('source', '')}")
     if len(candidates) > 100:
@@ -103,7 +106,9 @@ def _cmd_repair(args):
     from hermes_state import DEFAULT_DB_PATH as db_path, SessionDB
     from hermes_state_repair import _db_opens_cleanly, repair_state_db_schema
     if not db_path.exists():
-        print(f"No session database at {db_path} (nothing to repair).")
+        from agent.i18n import t
+
+        print(t("sessions.repair_no_db", path=db_path))
         return
     from hermes_state_reconcile import repair_declarative_schema, schema_drift_reason
     # A missing canonical sessions table is not additive upgrade drift: creating
@@ -115,46 +120,63 @@ def _cmd_repair(args):
         try:
             reason = schema_drift_reason(db_path)
         except (sqlite3.Error, OSError) as exc:
-            print(f"✗ Could not check session schema: {exc}")
+            from agent.i18n import t
+
+            print(t("sessions.repair_schema_check_failed", error=exc))
             return 1
     repair = repair_declarative_schema if drift_only else repair_state_db_schema
     if reason is None:
-        print(f"✓ {db_path} opens cleanly — no repair needed.")
+        from agent.i18n import t
+
+        print(t("sessions.repair_opens_cleanly", path=db_path))
         return
-    print(f"✗ {db_path} does not open cleanly: {reason}")
+    from agent.i18n import t
+
+    print(t("sessions.repair_not_clean", path=db_path, reason=reason))
     if getattr(args, "check_only", False):
         return 1
-    print("Repairing (a backup copy is made first)…")
+    from agent.i18n import t
+
+    print(t("sessions.repair_running"))
     report = repair(db_path, backup=not getattr(args, "no_backup", False))
     if report.get("repaired"):
         if report.get("backup_path"):
-            print(f"  backup: {report['backup_path']}")
-        print(f"  strategy: {report.get('strategy')}")
+            from agent.i18n import t
+
+            print(t("sessions.repair_backup", path=report['backup_path']))
+        from agent.i18n import t
+
+        print(t("sessions.repair_strategy", strategy=report.get('strategy')))
         try:
             with SessionDB(db_path=db_path, read_only=drift_only) as _repair_db:
                 n = _repair_db._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-            print(f"✓ Repaired — {n} sessions recovered.")
+            from agent.i18n import t
+
+            print(t("sessions.repair_done_count", count=n))
         except Exception:
-            print("✓ Repaired.")
+            from agent.i18n import t
+
+            print(t("sessions.repair_done"))
         return
-    print(f"✗ Repair failed: {report.get('error')}")
+    from agent.i18n import t
+
+    print(t("sessions.repair_failed", error=report.get('error')))
     if drift_only:
         if report.get('backup_path'):
-            print(f"  A backup is preserved at: {report['backup_path']}")
+            from agent.i18n import t
+
+            print(t("sessions.repair_backup_preserved", path=report['backup_path']))
         return 1
     if report.get("backup_path"):
-        print(f"  A backup is preserved at: {report['backup_path']}")
+        from agent.i18n import t
+
+        print(t("sessions.repair_backup_preserved", path=report['backup_path']))
     # Without this pointer the user is at a dead end; lead with --inspect-only before writing.
+    from agent.i18n import t
+
     source_hint = report.get("backup_path") or db_path
     print(
-        "  Keep state.db and the backup; do not delete them.\n"
-        "\n  Next step — offline recovery (never modifies the source):\n"
-        f"    hermes sessions recover --source {source_hint} \\\n"
-        "        --inspect-only\n"
-        "  If that reports the data is recoverable, rebuild it into\n"
-        "  a NEW database (the active one is left untouched):\n"
-        f"    hermes sessions recover --source {source_hint} \\\n"
-        "        --output recovered-state.db"
+        t("sessions.recover_keep_hint", source=source_hint)
     )
 
 
@@ -181,14 +203,18 @@ def _cmd_recover(args):
     )
     for bad, msg in usage_errors:
         if bad:
-            print(f"Error: {msg}")
+            from agent.i18n import t
+
+            print(t("sessions.usage_error", message=msg))
             return 2
     work_dir = getattr(args, "work_dir", None)
     try:
         if inspect_only:
             report = inspect_session_database(source, work_dir=work_dir)
         else:
-            print("Recovering canonical session data into a new database…")
+            from agent.i18n import t
+
+            print(t("sessions.recover_recovering"))
             progress = _RecoveryProgress()
             report = recover_session_database(
                 source, output, work_dir=work_dir, chunk_size=getattr(args, "chunk_size", 1000),
@@ -196,15 +222,21 @@ def _cmd_recover(args):
             )
             progress.finish()
     except (SessionRecoveryError, OSError, sqlite3.DatabaseError) as exc:
-        print(f"Error: session recovery failed: {exc}\nThe supplied source database was not replaced or deleted.")
+        from agent.i18n import t
+
+        print(t("sessions.recover_failed", error=exc))
         return 1
     if report_path is None:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         try:
-            print(f"Recovery report: {write_recovery_report(report_path, report)}")
+            from agent.i18n import t
+
+            print(t("sessions.recover_report", path=write_recovery_report(report_path, report)))
         except (FileExistsError, OSError) as exc:
-            print(f"Error: could not write recovery report: {exc}")
+            from agent.i18n import t
+
+            print(t("sessions.recover_report_failed", error=exc))
             return 1
     if inspect_only:
         return 0 if report.get("recoverable") else 1
@@ -232,35 +264,24 @@ class _RecoveryProgress:
 
 
 def _print_recovery_verdict(report, output, allow_partial) -> int:
+    from agent.i18n import t
+
     if report.get("complete"):
-        print(
-            f"✓ Recovered database verified at: {output}\n"
-            "  The active session database was not changed.\n"
-            "  Review the JSON report before installing this database."
-        )
+        print(t("sessions.recover_verified", output=output))
         return 0
     if allow_partial and report.get("verified"):
         counts = report.get("verification", {}).get("table_counts", {})
         if report.get("best_effort"):
-            print(
-                f"✓ BEST-EFFORT page-level salvage verified at: {output}\n"
-                "  The source table schemas were unreadable; rows were rebuilt from raw pages "
-                "via sqlite3 .recover and mapped heuristically."
-            )
+            print(t("sessions.recover_best_effort", output=output))
         else:
-            print(f"✓ Partial recovery output verified at: {output}")
+            print(t("sessions.recover_partial_verified", output=output))
         sessions_n, messages_n = int(counts.get("sessions") or 0), int(counts.get("messages") or 0)
         print(
-            f"  Recovered {sessions_n:,} sessions and {messages_n:,} messages.\n"
-            "  The active session database was not changed.\n"
-            "  This output is incomplete. Review every skipped range and orphan count in the "
-            "JSON report before installing it."
+            t("sessions.recover_incomplete_summary",
+              sessions=f"{sessions_n:,}", messages=f"{messages_n:,}")
         )
         return 0
-    print(
-        "✗ Recovery output did not pass every verification check.\n"
-        "  Do not install it. Review the JSON report for partial data or errors."
-    )
+    print(t("sessions.recover_failed_checks"))
     return 1
 
 
@@ -298,7 +319,9 @@ def _cmd_list(db, args):
             s for s, key in keyed if key and (_needle in key or _needle == os.path.basename(key.rstrip("/\\")))
         ]
     if not sessions:
-        print("No sessions found.")
+        from agent.i18n import t
+
+        print(t("sessions.no_sessions"))
         return
 
     # Workspace column only when some session carries a key (or when filtering): unbound listings read as before.
@@ -468,7 +491,9 @@ def _export_trace(db, args, filters):
         rows = db.list_sessions_rich(limit=1, order_by_last_active=True)
         session_id = rows[0].get("id") if rows else None
         if not session_id:
-            print("No session found to export. Pass --session-id.")
+            from agent.i18n import t
+
+            print(t("sessions.export_none_found"))
             return
     from agent.trace_upload import TraceRedactionError, build_trace_jsonl, upload_session_trace
     redact_trace = not getattr(args, "no_redact", False)
@@ -498,10 +523,14 @@ def _export_trace(db, args, filters):
         if len(ids) == 1:
             jsonl = _render_trace(ids[0])
             if not jsonl:
-                print(f"No transcript to export for session '{ids[0]}'.")
+                from agent.i18n import t
+
+                print(t("sessions.export_no_transcript", session_id=ids[0]))
                 return
             args.output = _output_file_in_dir(args.output, f"{ids[0]}.trace.jsonl")
-            _write_output(args.output, jsonl, f"Exported 1 session trace to {args.output}")
+            from agent.i18n import t
+
+            _write_output(args.output, jsonl, t("sessions.export_traces_done", count=1, dir=args.output))
         else:
             out_dir = _export_dir(args.output)
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -511,16 +540,22 @@ def _export_trace(db, args, filters):
                 if jsonl:
                     (out_dir / f"{sid}.trace.jsonl").write_text(jsonl, encoding="utf-8")
                     exported += 1
-            print(f"Exported {exported} session trace(s) to {out_dir}")
+            from agent.i18n import t
+
+            print(t("sessions.export_traces_done", count=exported, dir=out_dir))
     except TraceRedactionError:
-        print("Redaction failed; refusing to export unredacted trace content.")
+        from agent.i18n import t
+
+        print(t("sessions.export_redaction_failed"))
 
 
 def _export_markdown(db, args, filters, redact):
     """Markdown / QMD export: one file per session plus a manifest entry."""
     from hermes_cli.session_export_md import append_manifest_entry, write_session_markdown
     if args.output == "-":
-        print("Markdown/QMD export writes files; stdout (-) is only supported with --format jsonl.")
+        from agent.i18n import t
+
+        print(t("sessions.export_stdout_unsupported"))
         return
     output_dir = _export_dir(args.output)
 
@@ -540,17 +575,22 @@ def _export_markdown(db, args, filters, redact):
         append_manifest_entry(output_dir, data, path, fmt=args.format)
         return data, path, snapshots
     if args.delete_after_verified and not args.yes:
-        print("--delete-after-verified requires --yes.")
+        from agent.i18n import t
+
+        print(t("sessions.usage_error", message="--delete-after-verified requires --yes."))
         return
     if args.delete_after_verified and not args.session_id:
-        print("--delete-after-verified is only supported with --session-id.")
+        from agent.i18n import t
+
+        print(t("sessions.usage_error", message="--delete-after-verified is only supported with --session-id."))
         return
     lineage_is_logical = getattr(args, "lineage", "single") == "logical"
     if args.session_id:
         return _export_markdown_single(db, args, _export_one, output_dir, lineage_is_logical)
     if not filters:
-        print("Refusing bulk export without a filter. Pass --session-id or "
-              "at least one filter (e.g. --older-than 90, --source telegram).")
+        from agent.i18n import t
+
+        print(t("sessions.export_bulk_refuse"))
         return
     candidates = db.list_prune_candidates(**filters)
     if args.dry_run:
@@ -560,11 +600,15 @@ def _export_markdown(db, args, filters, redact):
         try:
             data, exported_path, _ = _export_one(row["id"], include_lineage=lineage_is_logical)
         except FileExistsError as e:
-            print(f"Skipping existing export: {e}. Pass --force to overwrite.")
+            from agent.i18n import t
+
+            print(t("sessions.export_skip_existing", error=e))
             continue
         if data and exported_path:
             exported += 1
-    print(f"Exported {exported} session(s) to {output_dir}")
+    from agent.i18n import t
+
+    print(t("sessions.export_done_sessions", count=exported, dir=output_dir))
 
 
 def _export_markdown_single(db, args, export_one, output_dir, lineage_is_logical):
@@ -581,16 +625,22 @@ def _export_markdown_single(db, args, export_one, output_dir, lineage_is_logical
                 target_id, include_lineage=(target_id == resolved_session_id and lineage_is_logical),
             )
         except FileExistsError as e:
-            print(f"Export already exists: {e}. Pass --force to overwrite.")
+            from agent.i18n import t
+
+            print(t("sessions.export_exists", error=e))
             return
         if not data or not exported_path:
-            print(f"Session '{target_id}' disappeared during export; nothing was deleted.")
+            from agent.i18n import t
+
+            print(t("sessions.export_disappeared", session_id=target_id))
             return
         exported_items.append((data, exported_path, snapshots))
     message_count = sum(len(data.get("messages") or []) for data, _path, _ in exported_items)
     n = len(exported_items)
-    print(f"Exported {n} session{'' if n == 1 else 's'} ({message_count} message{'' if message_count == 1 else 's'}) "
-          f"to {exported_items[0][1] if n == 1 else output_dir}")
+    from agent.i18n import t
+
+    print(t("sessions.export_deleted_summary", count=n, messages=message_count,
+            target=exported_items[0][1] if n == 1 else output_dir))
     if not args.delete_after_verified:
         return
     # verify_export_file proves file == dict; store == dict is decided inside delete_session's transaction
@@ -599,7 +649,9 @@ def _export_markdown_single(db, args, export_one, output_dir, lineage_is_logical
     for data, exported_path, snapshots in exported_items:
         ok, reason = verify_export_file(exported_path, data)
         if not ok:
-            print(f"Export verification failed; not deleting session '{data.get('id')}': {reason}")
+            from agent.i18n import t
+
+            print(t("sessions.export_verify_failed", session_id=data.get('id'), reason=reason))
             return
         expected_messages.update(snapshots)
     try:
@@ -607,15 +659,20 @@ def _export_markdown_single(db, args, export_one, output_dir, lineage_is_logical
             resolved_session_id, sessions_dir=_sessions_dir(), expected_delete_ids=delete_target_ids,
             expected_display_messages=expected_messages, exclude_active_write_guards=True,
         ):
-            print(f"Exported, but session '{resolved_session_id}' was not deleted because its history or delegate set "
-                  "changed after export.")
+            from agent.i18n import t
+
+            print(t("sessions.export_not_deleted_changed", session_id=resolved_session_id))
             return
     except SessionActiveWriteGuardError as exc:
-        print(f"Exported, but not deleted: {exc}")
+        from agent.i18n import t
+
+        print(t("sessions.export_not_deleted_error", error=exc))
         return
     delegates = len(delete_target_ids) - 1
     delegate_suffix = f" and {delegates} delegate session{'' if delegates == 1 else 's'}" if delegates else ""
-    print(f"Deleted exported session '{resolved_session_id}'{delegate_suffix}.")
+    from agent.i18n import t
+
+    print(t("sessions.export_deleted", session_id=resolved_session_id, delegate_suffix=delegate_suffix))
 
 
 # -- delete / prune / archive -------------------------------------------------
@@ -627,30 +684,40 @@ def _cmd_delete(db, args):
     # The delete is honored (explicit id), but a pin is a "keep" flag: say so instead of silently destroying it.
     _pinned_note = " (this session is PINNED)" if (db.get_session(resolved_session_id) or {}).get("pinned") else ""
     if not args.yes:
-        if not _confirm_prompt(f"Delete session '{resolved_session_id}'{_pinned_note} and all its messages? [y/N] "):
-            print("Cancelled.")
+        from agent.i18n import t
+
+        if not _confirm_prompt(t("sessions.delete_confirm", session_id=resolved_session_id, pinned=_pinned_note)):
+            from agent.i18n import t
+
+            print(t("sessions.cancelled"))
             return
     elif _pinned_note:
-        print(f"Warning: deleting a pinned session '{resolved_session_id}'.")
+        from agent.i18n import t
+
+        print(t("sessions.delete_pinned_warning", session_id=resolved_session_id))
     from hermes_state_runtime import RuntimeStoreError
     try:
         if not db.delete_session(resolved_session_id, sessions_dir=_sessions_dir(), exclude_active_write_guards=True):
             return _not_found(args.session_id)
     except SessionActiveWriteGuardError as exc:
-        print(f"Cannot delete active session: {exc}")
+        from agent.i18n import t
+
+        print(t("sessions.delete_active_failed", error=exc))
         return 1
     except RuntimeStoreError as exc:
         # The ledger refuses to delete a session with accepted, unfinished turns; say what to do.
+        from agent.i18n import t
+
         if exc.reason == 'unknown_execution':
-            print(f"Cannot delete session '{resolved_session_id}': a turn was lost across a gateway restart. "
-                  f"Acknowledge it first with: hermes sessions discard {resolved_session_id}")
+            print(t("sessions.delete_turn_lost", session_id=resolved_session_id))
         elif exc.reason == 'session_busy':
-            print(f"Cannot delete session '{resolved_session_id}': it has a queued or running turn. "
-                  "Wait for it to finish (or stop it), then retry.")
+            print(t("sessions.delete_busy", session_id=resolved_session_id))
         else:
-            print(f"Cannot delete session '{resolved_session_id}': {exc.reason}")
+            print(t("sessions.delete_refused", session_id=resolved_session_id, reason=exc.reason))
         return 1
-    print(f"Deleted session '{resolved_session_id}'.")
+    from agent.i18n import t
+
+    print(t("sessions.delete_done", session_id=resolved_session_id))
 
 
 #: Age floor for `prune --never-active`; generous: a young never-active row may be a chat nobody replied to yet.
@@ -671,27 +738,35 @@ def _prune_never_active_keyed(db, args):
     if older_than is not None:
         seconds = parse_duration_seconds(str(older_than))
         if seconds is None:
-            print(f"Error: --older-than '{older_than}' is not a duration. "
-                  "Use a bare number of days or a form like '2d' / '1w'.")
+            from agent.i18n import t
+
+            print(t("sessions.older_than_invalid", value=older_than))
             return
         days = seconds / 86400.0
     candidates = db.list_never_active_keyed_sessions(older_than_days=days)
     if not candidates:
-        print(f"No never-active keyed sessions older than {days:g} day(s).")
+        from agent.i18n import t
+
+        print(t("sessions.prune_none", days=f"{days:g}"))
         return
     shown = candidates if args.dry_run else candidates[:15]
-    print(f"{len(candidates)} never-active keyed session(s) older than {days:g} day(s) "
-          "— no messages, tokens, tool calls or title:")
+    from agent.i18n import t
+
+    print(t("sessions.never_active_header", count=len(candidates), days=f"{days:g}"))
     for s in shown:
         print(f"  {s['id']}  {format_epoch(s.get('started_at')):<17} {(s.get('source') or '-'):<10} "
               f"{s.get('session_key') or '-'}")
     if len(candidates) > len(shown):
         print_truncated(len(candidates) - len(shown))
     if args.dry_run:
-        print("Dry run — nothing deleted.")
+        from agent.i18n import t
+
+        print(t("sessions.dry_run_nothing_deleted"))
         return
-    if not args.yes and not _confirm_prompt(f"Delete {len(candidates)} session(s)? [y/N] "):
-        print("Aborted.")
+    if not args.yes and not _confirm_prompt(t("sessions.never_active_confirm", count=len(candidates))):
+        from agent.i18n import t
+
+        print(t("sessions.aborted"))
         return
     owner = getattr(args, "owner_endpoint", None)
     if owner is not None:
@@ -706,9 +781,11 @@ def _prune_never_active_keyed(db, args):
         deleted, routing_deleted, skipped = db.prune_never_active_keyed_sessions(
             older_than_days=days, sessions_dir=_sessions_dir()
         )
-    print(f"Deleted {deleted} never-active session(s) and {routing_deleted} stale routing entr(ies).")
+    print(t("sessions.prune_done", deleted=deleted, routing=routing_deleted))
     if skipped:
-        print(f"Skipped {skipped} session(s) with a live turn or compression lock.")
+        from agent.i18n import t
+
+        print(t("sessions.prune_skipped_locked", count=skipped))
 
 
 def _note_pinned_skipped(db, filters, action):
@@ -719,14 +796,14 @@ def _note_pinned_skipped(db, filters, action):
     skipped = int(db.count_prune_matches(**filters, pinned_only=True))
     if not skipped:
         return
-    suffix = "" if skipped == 1 else "s"
+    from agent.i18n import t
+
     if action == "prune":
-        verb = "deleted"
-        optin = "Pass --include-pinned to delete them anyway, or unpin first with `hermes sessions unpin <id>`."
+        verb = t("sessions.verb_deleted")
+        optin = t("sessions.optin_prune")
     else:
-        verb, optin = "archived", "Unpin first with `hermes sessions unpin <id>` to include them."
-    print(f"Note: {skipped} pinned session{suffix} also match these filters but will NOT be {verb} "
-          f"(pin is a keep flag). {optin}")
+        verb, optin = t("sessions.verb_archived"), t("sessions.optin_archive")
+    print(t("sessions.pinned_note", count=skipped, verb=verb, optin=optin))
 
 
 def _cmd_prune_or_archive(db, args, action):
@@ -742,11 +819,14 @@ def _cmd_prune_or_archive(db, args, action):
     try:
         filters = build_prune_filters(args)
     except ValueError as e:
-        print(f"Error: {e}")
+        from agent.i18n import t
+
+        print(t("sessions.usage_error", message=e))
         return 1
     if not prune and not any(v for k, v in filters.items() if k != "older_than_days"):
-        print("Refusing to archive every ended session: pass at least one "
-              "filter (e.g. --newer-than 5h, --source cli, --title codex).")
+        from agent.i18n import t
+
+        print(t("sessions.archive_refuse_all"))
         return
 
     # Prune skips archived rows unless --include-archived; archive only targets not-yet-archived rows.
@@ -768,15 +848,17 @@ def _cmd_prune_or_archive(db, args, action):
     # misdescribe its effect.
     skipped_open = db.count_open_prune_matches(**filters) if (prune or not include_open) else 0
     if skipped_open and prune:
-        print(f"Note: {skipped_open} open session{'' if skipped_open == 1 else 's'} also match these filters but "
-              "will be skipped because prune only deletes ended sessions. Use `hermes sessions delete <id>` "
-              "to remove one explicitly.")
+        from agent.i18n import t
+
+        print(t("sessions.archive_open_note", count=skipped_open))
     elif skipped_open:
-        print(f"Note: {skipped_open} matching session{'' if skipped_open == 1 else 's'} still open — "
-              "skipped because archive defaults to ended sessions. Use --include-open to archive "
-              "them too.")
+        from agent.i18n import t
+
+        print(t("sessions.archive_match_note", count=skipped_open))
     if not candidates:
-        print(f"No sessions match ({describe_filters(filters)}).")
+        from agent.i18n import t
+
+        print(t("sessions.no_match", filters=describe_filters(filters)))
         return
     # Candidates are oldest-activity-first; show the span so a long-lived but recently used
     # conversation cannot look old merely by creation date.
@@ -794,25 +876,33 @@ def _cmd_prune_or_archive(db, args, action):
         if len(candidates) > len(shown):
             print_truncated(len(candidates) - len(shown))
         if args.dry_run:
-            print(f"Dry run — nothing {'deleted' if prune else 'archived'}.")
+            from agent.i18n import t
+
+            print(t("sessions.dry_run_archived" if not prune else "sessions.dry_run_nothing_deleted"))
             return
-    verb = "Delete" if prune else "Archive"
-    if not args.yes and not _confirm_prompt(f"{verb} these {len(candidates)} session(s) ({_span})? [y/N] "):
-        print("Cancelled.")
+    verb = t("sessions.verb_delete") if prune else t("sessions.verb_archive")
+    if not args.yes and not _confirm_prompt(t("sessions.prune_confirm", verb=verb, count=len(candidates), span=_span)):
+        from agent.i18n import t
+
+        print(t("sessions.cancelled"))
         return
     if prune and getattr(args, "owner_endpoint", None) is not None:
         # The live gateway owns the store: it deletes, through the housekeeping retirement path.
+        from agent.i18n import t
         from hermes_cli.gateway_client import GatewayClientError
         from hermes_cli.sessions_owner import owner_prune, report_owner_failure
         try:
-            print(f"Pruned {owner_prune(args.owner_endpoint, filters=filters)['deleted']} session(s).")
+            print(t("sessions.pruned_owner", count=owner_prune(args.owner_endpoint, filters=filters)['deleted']))
         except (GatewayClientError, OSError, TimeoutError) as exc:
             return report_owner_failure(exc)
     elif prune:
-        print(f"Pruned {db.prune_sessions(sessions_dir=_sessions_dir(), exclude_active_write_guards=True, **filters)} session(s).")
+        from agent.i18n import t
+
+        print(t("sessions.pruned_db", count=db.prune_sessions(sessions_dir=_sessions_dir(), exclude_active_write_guards=True, **filters)))
     else:
-        print(f"Archived {db.archive_sessions(**filters)} session(s). They're hidden from listings "
-              "but fully recoverable (nothing was deleted).")
+        from agent.i18n import t
+
+        print(t("sessions.archived_done", count=db.archive_sessions(**filters)))
 
 
 # -- titles / pins -----------------------------------------------------------
@@ -823,19 +913,21 @@ def _cmd_rename(db, args):
         return _not_found(args.session_id)
     title = " ".join(args.title)
     # Empty titles render as "—" and newlines corrupt the `list` table; length is validated in set_session_title.
+    from agent.i18n import t
+
     if not title.strip():
-        print("Error: title cannot be empty or whitespace-only.")
+        print(t("sessions.title_empty"))
         return 1
     if "\n" in title or "\r" in title:
-        print("Error: title cannot contain newlines.")
+        print(t("sessions.title_newlines"))
         return 1
     try:
         if not db.set_session_title(resolved_session_id, title):
             return _not_found(args.session_id)
     except ValueError as e:
-        print(f"Error: {e}")
+        print(t("sessions.usage_error", message=e))
         return 1
-    print(f"Session '{resolved_session_id}' renamed to: {title}")
+    print(t("sessions.renamed", session_id=resolved_session_id, title=title))
 
 
 def _cmd_pin(db, args, pinning):
@@ -865,7 +957,9 @@ def _cmd_pinned(db, args):
         print(json.dumps([{"id": s["id"], **{k: s.get(k) for k in keys}} for s in pinned_rows], indent=2))
         return
     if not pinned_rows:
-        print("No pinned sessions. Pin one with: hermes sessions pin <session_id>")
+        from agent.i18n import t
+
+        print(t("sessions.no_pinned"))
         return
     print(f"{'Title':<32} {'Last Active':<13} {'Src':<9} {'ID'}\n" + "─" * 100)
     for s in pinned_rows:
@@ -880,7 +974,9 @@ def _cmd_retitle_skills(db, args):
     apply_changes = bool(getattr(args, "apply", False))
     candidates = db.list_skill_scaffolded_sessions(limit=limit)
     if not candidates:
-        print("No sessions were titled from a /skill invocation.")
+        from agent.i18n import t
+
+        print(t("sessions.no_titled"))
         return
     mode = "" if apply_changes else " (dry run — pass --apply to write)"
     print(f"{len(candidates)} session(s) opened with a /skill{mode}:")
@@ -913,7 +1009,9 @@ def _cmd_retitle_skills(db, args):
     if not changed:
         print("  every title already reflects the user's request.")
     elif apply_changes:
-        print(f"✓ Re-titled {changed} session(s).")
+        from agent.i18n import t
+
+        print(t("sessions.retitled", count=changed))
 
 
 def _cmd_browse(db, args):
@@ -923,16 +1021,22 @@ def _cmd_browse(db, args):
     )
     if not sessions:
         db.close()
-        print("No sessions found.")
+        from agent.i18n import t
+
+        print(t("sessions.no_sessions"))
         return
     try:  # keep the DB open: the picker uses it for status tags and 'd' delete
         selected_id = _session_browse_picker(sessions, session_db=db)
     finally:
         db.close()
     if not selected_id:
-        print("Cancelled.")
+        from agent.i18n import t
+
+        print(t("sessions.cancelled"))
         return
-    print(f"Resuming session: {selected_id}")
+    from agent.i18n import t
+
+    print(t("sessions.resuming", session_id=selected_id))
     from hermes_cli.relaunch import relaunch
     relaunch(["--resume", selected_id])  # won't return after execvp
 
@@ -951,33 +1055,39 @@ def _print_size_change(db, before_mb, prefix=""):
 
 def _cmd_optimize(db, args):
     before_mb = _size_mb(db.db_path)
-    print("Optimizing session store (FTS merge + VACUUM)…")
+    from agent.i18n import t
+
+    print(t("sessions.optimizing_fts"))
     try:
         n = db.vacuum()  # merges FTS5 segments then VACUUMs; returns indexes merged
     except Exception as e:
-        print(f"Error: optimization failed: {e}")
+        print(t("sessions.optimize_failed", error=e))
         return
-    print(f"Optimized {n} FTS index(es).")
+    print(t("sessions.optimized_fts", count=n))
     _print_size_change(db, before_mb)
 
 
 def _cmd_clean_markers(db, args):
+    from agent.i18n import t
+
     print(f"{'Dry run — scanning' if args.dry_run else 'Scanning'} for stale tool-call marker rows (#78148)…")
     report = db.purge_stale_tool_call_markers(dry_run=args.dry_run, backup=not args.no_backup)
     if report["rows_affected"] == 0:
-        print("✓ No affected rows found — nothing to clean.")
+        print(t("sessions.clean_none"))
     elif args.dry_run:
-        print(f"Would clear {report['rows_affected']} row(s): ids {report['row_ids']}")
+        print(t("sessions.clean_would", count=report['rows_affected'], ids=report['row_ids']))
     else:
         if report["backup_path"]:
-            print(f"  backup: {report['backup_path']}")
-        print(f"✓ Cleared {report['rows_affected']} row(s).")
+            print(t("sessions.repair_backup", path=report['backup_path']))
+        print(t("sessions.clean_done", count=report['rows_affected']))
 
 
 def _cmd_optimize_storage(db, args):
     db_path = db.db_path
     if not db.fts_optimize_available():
-        print("Search index is already on the compact layout — nothing to do.")
+        from agent.i18n import t
+
+        print(t("sessions.layout_compact"))
         return
     before_bytes = os.path.getsize(db_path) if db_path.exists() else 0
     before_mb = before_bytes / (1024 * 1024)
@@ -989,24 +1099,26 @@ def _cmd_optimize_storage(db, args):
     except Exception:
         free_bytes = None
     need_bytes = before_bytes if do_vacuum else int(before_bytes * 0.3)
-    print(f"Search-index optimization for {db_path}\n  Current database size: {before_mb:.1f} MB")
+    from agent.i18n import t
+
+    print(t("sessions.optimize_header", path=db_path, size=f"{before_mb:.1f} MB"))
     if free_bytes is not None:
-        print(f"  Free disk: {free_bytes / (1024*1024):.0f} MB "
-              f"(need ~{need_bytes / (1024*1024):.0f} MB to complete{' incl. VACUUM' if do_vacuum else ''})")
+        print(t("sessions.free_disk", free=f"{free_bytes / (1024*1024):.0f}",
+                need=f"{need_bytes / (1024*1024):.0f}", vacuum=' incl. VACUUM' if do_vacuum else ''))
         if free_bytes < need_bytes:
-            print("\n⚠ Not enough free disk to complete safely. Free up space, or run with --no-vacuum "
-                  "(rebuilds the index but doesn't reclaim space until a later VACUUM).")
+            print(t("sessions.free_disk_low"))
             return
     if before_mb > 500:
-        print("  This may take a while on a large database. It runs in the foreground with progress below; "
-              "safe to Ctrl-C and re-run (it resumes).")
+        print(t("sessions.optimize_foreground_note"))
     if not getattr(args, "yes", False):
         try:
             resp = input("Proceed? [y/N] ").strip().lower()
         except EOFError:
             resp = ""
         if resp not in ("y", "yes"):
-            print("Cancelled.")
+            from agent.i18n import t
+
+            print(t("sessions.cancelled"))
             return
     _last = {"phase": None}
     labels = {"teardown": "Reclaiming old index", "vacuum": "Compacting database (VACUUM)", "done": "Done"}
@@ -1019,52 +1131,58 @@ def _cmd_optimize_storage(db, args):
         elif phase != _last["phase"]:
             print(f"\n  {labels.get(phase, phase)}…", flush=True)
         _last["phase"] = phase
-    print("Optimizing search-index storage…")
+    from agent.i18n import t
+
+    print(t("sessions.optimizing_storage"))
     try:
         result = db.optimize_fts_storage(progress_cb=_progress, vacuum=do_vacuum)
     except Exception as e:
-        print(f"\nError: optimization failed: {e}\nNo data was lost. Re-run to resume.")
+        from agent.i18n import t
+
+        print(t("sessions.optimize_resume_failed", error=e))
         return
     if not result.get("ok"):
-        print(f"\nCould not optimize: {result.get('reason', 'unknown')}")
+        print(t("sessions.optimize_not_ok", reason=result.get('reason', 'unknown')))
         return
-    print("\n✓ Search index optimized.")
+    print(t("sessions.optimize_done"))
     _print_size_change(db, before_mb, prefix="  ")
     if result.get("vacuumed") is False:
-        print("  (VACUUM was skipped or failed — run `hermes sessions optimize` later to reclaim freed space.)")
+        print(t("sessions.vacuum_skipped"))
 
 
 def _cmd_repair_routing(db, args):
+    from agent.i18n import t
+
     records = db.find_orphaned_gateway_sessions(max_gap_s=getattr(args, "max_gap_seconds", None))
     adoptable = [r for r in records if r["adoptable"]]
     for record in records:
-        print(f"{record['orphan_id']}  ({record['source']}, {record['message_count']} messages)")
+        print(t("sessions.adopt_row", orphan_id=record['orphan_id'], source=record['source'],
+                count=record['message_count']))
         if record["adoptable"]:
-            print(f"  → adopt into {record['session_key']} (from {record['donor_id']}, "
-                  f"evidence: {record['evidence']})")
+            print(t("sessions.adopt_into", key=record['session_key'], donor=record['donor_id'],
+                    evidence=record['evidence']))
         else:
-            print(f"  ✗ not repairable — {record['reason']}")
+            print(t("sessions.adopt_not_repairable", reason=record['reason']))
     if not records:
-        print("✓ No gateway sessions are missing their routing identity.")
+        print(t("sessions.adopt_none_missing"))
         return
     if not adoptable:
-        print(f"\n{len(records)} orphaned session(s) found, none unambiguously repairable. Nothing to do.")
+        print(t("sessions.adopt_none_adoptable", count=len(records)))
         return
     if not getattr(args, "apply", False):
-        print(f"\n{len(adoptable)} of {len(records)} orphaned session(s) can be repaired. "
-              "Re-run with --apply to perform them.")
+        print(t("sessions.adopt_reRun_apply", adoptable=len(adoptable), total=len(records)))
         return
-    print("\nStop the gateway before applying — a running gateway still holds the old routing mapping in memory.")
-    if not _confirm_prompt(f"Adopt {len(adoptable)} orphaned session(s)? [y/N] "):
-        print("Aborted — nothing was changed.")
+    print(t("sessions.adopt_stop_gateway"))
+    if not _confirm_prompt(t("sessions.adopt_confirm", count=len(adoptable))):
+        print(t("sessions.aborted_em"))
         return
     repaired = 0
     for record in adoptable:
         if db.adopt_orphaned_gateway_session(record["orphan_id"], record["donor_id"]):
             repaired += 1
-            print(f"✓ {record['orphan_id']} now owns {record['session_key']}")
+            print(t("sessions.adopt_done", orphan_id=record['orphan_id'], session_key=record['session_key']))
         else:
-            print(f"✗ {record['orphan_id']} was not adopted (the row changed since it was reported)")
+            print(t("sessions.adopt_stale", orphan_id=record['orphan_id']))
     print(f"\nRepaired {repaired} of {len(adoptable)} session(s).")
 
 
@@ -1118,7 +1236,9 @@ def _cmd_repair_prompts(db, args):
     if target:
         session_id = db.resolve_session_id(target)
         if not session_id:
-            print(f"No session matches {target!r}.")
+            from agent.i18n import t
+
+            print(t("sessions.no_match_target", target=repr(target)))
             return 1
         row = db.get_session(session_id)
         if row and row.get("system_prompt"):
@@ -1179,30 +1299,39 @@ def _cmd_repair_prompts(db, args):
         if as_json:
             print(json.dumps(_payload([]), indent=2))
         elif target:
-            print(f"{session_id} already has no stored prompt; nothing to clear.")
+            from agent.i18n import t
+
+            print(t("sessions.prompt_already_clear"))
         else:
-            print("No degraded stored system prompts found.")
+            from agent.i18n import t
+
+            print(t("sessions.no_degraded_prompts"))
             if unverifiable:
-                print(f"{len(unverifiable)} row(s) lacked enough tools[] evidence and were left unchanged.")
+                print(t("sessions.unverifiable_left", count=len(unverifiable)))
         return 0
 
     if not as_json:
         for finding in findings:
             print(f"  {finding['id']}  ({finding['prompt_chars']} chars) - {finding['reason']}")
         if unverifiable:
-            print(f"\nSkipped {len(unverifiable)} unverifiable row(s) without enough tools[] evidence.")
+            from agent.i18n import t
+
+            print(t("sessions.unverifiable_skipped", count=len(unverifiable)))
 
     if not apply:
         if as_json:
             print(json.dumps(_payload([]), indent=2))
         else:
-            print(f"\n{len(findings)} stored prompt(s) can be repaired. Re-run with --apply to clear them; "
-                  "the next turn rebuilds a healthy prompt (one prefix-cache break per session).")
+            from agent.i18n import t
+
+            print(t("sessions.prompts_repairable", count=len(findings)))
         return 0
 
     # JSON mode is the non-interactive automation surface; --apply is the explicit mutation opt-in.
-    if not as_json and not _confirm_prompt(f"Clear {len(findings)} stored prompt(s)? [y/N] "):
-        print("Aborted - nothing was changed.")
+    if not as_json and not _confirm_prompt(t("sessions.prompts_clear_confirm", count=len(findings))):
+        from agent.i18n import t
+
+        print(t("sessions.aborted"))
         return 0
 
     cleared = []
@@ -1213,19 +1342,22 @@ def _cmd_repair_prompts(db, args):
     if as_json:
         print(json.dumps(_payload(cleared), indent=2))
     else:
-        print(f"\nCleared {len(cleared)} stored prompt(s); the next turn for each rebuilds and persists "
-              "a healthy prompt.")
-        print("One 'Stored system prompt ... is null' warning per repaired session is expected on that rebuild.")
+        print(t("sessions.prompts_cleared", count=len(cleared)))
+        from agent.i18n import t
+
+        print(t("sessions.repaired_warning_expected"))
     return 0
 
 
 def _cmd_stats(db, args):
-    print(f"Total sessions: {db.session_count()}\nTotal messages: {db.message_count()}")
+    from agent.i18n import t
+
+    print(t("sessions.totals", sessions=db.session_count(), messages=db.message_count()))
     for src in ("cli", "telegram", "discord", "whatsapp", "slack"):
         if (c := db.session_count(source=src)) > 0:
-            print(f"  {src}: {c} sessions")
+            print(t("sessions.stats_source", src=src, count=c))
     if db.db_path.exists():
-        print(f"Database size: {_size_mb(db.db_path):.1f} MB")
+        print(t("sessions.db_size", size=f"{_size_mb(db.db_path):.1f}"))
 
 
 # -- dispatch -----------------------------------------------------------------
@@ -1265,11 +1397,15 @@ _DB_HANDLERS = {
 def _print_empty_store(action: str, args) -> None:
     """A profile that never created state.db: report empty instead of opening a writer that creates it."""
     if action == "stats":
-        print("Total sessions: 0\nTotal messages: 0")
+        from agent.i18n import t
+
+        print(t("sessions.totals", sessions=0, messages=0))
     elif action == "pinned":
-        print("[]" if getattr(args, "json", False) else "No pinned sessions. Pin one with: hermes sessions pin <session_id>")
+        print("[]" if getattr(args, "json", False) else t("sessions.no_pinned"))
     else:
-        print("No sessions found.")
+        from agent.i18n import t
+
+        print(t("sessions.no_sessions"))
 
 
 # VACUUM, the FTS-layout rebuild and bulk deletes rewrite the store; underneath a live gateway/Desktop/cron
@@ -1305,9 +1441,11 @@ def cmd_sessions(args, sessions_parser=None):
         # mode=ro cannot create the store; a reader on a fresh profile reports empty rather than failing.
         if observational and not path.exists():
             return _print_empty_store(action, args)
-        print("Could not open your session history database. "
-              "Run: hermes sessions repair to fix it (a backup is made first).")
-        print(f"Details: {e}")
+        from agent.i18n import t
+
+        print(t("sessions.cannot_open_db"))
+        print(t("sessions.cannot_open_db_run"))
+        print(t("sessions.usage_error", message=e))
         return 1
     try:
         handler = _DB_HANDLERS.get(action)
@@ -1330,7 +1468,9 @@ def cmd_sessions(args, sessions_parser=None):
             if not observational or not _schema_not_built(e):
                 raise
             # A read-only opener skips schema migration, so a store from an older release can lack a column.
-            print(f"Error: session database needs migration — run any writing hermes command first ({e})")
+            from agent.i18n import t
+
+            print(t("sessions.db_needs_migration", error=e))
             return 1
     finally:
         db.close()
