@@ -478,8 +478,9 @@ class GatewayChatView:
         if text or not result.get("interrupted"):
             return
         reason = result.get("interrupt_message")
-        print(f"Turn interrupted{f' ({reason})' if isinstance(reason, str) and reason else ''}; "
-              "it was not retried. Resume this session to continue.", file=sys.stderr)
+        from agent.i18n import t
+        reason_part = f" ({reason})" if isinstance(reason, str) and reason else ""
+        print(t("cli.tui.turn_interrupted", reason=reason_part), file=sys.stderr)
 
     def _report_no_reply(self, exit_code):
         """`-z` exit 1 (a completed turn with no reply text): the in-process one-shot's stderr line."""
@@ -558,9 +559,9 @@ class GatewayChatView:
                 return exit_code
             from prompt_toolkit import PromptSession
             from prompt_toolkit.patch_stdout import patch_stdout
+            from agent.i18n import t
             from hermes_cli.skin_engine import get_active_prompt_symbol, get_active_skin
-            welcome = "Welcome to Hermes Agent! Type your message or /help for commands."
-            print(get_active_skin().get_branding("welcome", welcome), flush=True)
+            print(get_active_skin().get_branding("welcome", t("cli.tui.welcome")), flush=True)
             # The classic status bar's leading segments: model, then the attached session.
             prompt = PromptSession(erase_when_done=True,
                                    bottom_toolbar=lambda: f" \u2624 {self.model} \u2502 {self.session_id} ")
@@ -582,11 +583,11 @@ class GatewayChatView:
                             print(f"\n{'─' * 40}\n● {text}", flush=True)
                             await self.submit(text)
                     except KeyboardInterrupt:
-                        print("Use /stop to interrupt execution, /quit to detach.")
+                        print(t("cli.tui.kbdint_hint"))
                     except EOFError:
                         return 0
                     except GatewayClientError as exc:
-                        print(f"Error: {exc}", file=sys.stderr)
+                        print(t("cli.tui.error_prefix", error=str(exc)), file=sys.stderr)
                 raise self.failure
         finally:
             renderer.cancel()

@@ -2136,6 +2136,11 @@ cli:
     images_attached_other: "📎 {count} görsel eklendi"
     command_interrupted: "Komut kesildi."
     welcome: "Hermes Agent'a hoş geldiniz! Mesajınızı yazın veya komutlar için /help kullanın."
+    kbdint_hint: "Yürütmeyi kesmek için /stop, oturumdan ayrılmak için /quit kullan."
+    turn_interrupted: "Tur kesildi{reason}; yeniden denenmedi. Devam etmek için bu oturumu sürdür."
+    unknown_command: "Bilinmeyen komut: /{name} (/help kullan)"
+    no_output: "/{name}: çıktı yok"
+    error_prefix: "Hata: {error}"
     activated_skills_label: "Etkinleştirilen skill'ler:"
     redaction_disabled_title: "⚠  Gizli anahtar maskeleme DEVRE DIŞI"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). API anahtarları ve token'lar sohbet çıktısında, oturum JSON'larında ve günlüklerde açık biçimde görünebilir. Yeniden etkinleştirmek için config.yaml içinde {setting} ayarlayın."
@@ -3921,3 +3926,4 @@ tips:
     p09: "Bu hatayı ve nasıl düzeltileceğini açıkla"
     p10: "Bir hatırlatıcı kur veya yinelenen bir görev zamanla"
     p11: "Komutlara göz atmak için / yazın, palet için Ctrl+P"
+

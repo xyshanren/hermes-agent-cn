@@ -2153,6 +2153,11 @@ cli:
     images_attached_other: "📎 {count} kép csatolva"
     command_interrupted: "Parancs megszakítva."
     welcome: "Üdv a Hermes Agentben! Írd be az üzenetedet, vagy a /help paranccsal nézd meg a parancsokat."
+    kbdint_hint: "A végrehajtás megszakításához használd a /stop, a leváláshoz a /quit parancsot."
+    turn_interrupted: "Kör megszakítva{reason}; nem lett újrapróbálva. A folytatáshoz állítsd helyre ezt a munkamenetet."
+    unknown_command: "Ismeretlen parancs: /{name} (használd: /help)"
+    no_output: "/{name}: nincs kimenet"
+    error_prefix: "Hiba: {error}"
     activated_skills_label: "Aktivált skillek:"
     redaction_disabled_title: "⚠  A titkok kitakarása KI VAN KAPCSOLVA"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). Az API-kulcsok és tokenek szó szerint megjelenhetnek a chatkimenetben, a munkamenet-JSON-okban és a naplókban. A visszakapcsoláshoz állítsd be a config.yaml fájlban: {setting}."
@@ -3938,3 +3943,4 @@ tips:
     p09: "Magyarázd el ezt a hibát, és hogyan javítsam"
     p10: "Állíts be emlékeztetőt, vagy ütemezz ismétlődő feladatot"
     p11: "Írj / jelet a parancsokhoz, vagy nyomj Ctrl+P-t a palettához"
+

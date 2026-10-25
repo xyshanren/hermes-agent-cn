@@ -22,6 +22,9 @@ def home(tmp_path, monkeypatch):
     empty_bundled.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "os-home"))
     monkeypatch.setenv("HERMES_HOME", str(home))
+    # These tests exercise the config.yaml → language path; the suite-wide HERMES_LANGUAGE=en
+    # pin (tests/conftest.py) outranks config and must step aside here.
+    monkeypatch.delenv("HERMES_LANGUAGE", raising=False)
     monkeypatch.setattr(plugins_mod, "get_bundled_plugins_dir", lambda: empty_bundled)
     i18n_layers._reset_registry_for_tests()
     i18n.reset_language_cache()

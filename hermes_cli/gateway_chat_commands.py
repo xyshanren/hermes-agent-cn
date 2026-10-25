@@ -183,6 +183,7 @@ async def _tools(view, rest):
 async def forward(view, name, rest):
     """Run a registry command (or a skill) on the owner; its refusal names where the command stands."""
     from hermes_cli.gateway_client import GatewayRPCError
+    from agent.i18n import t
     try:
         reply = await view.client.rpc("slash.exec", session_id=view.session_id,
                                       command=name + (" " + rest if rest else ""))
@@ -190,7 +191,7 @@ async def forward(view, name, rest):
         if str(exc) != "unsupported_command":
             raise
         from hermes_cli.commands import resolve_command
-        print(refusal(name) if resolve_command(name) else f"Unknown command: /{name} (use /help)")
+        print(refusal(name) if resolve_command(name) else t("cli.tui.unknown_command", name=name))
         return
     if reply.get("type") in ("skill", "send"):
         # A prompt directive is the client's durable submit (same contract as Ink and Desktop):
@@ -200,7 +201,7 @@ async def forward(view, name, rest):
         print(f"\n{'─' * 40}\n● {reply.get('display') or '/' + name}", flush=True)
         await view.submit(reply["message"])
     else:
-        print(reply.get("output") or f"/{name}: no output")
+        print(reply.get("output") or t("cli.tui.no_output", name=name))
 
 
 _VIEW_CONTROLS = frozenset({"quit", "stop", "approve", "branch", "model", "compress", "yolo", "help"})

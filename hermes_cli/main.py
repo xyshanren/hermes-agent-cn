@@ -1770,12 +1770,8 @@ def cmd_chat(args):
         os.environ["HERMES_SESSION_SOURCE_EXPLICIT"] = "1"
 
     _pin_kanban_board_env()
-    from hermes_cli.observability.shared_metrics_consent import offer_consent_before_chat
-
-    # Not before setup: a blank install meets "Setup Required" first. The offer stays
-    # undecided, so it is asked on the first launch with a provider.
-    if provider_configured:
-        offer_consent_before_chat(args)
+    # CN fork: 裁掉 upstream 的 shared-metrics 首启采集问询（offer_consent_before_chat）——
+    # 不问即不采集（telemetry.shared_metrics.enabled 默认 False）；`hermes setup telemetry` 仍可手动开关。
     _confirm_startup_expensive_model_override(args)
 
     passthrough = {k: getattr(args, k, d) for k, d in _CHAT_PASSTHROUGH}

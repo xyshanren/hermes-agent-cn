@@ -392,6 +392,9 @@ def _hermetic_environment(tmp_path, tmp_path_factory, monkeypatch):
     monkeypatch.setenv("LANG", "C.UTF-8")
     monkeypatch.setenv("LC_ALL", "C.UTF-8")
     monkeypatch.setenv("PYTHONHASHSEED", "0")
+    # CN fork: 运行时默认语言是 zh（config_defaults display.language），但断言本地化文案的测试
+    # 以英文目录为基准（与 upstream 一致），这里钉回 en；测语言的用例各自显式控制。
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
 
     # 4b. Disable AWS IMDS lookups. Without this, any test that ends up
     #     calling has_aws_credentials() / resolve_aws_auth_env_var()

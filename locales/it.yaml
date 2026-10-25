@@ -2136,6 +2136,11 @@ cli:
     images_attached_other: "📎 {count} immagini allegate"
     command_interrupted: "Comando interrotto."
     welcome: "Benvenuto in Hermes Agent! Digita il tuo messaggio o /help per i comandi."
+    kbdint_hint: "Usa /stop per interrompere l'esecuzione e /quit per scollegarti."
+    turn_interrupted: "Turno interrotto{reason}; non è stato riprovato. Riprendi questa sessione per continuare."
+    unknown_command: "Comando sconosciuto: /{name} (usa /help)"
+    no_output: "/{name}: nessun output"
+    error_prefix: "Errore: {error}"
     activated_skills_label: "Skill attivate:"
     redaction_disabled_title: "⚠  La redazione dei segreti è DISATTIVATA"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). Chiavi API e token potrebbero comparire in chiaro nell'output della chat, nei JSON di sessione e nei log. Imposta {setting} in config.yaml per riattivarla."
@@ -3921,3 +3926,4 @@ tips:
     p09: "Spiega questo errore e come risolverlo"
     p10: "Imposta un promemoria o pianifica un'attività ricorrente"
     p11: "Digita / per sfogliare i comandi, o Ctrl+P per la palette comandi"
+

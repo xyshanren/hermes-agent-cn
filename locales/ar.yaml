@@ -2136,6 +2136,11 @@ cli:
     images_attached_other: "📎 {count} صور مرفقة"
     command_interrupted: "قُطع الأمر."
     welcome: "مرحبًا بك في Hermes Agent! اكتب رسالتك أو /help لعرض الأوامر."
+    kbdint_hint: "استخدم /stop لمقاطعة التنفيذ و/quit للانفصال."
+    turn_interrupted: "تمت مقاطعة الدور{reason}؛ لم تتم إعادة المحاولة. استأنف هذه الجلسة للمتابعة."
+    unknown_command: "أمر غير معروف: /{name} (استخدم /help)"
+    no_output: "/{name}: لا مخرجات"
+    error_prefix: "خطأ: {error}"
     activated_skills_label: "المهارات المفعّلة:"
     redaction_disabled_title: "⚠  إخفاء الأسرار معطّل"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). قد تظهر مفاتيح API ورموز الوصول حرفيًا في مخرجات المحادثة وملفات JSON للجلسات والسجلات. اضبط {setting} في config.yaml لإعادة التفعيل."
@@ -3921,3 +3926,4 @@ tips:
     p09: "اشرح هذا الخطأ وكيفية إصلاحه"
     p10: "اضبط تذكيرًا أو جدولة مهمة متكررة"
     p11: "اكتب / لاستعراض الأوامر، أو Ctrl+P للوحة الأوامر"
+

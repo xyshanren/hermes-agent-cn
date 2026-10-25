@@ -935,7 +935,8 @@ DEFAULT_CONFIG = {
         "skin": "default",
         # UI language for static messages (approval prompts, some gateway slash replies); not agent
         # responses/logs/tool outputs. en, zh, ja, de, es, fr, tr, uk; unknown → en.
-        "language": "en",
+        # CN fork: 默认简中（upstream 为 "en"）；HERMES_LANGUAGE 与用户显式设置仍优先。
+        "language": "zh",
         # TUI busy indicator: kaomoji | emoji | unicode (braille) | ascii. `/indicator <style>`.
         "tui_status_indicator": "kaomoji",
         # Seconds between idle prompt_toolkit redraws in the classic CLI; keeps wall-clock

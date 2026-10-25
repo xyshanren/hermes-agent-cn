@@ -2136,6 +2136,11 @@ cli:
     images_attached_other: "📎 {count} Bilder angehängt"
     command_interrupted: "Befehl unterbrochen."
     welcome: "Willkommen bei Hermes Agent! Geben Sie Ihre Nachricht ein oder /help für Befehle."
+    kbdint_hint: "Verwende /stop, um die Ausführung zu unterbrechen, und /quit, dich abzukoppeln."
+    turn_interrupted: "Durchlauf unterbrochen{reason}; er wurde nicht wiederholt. Setze diese Sitzung fort, um fortzufahren."
+    unknown_command: "Unbekannter Befehl: /{name} (siehe /help)"
+    no_output: "/{name}: keine Ausgabe"
+    error_prefix: "Fehler: {error}"
     activated_skills_label: "Aktivierte Skills:"
     redaction_disabled_title: "⚠  Schwärzung von Geheimnissen ist DEAKTIVIERT"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). API-Schlüssel und Tokens können im Klartext in der Chat-Ausgabe, in Sitzungs-JSONs und in Logs erscheinen. Setzen Sie {setting} in config.yaml, um sie wieder zu aktivieren."
@@ -3921,3 +3926,4 @@ tips:
     p09: "Erkläre diesen Fehler und wie ich ihn behebe"
     p10: "Richte eine Erinnerung ein oder plane eine wiederkehrende Aufgabe"
     p11: "Geben Sie / ein, um Befehle zu durchsuchen, oder Ctrl+P für die Palette"
+

@@ -2136,6 +2136,11 @@ cli:
     images_attached_other: "📎 {count} beelde aangeheg"
     command_interrupted: "Opdrag onderbreek."
     welcome: "Welkom by Hermes Agent! Tik jou boodskap of /help vir opdragte."
+    kbdint_hint: "Gebruik /stop om uitvoering te onderbreek en /quit om te ontkoppel."
+    turn_interrupted: "Beurt onderbreek{reason}; dit is nie herprobeer nie. Hervat hierdie sessie om voort te gaan."
+    unknown_command: "Onbekende opdrag: /{name} (gebruik /help)"
+    no_output: "/{name}: geen uitvoer nie"
+    error_prefix: "Fout: {error}"
     activated_skills_label: "Geaktiveerde vaardighede:"
     redaction_disabled_title: "⚠  Geheim-redigering is GEDEAKTIVEER"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). API-sleutels en tokens kan woordeliks in kletsuitvoer, sessie-JSON's en loglae verskyn. Stel {setting} in config.yaml om dit weer te aktiveer."
@@ -3921,3 +3926,4 @@ tips:
     p09: "Verduidelik hierdie fout en hoe om dit reg te maak"
     p10: "Stel 'n herinnering of skeduleer 'n herhalende taak"
     p11: "Tik / om deur opdragte te blaai, of Ctrl+P vir die palet"
+

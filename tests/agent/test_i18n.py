@@ -95,9 +95,11 @@ def test_catalog_values_have_no_escaped_newlines(lang: str):
 def test_default_when_nothing_set(monkeypatch):
     """With no env var and no config override, falls back to English."""
     monkeypatch.delenv("HERMES_LANGUAGE", raising=False)
-    # Force config lookup to return None -- patch the cached reader.
+    # Force config lookup to return None -- patch the cached reader `_resolve_language` uses
+    # (CN fork ships display.language=zh in DEFAULT_CONFIG, so the module-level en fallback is
+    # only reachable when the config layer yields nothing).
     i18n.reset_language_cache()
-    monkeypatch.setattr(i18n, "_config_language", lambda: None)
+    monkeypatch.setattr(i18n, "_config_language_cached", lambda home: None)
     assert i18n.get_language() == "en"
 
 

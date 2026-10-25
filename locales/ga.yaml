@@ -2136,6 +2136,11 @@ cli:
     images_attached_other: "📎 {count} íomhá ceangailte"
     command_interrupted: "Briseadh isteach ar an ordú."
     welcome: "Fáilte go Hermes Agent! Clóscríobh do theachtaireacht nó /help le haghaidh orduithe."
+    kbdint_hint: "Úsáid /stop chun an rith a bhriseadh, agus /quit chun dícheangal."
+    turn_interrupted: "Stopadh an casadh{reason}; níor rinneadh iarracht eile air. Athoscail an seisiún seo chun leanúint ar aghaidh."
+    unknown_command: "Ordú anaithnid: /{name} (bain úsáid as /help)"
+    no_output: "/{name}: gan aschur"
+    error_prefix: "Earráid: {error}"
     activated_skills_label: "Scileanna gníomhachtaithe:"
     redaction_disabled_title: "⚠  Tá ceilt rún DÍCHUMASAITHE"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). D'fhéadfadh eochracha API agus comharthaí a bheith le feiceáil focal ar fhocal in aschur comhrá, i JSON na seisiún agus i logaí. Socraigh {setting} i config.yaml chun é a athchumasú."
@@ -3921,3 +3926,4 @@ tips:
     p09: "Mínigh an earráid seo agus conas í a réiteach"
     p10: "Socraigh meabhrúchán nó sceidealaigh tasc athfhillteach"
     p11: "Clóscríobh / chun orduithe a bhrabhsáil, nó Ctrl+P don phailéad"
+

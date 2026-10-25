@@ -2136,6 +2136,11 @@ cli:
     images_attached_other: "📎 이미지 {count}개 첨부됨"
     command_interrupted: "명령이 중단됐어요."
     welcome: "Hermes Agent에 오신 것을 환영해요! 메시지를 입력하거나 /help로 명령을 확인하세요."
+    kbdint_hint: "실행을 중단하려면 /stop, 세션에서 분리하려면 /quit를 사용하세요."
+    turn_interrupted: "턴이 중단되었습니다{reason}; 재시도되지 않았습니다. 계속하려면 이 세션을 재개하세요."
+    unknown_command: "알 수 없는 명령: /{name} (/help 사용)"
+    no_output: "/{name}: 출력 없음"
+    error_prefix: "오류: {error}"
     activated_skills_label: "활성화된 스킬:"
     redaction_disabled_title: "⚠  시크릿 마스킹이 비활성화됨"
     redaction_disabled_body: "(HERMES_REDACT_SECRETS={value}). API 키와 토큰이 채팅 출력, 세션 JSON, 로그에 그대로 노출될 수 있어요. 다시 활성화하려면 config.yaml에서 {setting}을(를) 설정하세요."
@@ -3921,3 +3926,4 @@ tips:
     p09: "이 오류를 설명하고 해결 방법을 알려 줘"
     p10: "리마인더를 설정하거나 반복 작업을 예약해 줘"
     p11: "/ 를 입력해 명령을 둘러보거나 Ctrl+P로 팔레트를 여세요"
+
