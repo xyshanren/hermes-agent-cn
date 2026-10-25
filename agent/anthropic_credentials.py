@@ -783,17 +783,19 @@ def run_hermes_oauth_login_pure() -> Optional[dict[str, Any]]:
         from hermes_cli.auth import _can_open_graphical_browser as _can_open_gui
     except Exception:
         _can_open_gui = lambda: True
+    from agent.i18n import t
+
     if _can_open_gui():
         with contextlib.suppress(Exception):
             webbrowser.open(auth_url)
-            print("  (Browser opened automatically)")
-    print("\nAfter authorizing, you'll see a code. Paste it below.\n")
+            print(t("runtime.browser_opened"))
+    print(t("runtime.paste_code_prompt"))
     try:
         auth_code = input("Authorization code: ").strip()
     except (KeyboardInterrupt, EOFError):
         return None
     if not auth_code:
-        print("No code entered.")
+        print(t("runtime.no_code"))
         return None
     splits = auth_code.split("#")
     code, received_state = splits[0], (splits[1] if len(splits) > 1 else "")
@@ -807,10 +809,10 @@ def run_hermes_oauth_login_pure() -> Optional[dict[str, Any]]:
         }).encode()
         result = _post_oauth_token(exchange_data, content_type="application/json", timeout=15, what="exchange")
     except Exception as e:
-        print(f"Token exchange failed: {e}")
+        print(t("runtime.token_exchange_failed", error=e))
         return None
     if not result.get("access_token"):
-        print("No access token in response.")
+        print(t("runtime.oauth_no_token"))
         return None
     return _oauth_token_state(result)
 

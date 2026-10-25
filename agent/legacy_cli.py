@@ -71,7 +71,9 @@ def main(argv: Optional[list[str]] = None, *, run: Optional[Callable[..., object
     query = args.query or positional or None
     if query is None and not args.list_tools:
         parser.print_help()
-        print("\nNo query given: pass one with --query (or run `hermes` for the interactive CLI).")
+        from agent.i18n import t
+
+        print(t("runtime.no_query_given"))
         return 0
 
     if run is None:

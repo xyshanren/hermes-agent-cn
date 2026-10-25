@@ -311,9 +311,11 @@ def announce_api_call(
     """Print the request summary (verbose) or start the quiet-mode thinking indicator."""
     thinking_spinner = None
     if not agent.quiet_mode:
-        agent._vprint(f"\n{agent.log_prefix}🔄 Making API call #{api_call_count}/{agent.max_iterations}...")
-        agent._vprint(f"{agent.log_prefix}   📊 Request size: {len(api_messages)} messages, ~{approx_tokens:,} tokens (~{total_chars:,} chars)")
-        agent._vprint(f"{agent.log_prefix}   🔧 Available tools: {len(agent.tools) if agent.tools else 0}")
+        from agent.i18n import t
+
+        agent._vprint(f"\n{agent.log_prefix}{t('runtime.making_api_call', count=api_call_count, max=agent.max_iterations)}")
+        agent._vprint(f"{agent.log_prefix}{t('runtime.request_size', messages=len(api_messages), tokens=f'{approx_tokens:,}', chars=f'{total_chars:,}')}")
+        agent._vprint(f"{agent.log_prefix}{t('runtime.available_tools_count', count=len(agent.tools) if agent.tools else 0)}")
     else:
         # Animated thinking spinner in quiet mode
         face = random.choice(KawaiiSpinner.get_thinking_faces())
@@ -384,7 +386,9 @@ def begin_iteration(
         _issuer = interrupt_issuer(agent)
         _turn_exit_reason = f"interrupted_by_system({_issuer})" if _issuer else "interrupted_by_user"
         if not agent.quiet_mode:
-            agent._safe_print("\n⚡ Breaking out of tool loop due to interrupt...")
+            from agent.i18n import t
+
+            agent._safe_print(t("runtime.breaking_tool_loop"))
         return _verdict("break")
 
     # Aggregate input budget for detached auxiliary forks bounds the whole review, not
@@ -412,7 +416,10 @@ def begin_iteration(
     elif not agent.iteration_budget.consume():
         _turn_exit_reason = "budget_exhausted"
         if not agent.quiet_mode:
-            agent._safe_print(f"\n⚠️  Iteration budget exhausted ({agent.iteration_budget.used}/{agent.iteration_budget.max_total} iterations used)", diagnostic=True)
+            from agent.i18n import t
+
+            agent._safe_print(t("runtime.iteration_budget_exhausted",
+                                used=agent.iteration_budget.used, budget=agent.iteration_budget.max_total), diagnostic=True)
         return _verdict("break")
     return _verdict("fallthrough")
 

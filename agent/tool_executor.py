@@ -1013,12 +1013,14 @@ def _begin_tool_execution(agent, ref: _ToolCallRef, display_index: int | None) -
     function_name, function_args, effective_task_id, tool_call_id = ref.name, ref.args, ref.task_id, ref.call_id
     display_args = _redact_tool_args_for_display(function_name, function_args) or function_args
     if _tool_progress_enabled(agent):
-        prefix = f"Tool {display_index}" if display_index is not None else "Tool"
+        from agent.i18n import t
+
+        prefix = t("runtime.tool_prefix_index", index=display_index) if display_index is not None else t("runtime.tool_prefix")
         if agent.verbose_logging:
-            print(f"  📞 {prefix}: {function_name}({list(display_args.keys())})")
-            print(agent._wrap_verbose("Args: ", json.dumps(display_args, indent=2, ensure_ascii=False)))
+            print(f"  {t('runtime.tool_call_log', prefix=prefix, call=function_name + str(list(display_args.keys())))}")
+            print(agent._wrap_verbose(t("runtime.args_label"), json.dumps(display_args, indent=2, ensure_ascii=False)))
         else:
-            print(f"  📞 {prefix}: {function_name}({list(function_args.keys())}) - {_preview(json.dumps(display_args, ensure_ascii=False), agent.log_prefix_chars)}")
+            print(f"  {t('runtime.tool_call_log_preview', prefix=prefix, call=function_name + str(list(function_args.keys())), preview=_preview(json.dumps(display_args, ensure_ascii=False), agent.log_prefix_chars))}")
 
     agent._current_tool = function_name
     agent._touch_activity(f"executing tool: {function_name}")
@@ -1248,11 +1250,13 @@ def _preview(text: str, limit: int) -> str:
 
 def _print_tool_completed(agent, index: int, tool_duration: float, result) -> None:
     """Non-quiet ``✅ Tool N completed`` line (full result under verbose logging)."""
+    from agent.i18n import t
+
     if agent.verbose_logging:
-        print(f"  ✅ Tool {index} completed in {tool_duration:.2f}s")
-        print(agent._wrap_verbose("Result: ", result))
+        print(f"  {t('runtime.tool_completed', index=index, duration=f'{tool_duration:.2f}s')}")
+        print(agent._wrap_verbose(t("runtime.result_label"), result))
     else:
-        print(f"  ✅ Tool {index} completed in {tool_duration:.2f}s - {_preview(result if isinstance(result, str) else str(result), agent.log_prefix_chars)}")
+        print(f"  {t('runtime.tool_completed_preview', index=index, duration=f'{tool_duration:.2f}s', preview=_preview(result if isinstance(result, str) else str(result), agent.log_prefix_chars))}")
 
 
 # ── Concurrent batch machinery ──────────────────────────────────────────────
@@ -1602,7 +1606,9 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
     _tool_budget = _budget_for_agent(agent)  # once per turn, not per result
 
     if agent._interrupt_requested:
-        print(f"{agent.log_prefix}⚡ Interrupt: skipping {num_tools} tool call(s)")
+        from agent.i18n import t
+
+        print(f"{agent.log_prefix}{t('runtime.tool_interrupt_skip', count=num_tools)}")
         _append_skipped_tool_results(
             agent, messages, tool_calls, effective_task_id,
             content=f"[Tool execution cancelled — {{name}} was skipped. {interrupt_skip_wording(agent)}]",
@@ -1616,7 +1622,9 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
 
     tool_names_str = ", ".join(pc.name for pc in parsed_calls)
     if _tool_progress_enabled(agent):
-        print(f"  ⚡ Concurrent: {num_tools} tool calls — {tool_names_str}")
+        from agent.i18n import t
+
+        print(f"  {t('runtime.tool_concurrent', count=num_tools, names=tool_names_str)}")
 
     # Resolved before the batch is built so the start-order gate can clamp under the deadline.
     timeout_s = _resolve_concurrent_tool_timeout()
@@ -1761,7 +1769,9 @@ def _resolve_sequential_dispatch(agent, ref: _ToolCallRef, messages: list) -> _S
 def _skip_remaining_sequential(agent, messages: list, remaining, effective_task_id: str, *, notice: str, **skip_kwargs) -> bool:
     """Announce an interrupt and append one skipped result per unstarted call; False when
     a flush failed (the caller must stop the batch)."""
-    agent._vprint(f"{agent.log_prefix}⚡ Interrupt: skipping {len(remaining)} {notice}", force=True)
+    from agent.i18n import t
+
+    agent._vprint(f"{agent.log_prefix}{t('runtime.tool_interrupt_skip_notice', count=len(remaining), notice=notice)}", force=True)
     return _append_skipped_tool_results(agent, messages, remaining, effective_task_id, **skip_kwargs)
 
 

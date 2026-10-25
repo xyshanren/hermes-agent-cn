@@ -104,7 +104,9 @@ def validate_tool_calls(
         if tc.function.name not in valid_names:
             repaired = agent._repair_tool_call(tc.function.name)
             if repaired:
-                agent._vprint(f"{agent.log_prefix}🔧 Auto-repaired tool name: '{tc.function.name}' -> '{repaired}'",
+                from agent.i18n import t
+
+                agent._vprint(f"{agent.log_prefix}{t('runtime.auto_repaired_tool', from_name=tc.function.name, to_name=repaired)}",
                               force=True, diagnostic=True)
                 tc.function.name = repaired
                 repaired_ids.add(id(tc))
@@ -129,11 +131,13 @@ def validate_tool_calls(
         agent._invalid_tool_retries += 1
         # Return helpful error to model — model can agent-correct next turn
         invalid_preview = _preview_name(invalid_tool_calls[0])
-        agent._buffer_vprint(f"⚠️  Unknown tool '{invalid_preview}' — sending error to model for agent-correction ({agent._invalid_tool_retries}/3)")
+        from agent.i18n import t
+
+        agent._buffer_vprint(t("runtime.unknown_tool", name=invalid_preview, n=agent._invalid_tool_retries))
 
         if agent._invalid_tool_retries >= 3:
             agent._flush_status_buffer()
-            agent._vprint(f"{agent.log_prefix}❌ Max retries (3) for invalid tool calls exceeded. Stopping as partial.", force=True, diagnostic=True)
+            agent._vprint(f"{agent.log_prefix}{t('runtime.invalid_tool_max')}", force=True, diagnostic=True)
             agent._invalid_tool_retries = 0
             return _verdict("return", _partial_exit(
                 agent, messages, conversation_history, api_call_count,
@@ -204,15 +208,17 @@ def validate_tool_calls(
 
         agent._invalid_json_retries += 1
         tool_name, error_msg = invalid_json_args[0]
-        agent._buffer_vprint(f"⚠️  Invalid JSON in tool call arguments for '{tool_name}': {error_msg}")
+        from agent.i18n import t
+
+        agent._buffer_vprint(t("runtime.invalid_json_args", tool=tool_name, error=error_msg))
 
         if agent._invalid_json_retries < 3:
-            agent._buffer_vprint(f"🔄 Retrying API call ({agent._invalid_json_retries}/3)...")
+            agent._buffer_vprint(t("runtime.invalid_json_retry", n=agent._invalid_json_retries))
             # Don't add anything to messages, just retry the API call
             return _verdict("continue")
         # Instead of returning partial, inject tool error results so the model can recover.
         # Using tool results (not user messages) preserves role alternation.
-        agent._buffer_vprint("⚠️  Injecting recovery tool results for invalid JSON...")
+        agent._buffer_vprint(t("runtime.injecting_recovery"))
         agent._invalid_json_retries = 0  # Reset for next attempt
         # Append the assistant message with its (broken) tool_calls, then one
         # error result per call.

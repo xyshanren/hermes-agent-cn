@@ -69,7 +69,9 @@ def run_tool_round(
         )
 
     if not agent.quiet_mode:
-        agent._vprint(f"{agent.log_prefix}🔧 Processing {len(assistant_message.tool_calls)} tool call(s)...")
+        from agent.i18n import t
+
+        agent._vprint(f"{agent.log_prefix}{t('runtime.processing_tool_calls', count=len(assistant_message.tool_calls))}")
 
     if agent.verbose_logging:
         for tc in assistant_message.tool_calls:
@@ -180,7 +182,9 @@ def run_tool_round(
         decision = agent._tool_guardrail_halt_decision
         _turn_exit_reason = "guardrail_halt"
         final_response = agent._toolguard_controlled_halt_response(decision)
-        agent._emit_diagnostic_status(f"⚠️ Tool guardrail halted {decision.tool_name}: {decision.code}")
+        from agent.i18n import t
+
+        agent._emit_diagnostic_status(t("runtime.guardrail_halted", tool=decision.tool_name, code=decision.code))
         append_message(messages, {"role": "assistant", "content": final_response})
         # Emit the halt so it isn't mistaken for a crash; the stream callback is still
         # alive, so SSE/TUI clients see the explanation.

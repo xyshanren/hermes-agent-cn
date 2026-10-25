@@ -33,11 +33,13 @@ def _init_fallback_chain(agent, fallback_model):
     agent._fallback_model = agent._fallback_chain[0] if agent._fallback_chain else None
     chain = agent._fallback_chain
     if chain and not agent.quiet_mode:
+        from agent.i18n import t
+
         labels = [f"{f['model']} ({f['provider']})" for f in chain]
         if len(chain) == 1:
-            print(f"🔄 Fallback model: {labels[0]}")
+            print(t("runtime.fallback_model", label=labels[0]))
         else:
-            print(f"🔄 Fallback chain ({len(chain)} providers): " + " → ".join(labels))
+            print(t("runtime.fallback_chain", count=len(chain)) + " " + " → ".join(labels))
 
 
 def recompute_init_fallback_api_mode(agent, fb_client) -> None:

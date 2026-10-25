@@ -151,22 +151,28 @@ def normalize_model_response(
     content = assistant_message.content
     if content and not agent.quiet_mode:
         if agent.verbose_logging:
-            agent._vprint(f"{agent.log_prefix}🤖 Assistant: {content}")
+            from agent.i18n import t
+
+            agent._vprint(f"{agent.log_prefix}{t('runtime.assistant_line', content=content)}")
         else:
-            agent._vprint(f"{agent.log_prefix}🤖 Assistant: {content[:100]}{'...' if len(content) > 100 else ''}")
+            from agent.i18n import t
+
+            agent._vprint(f"{agent.log_prefix}{t('runtime.assistant_line', content=content[:100] + ('...' if len(content) > 100 else ''))}")
     if content and agent.tool_progress_callback:
         _relay_thinking(agent, content)
 
     # Incomplete <REASONING_SCRATCHPAD> (opened, never closed): the model ran out of
     # output tokens mid-reasoning — retry up to 2 times, then save as partial.
     if has_incomplete_scratchpad(content or ""):
+        from agent.i18n import t
+
         agent._incomplete_scratchpad_retries += 1
-        agent._buffer_vprint("⚠️  Incomplete <REASONING_SCRATCHPAD> detected (opened but never closed)")
+        agent._buffer_vprint(t("runtime.scratchpad_incomplete"))
         if agent._incomplete_scratchpad_retries <= 2:
-            agent._buffer_vprint(f"🔄 Retrying API call ({agent._incomplete_scratchpad_retries}/2)...")
+            agent._buffer_vprint(t("runtime.scratchpad_retry", n=agent._incomplete_scratchpad_retries))
             return _verdict("continue")  # don't add the broken message
         agent._flush_status_buffer()
-        agent._vprint(f"{agent.log_prefix}❌ Max retries (2) for incomplete scratchpad. Saving as partial.", force=True, diagnostic=True)
+        agent._vprint(f"{agent.log_prefix}{t('runtime.scratchpad_max')}", force=True, diagnostic=True)
         agent._incomplete_scratchpad_retries = 0
         rolled_back_messages = agent._get_messages_up_to_last_assistant(messages)
         agent._cleanup_task_resources(effective_task_id)

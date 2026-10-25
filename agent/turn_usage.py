@@ -194,7 +194,9 @@ def record_response_usage(
             from agent.model_metadata import save_provider_context_length
 
             save_provider_context_length(agent.model, agent.base_url, ctx, agent.provider)
-            agent._safe_print(f"{agent.log_prefix}💾 Cached context length: {ctx:,} tokens for {agent.model}")
+            from agent.i18n import t
+
+            agent._safe_print(f"{agent.log_prefix}{t('runtime.cached_context', ctx=f'{ctx:,}', model=agent.model)}")
         compressor._context_probed = False
         compressor._context_probe_persistable = False
 

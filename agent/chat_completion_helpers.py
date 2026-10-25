@@ -2827,9 +2827,9 @@ class _BedrockStream:
         # attempt (one lifecycle boundary).
         from agent.bedrock_adapter import normalize_converse_response
         self.agent._disable_streaming = True
-        self.agent._safe_print("\n⚠  AWS IAM denied bedrock:InvokeModelWithResponseStream — "
-            "falling back to non-streaming InvokeModel.\n"
-            "   Grant that action to restore streaming output.\n", diagnostic=True)
+        from agent.i18n import t
+
+        self.agent._safe_print(t("runtime.aws_iam_denied"), diagnostic=True)
         logger.info("bedrock: converse_stream denied by IAM (%s) — "
             "using non-streaming converse() for this session.", type(exc).__name__)
         return normalize_converse_response(client.converse(**final_kwargs))

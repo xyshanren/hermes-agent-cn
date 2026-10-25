@@ -331,7 +331,9 @@ def _adopt_provider_context_limit(st: _Recovery, error_msg: str, old_ctx: int) -
     compressor = agent.context_compressor
     new_ctx = get_context_length_from_provider_error(error_msg, old_ctx)
     if new_ctx is not None:
-        agent._buffer_vprint(f"Context limit detected from API: {new_ctx:,} tokens (was {old_ctx:,})")
+        from agent.i18n import t
+
+        agent._buffer_vprint(t("runtime.ctx_detected", new=f"{new_ctx:,}", old=f"{old_ctx:,}"))
         compressor.update_model(
             model=agent.model, context_length=new_ctx, base_url=agent.base_url,
             api_key=getattr(agent, "api_key", ""), provider=agent.provider, api_mode=agent.api_mode,
@@ -345,7 +347,9 @@ def _adopt_provider_context_limit(st: _Recovery, error_msg: str, old_ctx: int) -
         if hasattr(compressor, "_context_probed"):
             compressor._context_probed = True
             compressor._context_probe_persistable = True
-        agent._buffer_vprint(f"⚠️  Context length exceeded — using provider limit: {old_ctx:,} → {new_ctx:,} tokens")
+        from agent.i18n import t
+
+        agent._buffer_vprint(t("runtime.ctx_exceeded", old=f"{old_ctx:,}", new=f"{new_ctx:,}"))
         return new_ctx
 
     is_minimax_provider = (

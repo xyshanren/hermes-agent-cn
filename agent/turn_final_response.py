@@ -372,5 +372,7 @@ def finish_text_response(
 
     _turn_exit_reason = f"text_response(finish_reason={finish_reason})"
     if not agent.quiet_mode:
-        agent._safe_print(f"🎉 Conversation completed after {api_call_count} OpenAI-compatible API call(s)")
+        from agent.i18n import t
+
+        agent._safe_print(t("runtime.conversation_completed", count=api_call_count))
     return _verdict("break")

@@ -329,14 +329,20 @@ def _continue_text(st: _Trunc, _retry: TurnRetryState, assistant_message: Any) -
     if n < 4 and filled is None:
         _dropped_tools = getattr(st.response, "_dropped_tool_names", None)
         if st.is_stub and _dropped_tools:
+            from agent.i18n import t
+
             agent._vprint(
-                f"{agent.log_prefix}↻ Stream interrupted mid "
-                f"tool-call ({', '.join(_dropped_tools[:3])}) — requesting chunked retry ({n}/4)...", diagnostic=True,
+                f"{agent.log_prefix}{t('runtime.stream_mid_tool_continuation', tools=', '.join(_dropped_tools[:3]), n=n)}",
+                diagnostic=True,
             )
         elif st.is_stub:
-            agent._vprint(f"{agent.log_prefix}↻ Stream interrupted — requesting continuation ({n}/4)...", diagnostic=True)
+            from agent.i18n import t
+
+            agent._vprint(f"{agent.log_prefix}{t('runtime.stream_continuation', n=n)}", diagnostic=True)
         else:
-            agent._vprint(f"{agent.log_prefix}↻ Requesting continuation ({n}/4)...", diagnostic=True)
+            from agent.i18n import t
+
+            agent._vprint(f"{agent.log_prefix}{t('runtime.requesting_continuation', n=n)}", diagnostic=True)
         append_message(messages, {
             "role": "user", "content": _get_continuation_prompt(st.is_stub, _dropped_tools),
             "_length_continuation_nudge": True,
@@ -407,10 +413,12 @@ def _retry_truncated_tool_call(st: _Trunc, api_kwargs: Any) -> TruncationVerdict
     if st.truncated_tool_call_retries < 4:
         st.truncated_tool_call_retries += 1
         n = st.truncated_tool_call_retries
+        from agent.i18n import t
+
         if st.is_stub:
-            agent._buffer_vprint(f"⚠️  Stream interrupted mid tool-call — retrying ({n}/4)...")
+            agent._buffer_vprint(t("runtime.stream_tool_retry", n=n))
         else:
-            agent._buffer_vprint(f"⚠️  Truncated tool call detected — retrying API call ({n}/4)...")
+            agent._buffer_vprint(t("runtime.truncated_tool_retry", n=n))
         agent._ephemeral_max_output_tokens = boosted_output_cap(
             agent, agent._requested_output_cap_from_api_kwargs(api_kwargs), n
         )
@@ -534,7 +542,9 @@ def recover_from_truncation(
             return _retry_truncated_tool_call(st, api_kwargs)
 
     if len(messages) > 1:
-        agent._vprint(f"{agent.log_prefix}   ⏪ Rolling back to last complete assistant turn", diagnostic=True)
+        from agent.i18n import t
+
+        agent._vprint(f"{agent.log_prefix}{t('runtime.rolling_back')}", diagnostic=True)
         return st.end_turn(
             _TRUNCATED_FINAL, result_messages=agent._get_messages_up_to_last_assistant(messages)
         )
@@ -676,7 +686,9 @@ def continue_codex_incomplete(
                 agent, None, n, base=agent.max_tokens or int(observed or 0) or 4096
             )
         if not agent.quiet_mode:
-            agent._vprint(f"{agent.log_prefix}↻ Codex response incomplete; continuing turn ({n}/3)", diagnostic=True)
+            from agent.i18n import t
+
+            agent._vprint(f"{agent.log_prefix}{t('runtime.codex_incomplete', n=n)}", diagnostic=True)
         # Spinner/heartbeat notice: these retries can take minutes and otherwise look
         # like infinite thinking.
         # #70773: same FD-recycle corruption vector as #67142. The shared OpenAI client's connection pool

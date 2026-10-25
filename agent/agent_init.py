@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 from agent.context_compressor import ContextCompressor
+from agent.i18n import t
 from agent.agent_init_fallback import _fallback_entries, _init_fallback_chain, recompute_init_fallback_api_mode
 from agent.agent_init_params import _CALLBACK_PARAMS, _GATEWAY_IDENTITY_PARAMS, _PASSTHROUGH_PARAMS
 from agent.agent_runtime_helpers import _ra
@@ -733,12 +734,13 @@ def _print_key_banner(key, label: str, warn_missing: bool = False) -> None:
     """Masked credential line. A callable ``key`` (Entra ID, Vertex OAuth, key_cmd, ...) is labelled
     by its tagged source and never invoked. Keys ≤ 12 chars (incl. "dummy-key") are not shown."""
     from agent.credential_source import credential_label
+
     if source_label := credential_label(key):
-        print(f"🔑 Using credentials: {source_label}")
+        print(t("runtime.using_credentials", source=source_label))
     elif isinstance(key, str) and len(key) > 12:
-        print(f"🔑 Using {label}: {key[:8]}...{key[-4:]}")
+        print(t("runtime.using_key", label=label, key=f"{key[:8]}...{key[-4:]}"))
     elif warn_missing:
-        print("⚠️  Warning: API key appears invalid or missing")
+        print(t("runtime.api_key_invalid_warning"))
 
 
 def _init_anthropic_client(agent, api_key, base_url, _provider_timeout):
@@ -753,7 +755,7 @@ def _init_anthropic_client(agent, api_key, base_url, _provider_timeout):
         from agent.bedrock_adapter import bind_bedrock_runtime
         bind_bedrock_runtime(agent, base_url, "anthropic_messages")
         if not agent.quiet_mode:
-            print(f"🤖 AI Agent initialized with model: {agent.model} (AWS Bedrock + AnthropicBedrock SDK, {agent._bedrock_region})")
+            print(t("runtime.agent_initialized", model=agent.model, detail=f" (AWS Bedrock + AnthropicBedrock SDK, {agent._bedrock_region})"))
         return
     # ANTHROPIC_TOKEN fallback only for native Anthropic — other anthropic_messages providers
     # must use their own key or Anthropic credentials leak to third-party endpoints.
@@ -786,7 +788,7 @@ def _init_anthropic_client(agent, api_key, base_url, _provider_timeout):
     agent._is_anthropic_oauth = anthropic_route_is_oauth(base_url, effective_key, provider=agent.provider)
     agent._anthropic_client = build_anthropic_client(effective_key, base_url, timeout=_provider_timeout)
     if not agent.quiet_mode:
-        print(f"🤖 AI Agent initialized with model: {agent.model} (Anthropic native)")
+        print(t("runtime.agent_initialized", model=agent.model, detail=" (Anthropic native)"))
         _print_key_banner(effective_key, "token")
 
 
@@ -804,7 +806,7 @@ def _init_moa_client(agent, api_key):
     # they never touch the message history. See #53802.
     bind_moa_runtime(agent, agent.model, api_key)
     if not agent.quiet_mode:
-        print(f"🤖 AI Agent initialized with MoA preset: {agent.model}")
+        print(t("runtime.agent_initialized_moa", model=agent.model))
 
 
 def _init_bedrock_client(agent, base_url):
@@ -813,7 +815,8 @@ def _init_bedrock_client(agent, base_url):
     bind_bedrock_runtime(agent, base_url, "bedrock_converse")
     if not agent.quiet_mode:
         _gr_label = " + Guardrails" if agent._bedrock_guardrail_config else ""
-        print(f"🤖 AI Agent initialized with model: {agent.model} (AWS Bedrock, {agent._bedrock_region}{_gr_label})")
+        print(t("runtime.agent_initialized", model=agent.model,
+                detail=f" (AWS Bedrock, {agent._bedrock_region}{_gr_label})"))
 
 
 def _explicit_client_kwargs(agent, api_key, base_url, _provider_timeout) -> dict[str, Any]:
@@ -996,7 +999,7 @@ def _init_openai_client(agent, api_key, base_url, fallback_model, _provider_time
         client_kwargs = _routed_client_kwargs(agent, fallback_model, _provider_timeout)
         if client_kwargs is None:  # init-time fallback bound the MoA facade
             if not agent.quiet_mode:
-                print(f"🤖 AI Agent initialized with MoA preset: {agent.model}")
+                print(t("runtime.agent_initialized_moa", model=agent.model))
             return
     from hermes_cli.providers import is_actual_route
     if is_actual_route(agent.provider, client_kwargs.get("base_url", "")):
@@ -1017,9 +1020,9 @@ def _init_openai_client(agent, api_key, base_url, fallback_model, _provider_time
     try:
         agent.client = agent._create_openai_client(client_kwargs, reason="agent_init", shared=True)
         if not agent.quiet_mode:
-            print(f"🤖 AI Agent initialized with model: {agent.model}")
+            print(t("runtime.agent_initialized", model=agent.model, detail=""))
             if base_url:
-                print(f"🔗 Using custom base URL: {base_url}")
+                print(t("runtime.using_custom_base_url", url=base_url))
             from gateway.warning_notifications import warning_notifications_enabled
             _print_key_banner(client_kwargs.get("api_key", "none"), "API key",
                               warn_missing=warning_notifications_enabled(agent.platform))
@@ -1136,23 +1139,23 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
     if agent.quiet_mode:
         return
     if agent.tools:
-        print(f"🛠️  Loaded {len(agent.tools)} tools: {', '.join(sorted(agent.valid_tool_names))}")
+        print(t("runtime.loaded_tools", count=len(agent.tools), names=', '.join(sorted(agent.valid_tool_names))))
         if enabled_toolsets:
-            print(f"   ✅ Enabled toolsets: {', '.join(enabled_toolsets)}")
+            print(t("runtime.enabled_toolsets", names=', '.join(enabled_toolsets)))
         if disabled_toolsets:
-            print(f"   ❌ Disabled toolsets: {', '.join(disabled_toolsets)}")
+            print(t("runtime.disabled_toolsets", names=', '.join(disabled_toolsets)))
         import model_tools
         requirements = model_tools.check_toolset_requirements()
         missing_reqs = [name for name, available in requirements.items() if not available]
         if missing_reqs:
-            agent._safe_print(f"⚠️  Some tools may not work due to missing requirements: {missing_reqs}", diagnostic=True)
+            agent._safe_print(t("runtime.missing_requirements", reqs=missing_reqs), diagnostic=True)
     else:
-        print("🛠️  No tools loaded (all tools filtered out or unavailable)")
+        print(t("runtime.no_tools_loaded"))
     if agent.save_trajectories:
-        print("📝 Trajectory saving enabled")
+        print(t("runtime.trajectory_enabled"))
     if agent.ephemeral_system_prompt:
         prompt_preview = agent.ephemeral_system_prompt[:60] + "..." if len(agent.ephemeral_system_prompt) > 60 else agent.ephemeral_system_prompt
-        print(f"🔒 Ephemeral system prompt: '{prompt_preview}' (not saved to trajectories)")
+        print(t("runtime.ephemeral_prompt", preview=prompt_preview))
     if agent._use_prompt_caching:
         if agent._use_native_cache_layout and agent.provider == "anthropic":
             source = "native Anthropic"
@@ -1160,7 +1163,7 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
             source = "Anthropic-compatible endpoint"
         else:
             source = "Claude via OpenRouter"
-        print(f"💾 Prompt caching: ENABLED ({source}, {agent._cache_ttl} TTL)")
+        print(t("runtime.prompt_caching", source=source, ttl=agent._cache_ttl))
 
 
 def _publish_session_id(session_id: str) -> None:
@@ -2214,9 +2217,10 @@ def _emit_compression_summary(agent, cs):
             _eff_cap = getattr(_cc, "_effective_threshold_cap", lambda _ctx: None)(_cc.context_length)
             _cap_binds = _eff_cap is not None and _cc.threshold_tokens == _eff_cap
             _cap_note = f" (capped at {_cap:,} tokens)" if _cap_binds else ""
-            print(f"📊 Context limit: {_cc.context_length:,} tokens (compress at {int(_pct*100)}% = {_cc.threshold_tokens:,}{_cap_note})")
+            print(t("runtime.context_limit", tokens=f"{_cc.context_length:,}", pct=int(_pct * 100),
+                    threshold=f"{_cc.threshold_tokens:,}", cap=_cap_note))
         else:
-            print(f"📊 Context limit: {_cc.context_length:,} tokens (auto-compression disabled)")
+            print(t("runtime.context_limit_no_compress", tokens=f"{_cc.context_length:,}"))
         # Gateway users get the same text via _compression_warning on turn 1.
         if _autoraise_notice:
             agent._safe_print(_autoraise_notice, diagnostic=True)

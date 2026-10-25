@@ -295,9 +295,12 @@ def retry_invalid_response(
     error_msg, provider_name, _failure_hint = describe_invalid_response(
         agent, response, api_duration
     )
-    agent._buffer_vprint(f"⚠️  Invalid API response (attempt {retry_count}/{max_retries}): {', '.join(error_details)}")
-    agent._buffer_vprint(f"   🏢 Provider: {provider_name}")
-    agent._buffer_vprint(f"   📝 Provider message: {agent._clean_error_message(error_msg)}")
+    from agent.i18n import t
+
+    agent._buffer_vprint(t("runtime.invalid_api_response", retry=retry_count, max=max_retries,
+                           errors=', '.join(error_details)))
+    agent._buffer_vprint(t("runtime.provider_label", provider=provider_name))
+    agent._buffer_vprint(t("runtime.provider_message", message=agent._clean_error_message(error_msg)))
     agent._buffer_vprint(f"   ⏱️  {_failure_hint}")
 
     if retry_count >= max_retries:
@@ -335,7 +338,7 @@ def retry_invalid_response(
         }, invalid_response_failure_reason(response), True))
 
     wait_time = jittered_backoff(retry_count, base_delay=5.0, max_delay=120.0)
-    agent._buffer_vprint(f"⏳ Retrying in {wait_time:.1f}s ({_failure_hint})...")
+    agent._buffer_vprint(t("runtime.retrying_in", wait=f"{wait_time:.1f}", hint=_failure_hint))
     logger.warning("Invalid API response (retry %d/%d): %s | Provider: %s", retry_count, max_retries, ', '.join(error_details), provider_name)
 
     # A redirect cancels only the live request; the helper preserves the pending
