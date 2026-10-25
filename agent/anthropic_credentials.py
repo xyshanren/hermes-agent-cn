@@ -791,7 +791,7 @@ def run_hermes_oauth_login_pure() -> Optional[dict[str, Any]]:
             print(t("runtime.browser_opened"))
     print(t("runtime.paste_code_prompt"))
     try:
-        auth_code = input("Authorization code: ").strip()
+        auth_code = input(t("cli.setup.prompt_auth_code")).strip()
     except (KeyboardInterrupt, EOFError):
         return None
     if not auth_code:

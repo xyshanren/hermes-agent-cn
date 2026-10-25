@@ -156,11 +156,14 @@ def test_unseen_no_thanks_is_asked_once_more_and_then_settled(monkeypatch):
 def test_every_cli_promise_that_pre_opt_in_data_stays_local_names_the_install_note():
     """Invariant: the fresh-install note is the one record kept from before the consent answer and
     counted after it, so each CLI surface stating the pre-opt-in promise names that exception, and
-    the explainer still fits an 80-column terminal (print_info indents by two)."""
+    the explainer still fits an 80-column terminal (print_info indents by two). CN fork: the
+    explainer lives in the cli.setup.send_consent_explainer catalog key; under the suite's en pin
+    this checks the English catalog text, which is the reference wording."""
+    from agent.i18n import t
     from hermes_cli.observability.shared_metrics_consent import _OFFER_DESCRIPTION
-    from hermes_cli.setup import _SEND_CONSENT_EXPLAINER
 
-    explainer = " ".join(_SEND_CONSENT_EXPLAINER)
+    explainer_lines = t("cli.setup.send_consent_explainer").split("\n")
+    explainer = " ".join(explainer_lines)
     for text in (explainer, " ".join(_OFFER_DESCRIPTION.split())):
         assert "before you opt in" in text and "install note" in text.split("before you opt in")[0], text
-    assert max(len(line) for line in _SEND_CONSENT_EXPLAINER) + 2 <= 80
+    assert max(len(line) for line in explainer_lines) + 2 <= 80
