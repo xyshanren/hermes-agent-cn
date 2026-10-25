@@ -5059,7 +5059,9 @@ def _guard_corrupt_user_config() -> None:
     try:
         require_parseable_user_config()
     except InvalidUserConfigError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        from agent.i18n import t
+
+        print(t("cli.tui.error_prefix", error=str(exc)), file=sys.stderr)
         raise SystemExit(2) from exc
 
 

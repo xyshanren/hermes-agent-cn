@@ -1413,9 +1413,11 @@ def _print_tool_listing() -> None:
     from model_tools import get_all_tool_names, get_available_toolsets
     from toolsets import get_all_toolsets, get_toolset_info
 
-    print("📋 Available Tools & Toolsets:")
+    from agent.i18n import t
+
+    print(t("runtime.list_tools_header"))
     print("-" * 50)
-    print("\n🎯 Predefined Toolsets (New System):")
+    print(t("runtime.predefined_toolsets"))
     print("-" * 40)
     basic_toolsets, composite_toolsets, scenario_toolsets = [], [], []
     for name in get_all_toolsets():
@@ -1423,28 +1425,28 @@ def _print_tool_listing() -> None:
         if info:
             bucket = basic_toolsets if name in _BASIC_TOOLSETS else composite_toolsets if name in _COMPOSITE_TOOLSETS else scenario_toolsets
             bucket.append((name, info))
-    print("\n📌 Basic Toolsets:")
+    print(t("runtime.basic_toolsets"))
     for name, info in basic_toolsets:
         print(f"  • {name:15} - {info['description']}")
-        print(f"    Tools: {', '.join(info['resolved_tools']) if info['resolved_tools'] else 'none'}")
-    print("\n📂 Composite Toolsets (built from other toolsets):")
+        print(t("runtime.tools_line", tools=', '.join(info['resolved_tools']) if info['resolved_tools'] else 'none'))
+    print(t("runtime.composite_toolsets"))
     for name, info in composite_toolsets:
         print(f"  • {name:15} - {info['description']}")
-        print(f"    Includes: {', '.join(info['includes']) if info['includes'] else 'none'}")
-        print(f"    Total tools: {info['tool_count']}")
-    print("\n🎭 Scenario-Specific Toolsets:")
+        print(t("runtime.includes_line", tools=', '.join(info['includes']) if info['includes'] else 'none'))
+        print(t("runtime.total_tools_line", count=info['tool_count']))
+    print(t("runtime.scenario_toolsets"))
     for name, info in scenario_toolsets:
         print(f"  • {name:20} - {info['description']}")
-        print(f"    Total tools: {info['tool_count']}")
-    print("\n📦 Legacy Toolsets (for backward compatibility):")
+        print(t("runtime.total_tools_line", count=info['tool_count']))
+    print(t("runtime.legacy_toolsets"))
     for name, info in get_available_toolsets().items():
         print(f"  {'✅' if info['available'] else '❌'} {name}: {info['description']}")
         if not info["available"]:
-            print(f"    Requirements: {', '.join(info['requirements'])}")
+            print(t("runtime.requirements_line", reqs=', '.join(info['requirements'])))
     all_tools = get_all_tool_names()
-    print(f"\n🔧 Individual Tools ({len(all_tools)} available):")
+    print(t("runtime.individual_tools", count=len(all_tools)))
     for tool_name in sorted(all_tools):
-        print(f"  📌 {tool_name} (from {get_toolset_for_tool(tool_name)})")
+        print(t("runtime.tool_entry", tool=tool_name, toolset=get_toolset_for_tool(tool_name)))
     print(_LIST_TOOLS_USAGE)
 
 
@@ -1503,7 +1505,9 @@ def main(
     Toolset Examples:
         - "research": Web search, extract, crawl + vision tools
     """
-    print("🤖 AI Agent with Tool Calling")
+    from agent.i18n import t
+
+    print(t("runtime.banner_title"))
     print("=" * 50)
     if list_tools:
         return _print_tool_listing()
@@ -1519,7 +1523,9 @@ def main(
     enabled_toolsets_list = _parse_toolset_arg(enabled_toolsets, "🎯 Enabled toolsets")
     disabled_toolsets_list = _parse_toolset_arg(disabled_toolsets, "🚫 Disabled toolsets")
     if save_trajectories:
-        print("💾 Trajectory saving: ENABLED")
+        from agent.i18n import t
+
+        print(t("runtime.trajectory_banner"))
         print("   - Successful conversations → trajectory_samples.jsonl")
         print("   - Failed conversations → failed_trajectories.jsonl")
 
@@ -1530,7 +1536,9 @@ def main(
             save_trajectories=save_trajectories, verbose_logging=verbose, log_prefix_chars=log_prefix_chars,
         )
     except RuntimeError as e:
-        print(f"❌ Failed to initialize agent: {e}")
+        from agent.i18n import t
+
+        print(t("runtime.agent_init_failed", error=e))
         return
 
     user_query = query if query is not None else ("Tell me about the latest developments in Python 3.13 and what new features "
@@ -1540,10 +1548,12 @@ def main(
 
     result = agent.run_conversation(user_query)
 
-    print("\n" + "=" * 50 + "\n📋 CONVERSATION SUMMARY\n" + "=" * 50)
-    print(f"✅ Completed: {result['completed']}\n📞 API Calls: {result['api_calls']}\n💬 Messages: {len(result['messages'])}")
+    print("\n" + "=" * 50 + t("runtime.conversation_summary") + "\n" + "=" * 50)
+    from agent.i18n import t
+
+    print(t("runtime.summary_line", completed=result['completed'], calls=result['api_calls'], count=len(result['messages'])))
     if result['final_response']:
-        print("\n🎯 FINAL RESPONSE:\n" + "-" * 30 + "\n" + result['final_response'])
+        print(t("runtime.final_response_header") + "\n" + "-" * 30 + "\n" + result['final_response'])
     if save_sample:
         _save_sample_trajectory(agent, result, user_query, model)
     print("\n👋 Agent execution completed!")
