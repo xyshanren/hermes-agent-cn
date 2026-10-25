@@ -1620,15 +1620,19 @@ def _print_gateway_process_mismatch(snapshot: GatewayRuntimeSnapshot) -> None:
     pids_line = f"  PID(s): {_format_gateway_pids(snapshot.gateway_pids, limit=None)}"
     # Managed detached fallback (launchd exit-5 path) vs. a genuinely manual run.
     if _launchd_unsupported_marker_exists():
-        print("⚠ Gateway is running as a detached fallback process — launchd cannot supervise it")
+        from agent.i18n import t
+
+        print(t("gateway.admin.detached_fallback"))
         print(pids_line)
-        print("  Auto-start at login and auto-restart on crash are NOT available.")
-        print("  Stop it with: hermes gateway stop")
+        print(t("gateway.admin.detached_no_autostart"))
+        print(t("gateway.admin.detached_stop"))
     else:
-        print("⚠ Gateway process is running for this profile, but the service is not active")
+        from agent.i18n import t
+
+        print(t("gateway.admin.manual_run_warning"))
         print(pids_line)
-        print("  This is usually a manual foreground/tmux/nohup run, so `hermes gateway`")
-        print("  can refuse to start another copy until this process stops.")
+        print(t("gateway.admin.manual_run_detail"))
+        print(t("gateway.admin.manual_run_detail2"))
 
 
 def _print_multiplex_standalone_reason() -> None:
@@ -1649,7 +1653,9 @@ def _print_served_ingress_urls(profile: str | None = None) -> None:
     if not urls:
         return
     print()
-    print("Inbound callback URLs on the shared listener:")
+    from agent.i18n import t
+
+    print(t("gateway.admin.ingress_urls_header"))
     for name, per_platform in sorted(urls.items()):
         for line in format_ingress_url_lines(per_platform, indent=f"  {name}/" if not profile else "  "):
             print(line)
@@ -1666,9 +1672,11 @@ def _print_unserved_shared_ingress(profile: str | None) -> None:
     if not unserved:
         return
     print()
+    from agent.i18n import t
+
     for platform, reason in sorted(unserved.items()):
         print(f"  ⚠ {platform}: {reason}")
-    print("  Enable it on the default profile (shared ingress serves every profile), or disable it here.")
+    print(t("gateway.admin.unserved_enable_hint"))
 
 
 def _print_other_profiles_gateway_status() -> None:
@@ -1680,9 +1688,11 @@ def _print_other_profiles_gateway_status() -> None:
         if not other_processes:
             return
         print()
-        print("Other profiles:")
+        from agent.i18n import t
+
+        print(t("gateway.admin.other_profiles_header"))
         for proc in other_processes:
-            print(f"  ✓ {proc.profile:<16s} — PID {proc.pid}")
+            print(t("gateway.admin.other_profile_row", profile=f"{proc.profile:<16s}", pid=proc.pid))
     except Exception:
         pass
 
@@ -1704,12 +1714,16 @@ def _gateway_list() -> None:
     try:
         from hermes_cli.profiles import list_profiles, get_active_profile_name
     except Exception:
-        print("Unable to list profiles.")
+        from agent.i18n import t
+
+        print(t("gateway.admin.unable_list_profiles"))
         return
 
     profiles = list_profiles()
     if not profiles:
-        print("No profiles found.")
+        from agent.i18n import t
+
+        print(t("gateway.admin.no_profiles_found"))
         return
 
     current = get_active_profile_name()
@@ -2750,19 +2764,9 @@ def refuses_container_user_scope_install(system: bool) -> bool:
     Callers decide between ``sys.exit(1)`` (CLI) and skipping the install (wizard)."""
     if system or not is_container():
         return False
-    print_error("Refusing to install a user-scope systemd gateway service inside a container.")
-    _print_info_lines(
-        "The unit file and its enable symlink would be written to the home directory, which is",
-        "commonly the host's own home bind-mounted in — the host's user manager then enables and",
-        "starts the same unit, so a second gateway polls the same bot token outside the container",
-        "(Telegram: 'Conflict: terminated by other getUpdates request').",
-        "",
-        "  hermes gateway run                                # run as the container's main process",
-        "  docker run --restart unless-stopped ...           # container restart policy",
-        "",
-        "If systemd manages this container (systemd as PID 1), install an isolated system service instead:",
-        "  sudo hermes gateway install --system --run-as-user <user>",
-    )
+    from agent.i18n import t
+
+    print_error(t("gateway.admin.container_refuse"))
     return True
 
 
@@ -2779,14 +2783,20 @@ def _system_service_identity(run_as_user: str | None = None) -> tuple[str, str, 
         run_as_user or os.getenv("SUDO_USER") or os.getenv("USER") or os.getenv("LOGNAME") or getpass.getuser()
     ).strip()
     if not username:
-        raise ValueError("Could not determine which user the gateway service should run as")
+        from agent.i18n import t
+
+        raise ValueError(t("gateway.admin.cannot_determine_user"))
     if username == "root" and not run_as_user:
+        from agent.i18n import t
+
         raise ValueError(
-            "Refusing to install the gateway system service as root; pass --run-as-user root to override (e.g. in LXC containers)"
+            t("gateway.admin.refuse_root_system")
         )
     if username == "root":
-        print_warning("Installing gateway service to run as root.")
-        print_info("  This is fine for LXC/container environments but not recommended on bare-metal hosts.")
+        from agent.i18n import t
+
+        print_warning(t("gateway.admin.root_install_warning"))
+        print_info(t("gateway.admin.root_install_lxc_note"))
 
     try:
         user_info = pwd.getpwnam(username)
@@ -2814,17 +2824,19 @@ def _default_system_service_user() -> str | None:
 
 def prompt_linux_gateway_install_scope() -> str | None:
     # Only root can create a boot-time system service; never hand a non-root user a "re-run under sudo" recipe.
+    from agent.i18n import t
+
     is_root = os.geteuid() == 0  # windows-footgun: ok — Linux systemd install wizard, never invoked on Windows
-    options = ["User service (no sudo; best for laptops/dev boxes; may need linger after logout)"]
+    options = [t("gateway.admin.opt_user_service")]
     values: list[str | None] = ["user"]
     if is_root:
-        options.append("System service (starts on boot; runs as your chosen user)")
+        options.append(t("gateway.admin.opt_system_service"))
         values.append("system")
-    options.append("Skip service install for now")
+    options.append(t("gateway.admin.opt_skip_service"))
     values.append(None)
-    choice = prompt_choice("  Choose how the gateway should run in the background:", options, default=0)
+    choice = prompt_choice(t("gateway.admin.prompt_install_scope"), options, default=0)
     if not is_root and choice == 0:
-        print_info("  Tip: for a boot-time system service, re-run setup as root (e.g. from a root shell or `sudo -i`).")
+        print_info(t("gateway.admin.boot_time_tip"))
     return values[choice]
 
 
@@ -2844,9 +2856,9 @@ def install_linux_gateway_from_setup(force: bool = False, enable_on_startup: boo
             return scope, False
 
         while not run_as_user:
-            run_as_user = (prompt("  Run the system gateway service as which user?", default="") or "").strip()
+            run_as_user = (prompt(t("gateway.admin.prompt_run_as_user"), default="") or "").strip()
             if not run_as_user:
-                print_error("  Enter a username.")
+                print_error(t("gateway.admin.enter_username"))
 
         systemd_install(force=force, system=True, run_as_user=run_as_user, enable_on_startup=enable_on_startup)
         return scope, True
@@ -3409,7 +3421,9 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
     current = systemd_unit_is_current(system=system)
     if _retire_hermes_replace_dropin(system=system):
         _run_systemctl(["daemon-reload"], system=system, check=True, timeout=30)
-        print(f"↻ Removed the stale Hermes --replace drop-in from the gateway {_service_scope_label(system)} service")
+        from agent.i18n import t
+
+        print(t("gateway.admin.dropin_removed", scope=_service_scope_label(system)))
         if current:
             return True
     elif current:
@@ -3430,7 +3444,9 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
     _prepare_service_launcher(system=system, run_as_user=expected_user)
     unit_path.write_text(new_unit, encoding="utf-8")
     _run_systemctl(["daemon-reload"], system=system, check=True, timeout=30)
-    print(f"↻ Updated gateway {_service_scope_label(system)} service definition to match the current Hermes install")
+    from agent.i18n import t
+
+    print(t("gateway.admin.unit_updated", scope=_service_scope_label(system)))
     return True
 
 
@@ -3787,7 +3803,9 @@ def systemd_stop(system: bool = False):
             t("gateway.admin.stop_still_stopping", scope=_service_scope_label(system))
         )
         return
-    print(f"✓ {_service_scope_label(system).capitalize()} service stopped")
+    from agent.i18n import t
+
+    print(t("gateway.admin.svc_stopped", scope=_service_scope_label(system).capitalize()))
 
 
 def systemd_restart(system: bool = False):
@@ -4250,11 +4268,12 @@ def _served_profile_needs_no_service() -> bool:
         from gateway.host_attach import standalone_rescan_message
         print_info(standalone_rescan_message(_current_profile_name()))
         return True
-    print_success(
-        f"Profile '{_current_profile_name()}' is already served by the default multiplexer."
-    )
-    print_info("  (served now by the running multiplexed gateway — add its bot token and it connects)")
-    print_info("  No standalone gateway service was installed or started.")
+    from agent.i18n import t
+
+    print_success(t("gateway.admin.profile_already_served", profile=_current_profile_name()))
+    print_info(t("gateway.admin.profile_served_now_note"))
+    print_info(t("gateway.admin.no_standalone_note"))
+    return True
     return True
 
 
@@ -4299,12 +4318,14 @@ def _named_profile_refused_under_multiplexer(force: bool = False) -> bool:
     if not served and not new_standalone:
         return False
 
+    from agent.i18n import t
+
     if served:
-        print_error(f"The host gateway already serves profile '{suffix}'.")
+        print_error(t("gateway.admin.multiplex_already_serves", suffix=suffix))
         if owner is not None:
             print(f"  {owner.describe()}")
     else:
-        print_error(f"Profile '{suffix}' does not get a gateway of its own.")
+        print_error(t("gateway.admin.multiplex_no_own_gateway", suffix=suffix))
     print(
         "  Exactly one gateway per host is the inbound process for every\n"
         "  profile. Starting a separate gateway for this profile would\n"
@@ -4312,26 +4333,26 @@ def _named_profile_refused_under_multiplexer(force: bool = False) -> bool:
         "  conflicts).\n"
     )
     if served:
-        print("  Manage the host gateway instead:")
+        print(t("gateway.admin.multiplex_manage_host"))
         print()
         print(f"    hermes -p {owner.profile_label if owner is not None else 'default'} gateway restart")
     else:
-        print("  Install or start the host gateway from the default profile; it serves this one too:")
+        print(t("gateway.admin.multiplex_install_from_default"))
         print()
         print("    hermes gateway install")
         print()
-        print("  Or fold an existing per-profile fleet onto one host gateway:")
+        print(t("gateway.admin.multiplex_fold_fleet"))
         print()
         print("    hermes gateway migrate --multiplex")
     print()
-    print("  A separate per-profile gateway (for a fleet split across UNIX users or a")
-    print(f"  HERMES_HOME outside profiles/) needs --force:  hermes -p {suffix} gateway install --force")
+    print(t("gateway.admin.multiplex_force_note"))
+    print(t("gateway.admin.multiplex_force_cmd", suffix=suffix))
     print()
     from hermes_constants import display_hermes_home
     from hermes_cli.gateway_multiplex_mode import STANDALONE_DEPRECATION_NOTICE
-    print("  Temporary compatibility path while multiplexing gaps are closed: set")
-    print(f"  gateway.standalone: true in {display_hermes_home(get_hermes_home())}/config.yaml,")
-    print("  then wait for the host gateway to rescan (<=30s) or send its rescan-profiles control verb.")
+    print(t("gateway.admin.multiplex_compat_path"))
+    print(t("gateway.admin.multiplex_standalone_hint", home=display_hermes_home(get_hermes_home())))
+    print(t("gateway.admin.multiplex_rescan_hint"))
     print(f"  ({STANDALONE_DEPRECATION_NOTICE})")
     return True
 
@@ -4431,12 +4452,11 @@ def _guard_supervised_gateway_conflict(force: bool = False) -> None:
     if not (snapshot.service_installed and snapshot.service_running):
         return
 
-    print_error(f"A gateway is already running under {snapshot.manager} for this profile.")
+    from agent.i18n import t
+
+    print_error(t("gateway.admin.supervised_conflict", manager=snapshot.manager))
     print(
-        "  Starting another one from a shell leaves an orphan dispatcher that\n"
-        "  escapes the service, survives restarts, and writes to the same kanban\n"
-        "  DB concurrently — which can corrupt it. Restart the supervised gateway\n"
-        "  instead:"
+        t("gateway.admin.supervised_conflict_detail")
     )
     print()
     print("    hermes gateway restart")
@@ -4476,10 +4496,12 @@ def _guard_existing_gateway_process_conflict(replace: bool = False) -> None:
             pass
         return
 
-    print_error(f"A gateway is already running (PID {pid}), so your bots are most likely online already.")
-    print("  Check with `hermes gateway status`.")
-    print("  To restart it: `hermes gateway restart`. To stop it: `hermes gateway stop`.")
-    print("  To replace it from here: `hermes gateway run --replace`.")
+    from agent.i18n import t
+
+    print_error(t("gateway.admin.already_running_pid", pid=pid))
+    print(t("gateway.admin.already_running_check"))
+    print(t("gateway.admin.already_running_restart"))
+    print(t("gateway.admin.already_running_replace"))
     sys.exit(1)
 
 
@@ -4490,7 +4512,9 @@ def _guard_official_docker_root_gateway() -> None:
     if not _is_official_docker_checkout():
         return
 
-    print_error("Refusing to run the Hermes gateway as root inside the official Docker image.")
+    from agent.i18n import t
+
+    print_error(t("gateway.admin.docker_root_refuse"))
     print(
         "  The image entrypoint normally drops privileges to the 'hermes' user. "
         "If you override entrypoint in Docker Compose, include "
@@ -4500,7 +4524,7 @@ def _guard_official_docker_root_gateway() -> None:
         "  Running the gateway as root can leave root-owned files in "
         "$HERMES_HOME and break later non-root dashboard/gateway runs."
     )
-    print("  Set HERMES_ALLOW_ROOT_GATEWAY=1 only if you intentionally accept this risk.")
+    print(t("gateway.admin.docker_root_env_hint"))
     sys.exit(1)
 
 
@@ -4663,11 +4687,13 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
         from hermes_logging import redact_detached_stdio
         redact_detached_stdio()
     from gateway.run import start_gateway
+    from agent.i18n import t
+
     print("┌─────────────────────────────────────────────────────────┐")
-    print("│           ☤ Hermes Gateway Starting...                 │")
+    print(t("gateway.admin.starting_banner_title"))
     print("├─────────────────────────────────────────────────────────┤")
-    print("│  Messaging platforms + cron scheduler                    │")
-    print("│  Press Ctrl+C to stop                                   │")
+    print(t("gateway.admin.starting_banner_line1"))
+    print(t("gateway.admin.starting_banner_line2"))
     print("└─────────────────────────────────────────────────────────┘")
     print()
 
@@ -4916,7 +4942,9 @@ def _dispatch_via_service_manager_if_s6(action: str, profile: str | None = None)
             # repairs that; stop/restart on a missing slot stay an error.
             if action != "start" or not register_unregistered_profile_gateway(mgr, profile):
                 raise
-            print(f"✓ registered the s6 gateway slot for profile {profile!r}")
+            from agent.i18n import t
+
+            print(t("gateway.admin.s6_slot_registered", profile=profile))
             mgr.start(service)
     except (RuntimeError, ValueError, OSError) as exc:  # S6Error is a RuntimeError
         print(f"✗ {exc}")
@@ -4934,7 +4962,9 @@ def _dispatch_all_via_service_manager_if_s6(action: str) -> bool:
     mgr = get_service_manager()
     profiles = mgr.list_profile_gateways()
     if not profiles:
-        print("✗ No profile gateways registered under s6")
+        from agent.i18n import t
+
+        print(t("gateway.admin.s6_no_profiles"))
         return True
     fn = mgr.stop if action == "stop" else mgr.restart
     errors: list[tuple[str, Exception]] = []
@@ -4946,9 +4976,13 @@ def _dispatch_all_via_service_manager_if_s6(action: str) -> bool:
     succeeded = len(profiles) - len(errors)
     verb = "stopped" if action == "stop" else "restarted"
     if succeeded:
-        print(f"✓ {verb.capitalize()} {succeeded} profile gateway(s) under s6")
+        from agent.i18n import t
+
+        print(t("gateway.admin.s6_done", verb=verb.capitalize(), count=succeeded))
     for profile, exc in errors:
-        print(f"✗ Could not {action} gateway-{profile}: {exc}")
+        from agent.i18n import t
+
+        print(t("gateway.admin.s6_action_failed", action=action, profile=profile, exc=exc))
     return True
 
 
@@ -4958,7 +4992,9 @@ def gateway_command(args):
         return _gateway_command_inner(args)
     except UserSystemdUnavailableError as e:
         # Actionable message, not a traceback, when the user D-Bus session is unreachable.
-        print_error("User systemd not reachable:")
+        from agent.i18n import t
+
+        print_error(t("gateway.admin.user_systemd_unreachable"))
         _print_indented(str(e))
         sys.exit(1)
     except SystemScopeRequiresRootError as e:
@@ -5232,7 +5268,9 @@ def _handle_no_backend(subcommand: str, *, wsl: bool, s6: bool) -> None:
 
 def _install_systemd_from_cli(args, *, force: bool, system: bool, run_as_user) -> None:
     if is_wsl():
-        print_warning("WSL detected — systemd services may not survive WSL restarts.")
+        from agent.i18n import t
+
+        print_warning(t("gateway.admin.wsl_warning"))
         _print_info_lines(
             "  Consider running in foreground instead: hermes gateway run",
             "  Or use tmux/screen for persistence: tmux new -s hermes 'hermes gateway run'",
@@ -5263,7 +5301,9 @@ def _cmd_install(args):
         managed_error("install gateway service")
         return
     if getattr(args, "if_missing", False) and _is_service_installed():
-        print("✓ Gateway service already installed")
+        from agent.i18n import t
+
+        print(t("gateway.admin.svc_already_installed"))
         return
     force = getattr(args, "force", False)
     # `--force` doubles as the reinstall flag here; a served profile's unit would only ever exit 78.
@@ -5340,9 +5380,10 @@ def _print_unfolded_gateway_note(owner) -> None:
         return
     if not others:
         return
-    print(f"  {len(others)} per-profile gateway process(es) still run beside it "
-          f"(PIDs: {', '.join(str(p) for p in others)}).")
-    print("  They were left running; fold them in with: hermes gateway migrate --multiplex")
+    from agent.i18n import t
+
+    print(t("gateway.admin.unfolded_pids", pids=', '.join(str(p) for p in others), count=len(others)))
+    print(t("gateway.admin.unfolded_fold_hint"))
 
 
 def _cmd_start(args):
@@ -5357,8 +5398,10 @@ def _cmd_start(args):
         if owner is not None:
             # Already up: `--all` has nothing to start, and the old sweep here SIGTERMed this very
             # process before starting a single-profile replacement.
-            print(f"✓ The host gateway is already running — {owner.describe()}")
-            print("  One gateway per host serves every profile; nothing to start.")
+            from agent.i18n import t
+
+            print(t("gateway.admin.host_already_running", describe=owner.describe()))
+            print(t("gateway.admin.host_one_per_host"))
             _print_unfolded_gateway_note(owner)
             return
         # `--all` names the ONE host gateway, regardless of which profile invoked the CLI: stale-owner
@@ -5375,7 +5418,9 @@ def _cmd_start(args):
         if start_all:
             killed = kill_gateway_processes(all_profiles=True)
             if killed:
-                print(f"✓ Killed {killed} stale gateway process(es) across all profiles")
+                from agent.i18n import t
+
+                print(t("gateway.admin.killed_stale", count=killed))
                 _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
                 _wait_for_api_server_port_free()
         if _service_mgmt_blocked():
@@ -5398,13 +5443,14 @@ def _cmd_stop(args):
             _served_by_another_host_gateway() or named_profile_served_by_running_multiplexer()):
         # The launch/default-profile lifecycle still names the whole host.
         owner = _served_by_another_host_gateway()
+        from agent.i18n import t
+
         print_error(
-            f"The host gateway serves profile '{_current_profile_name()}' — there is no separate "
-            f"gateway for this profile to stop."
+            t("gateway.admin.stop_host_serves_profile", profile=_current_profile_name())
         )
         if owner is not None:
             print(f"  {owner.describe()}")
-        print("  Stop or restart the host gateway instead:")
+        print(t("gateway.admin.stop_host_instead"))
         print()
         owner_flag = f"-p {owner.profile_label} " if owner is not None else ""
         print(f"    hermes {owner_flag}gateway stop      # takes every served profile offline")
@@ -5422,17 +5468,25 @@ def _cmd_stop(args):
         with host_scope_for_all_verb(_host_multiplexer_for_all_verb()):
             service_available = _stop_installed_service(system)
         total = kill_gateway_processes(all_profiles=True) + (1 if service_available else 0)
+        from agent.i18n import t
+
         if total:
-            print(f"✓ Stopped {total} gateway process(es) across all profiles")
+            print(t("gateway.admin.stopped_all", count=total))
         else:
-            print("✗ No gateway processes found")
+            print(t("gateway.admin.no_processes_found"))
         return
     if _stop_installed_service(system):
-        print(f"✓ Stopped {get_service_name()} service")
+        from agent.i18n import t
+
+        print(t("gateway.admin.stopped_svc", svc=get_service_name()))
     elif stop_profile_gateway():
-        print("✓ Stopped gateway for this profile")
+        from agent.i18n import t
+
+        print(t("gateway.admin.stopped_profile"))
     else:
-        print("✗ No gateway running for this profile")
+        from agent.i18n import t
+
+        print(t("gateway.admin.no_gateway_profile"))
 
 
 def _stop_host_multiplexer(owner) -> int:
@@ -5454,9 +5508,11 @@ def _restart_all(system: bool) -> None:
         # `--all` means "restart the ONE host multiplexer" — and this profile does not own it.
         # Sweeping every profile here took the host process down and replaced it with a gateway
         # serving only this profile.
-        print_error(f"The host gateway runs under profile '{owner.profile_label}'.")
+        from agent.i18n import t
+
+        print_error(t("gateway.admin.host_runs_under", profile=owner.profile_label))
         print(f"  {owner.describe()}")
-        print("  `--all` restarts the one host multiplexer, and this profile is not its owner.")
+        print(t("gateway.admin.host_all_note"))
         print()
         print(f"    hermes -p {owner.profile_label} gateway restart --all")
         sys.exit(GATEWAY_FATAL_CONFIG_EXIT_CODE)
@@ -5474,13 +5530,17 @@ def _restart_all_as_host(owner, system: bool) -> None:
         stopped = _stop_host_multiplexer(owner)
         total = stopped + (1 if service_stopped else 0)
         if total:
-            print(f"✓ Stopped the host gateway (PID {owner.pid}; serves "
-                  f"{', '.join(owner.profiles) or 'unknown'})")
+            from agent.i18n import t
+
+            print(t("gateway.admin.stopped_host", pid=owner.pid,
+                    profiles=', '.join(owner.profiles) or 'unknown'))
         _print_unfolded_gateway_note(owner)
     else:
         total = kill_gateway_processes(all_profiles=True) + (1 if service_stopped else 0)
         if total:
-            print(f"✓ Stopped {total} gateway process(es) across all profiles")
+            from agent.i18n import t
+
+            print(t("gateway.admin.stopped_all", count=total))
     _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
     _wait_for_api_server_port_free()
     # Retract the stopped owner's rendezvous record. Leaving it made this very function a silent
@@ -5489,7 +5549,9 @@ def _restart_all_as_host(owner, system: bool) -> None:
     # The retraction only invalidates when it removed a record; the pre-stop memo must go either way.
     _forget_host_gateway_probe()
 
-    print("Starting gateway...")
+    from agent.i18n import t
+
+    print(t("gateway.admin.starting_gateway"))
     # Even without a registered task, gateway_windows.start() uses the detached launcher.
     kind = _installed_service_kind_for(is_windows)
     if kind is not None:
@@ -5502,9 +5564,13 @@ def _restart_all_as_host(owner, system: bool) -> None:
         # default profile with the named profile's credentials. The detached child starts from the
         # scrubbed host env (the root's own secrets only); `--replace` is part of its argv.
         if not _spawn_detached_gateway():
-            print_error("Failed to start the host gateway as a background process.")
+            from agent.i18n import t
+
+            print_error(t("gateway.admin.host_bg_start_failed"))
             sys.exit(1)
-        print("✓ Started the host gateway as a background process")
+        from agent.i18n import t
+
+        print(t("gateway.admin.host_bg_started"))
         return
     # replace=True: if the old owner is still draining (a long drain, an ineffective SIGKILL, a
     # foreign-home owner the scan never saw), take the host over instead of attaching to it.
@@ -5621,7 +5687,9 @@ def _cmd_restart(args):
     _refuse_restart_of_service_managed_gateway(supervised_pid)
 
     if stop_profile_gateway():
-        print("✓ Stopped gateway for this profile")
+        from agent.i18n import t
+
+        print(t("gateway.admin.stopped_profile"))
     _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
     _wait_for_api_server_port_free()
     _forget_host_gateway_probe()
@@ -5687,8 +5755,10 @@ def _cmd_status(args):
     _windows_service_installed = is_windows() and _gw_windows().is_installed()
     if not active_standalone and not snapshot.running and named_profile_served_by_running_multiplexer():
         # Satellite profile: the default multiplexer is the live inbound process for it.
-        print("✓ Gateway is running via the default-profile multiplexer")
-        print("  Manage it from the default profile: hermes gateway status")
+        from agent.i18n import t
+
+        print(t("gateway.admin.running_via_multiplexer"))
+        print(t("gateway.admin.running_via_multiplexer_hint"))
         _print_served_ingress_urls(get_active_profile_name())
         _print_unserved_shared_ingress(get_active_profile_name())
     elif (kind := _installed_service_kind_for(lambda: _windows_service_installed)) is not None:
@@ -5707,8 +5777,10 @@ def _cmd_status(args):
         if pids and report_incompatible_owner(pids):
             pass  # an older Hermes's gateway: alive, but every client of this version refuses it
         elif pids:
-            print(f"✓ Gateway is running (PID: {', '.join(map(str, pids))})")
-            print("  (Running manually, not as a system service)")
+            from agent.i18n import t
+
+            print(t("gateway.admin.running_pids", pids=', '.join(map(str, pids))))
+            print(t("gateway.admin.running_manual_note"))
             _print_runtime_health()
             _print_multiplex_standalone_reason()
             _print_served_ingress_urls()
@@ -5717,16 +5789,20 @@ def _cmd_status(args):
         elif snapshot.service_running:
             # s6 container: the service is up but the scan finds no PID (the `python -c` launcher
             # argv is deliberately unmatched, #123881, and there is no gateway.pid) — #125390.
-            print(f"✓ Gateway is running (supervised by {snapshot.manager})")
+            from agent.i18n import t
+
+            print(t("gateway.admin.running_supervised", manager=snapshot.manager))
             _print_runtime_health()
             _print_multiplex_standalone_reason()
             _print_served_ingress_urls()
         else:
-            print("✗ Gateway is not running")
+            from agent.i18n import t
+
+            print(t("gateway.admin.not_running"))
             _print_runtime_health()
             print()
-            print("To start:")
-            print("  hermes gateway run      # Run in foreground")
+            print(t("gateway.admin.to_start_header"))
+            print(t("gateway.admin.to_start_foreground"))
             _print_lines(*_STATUS_STOPPED_HINTS[_status_host_kind()])
 
     _print_duplicate_credential_warnings()
@@ -5743,7 +5819,9 @@ def _cmd_migrate_legacy(args):
     dry_run = getattr(args, "dry_run", False)
     yes = getattr(args, "yes", False)
     if not supports_systemd_services() and not is_macos():
-        print("Legacy unit migration only applies to systemd-based Linux hosts.")
+        from agent.i18n import t
+
+        print(t("gateway.admin.legacy_systemd_only"))
         return
     remove_legacy_hermes_units(interactive=not yes, dry_run=dry_run)
 
