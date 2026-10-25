@@ -2628,11 +2628,15 @@ def remove_legacy_hermes_units(interactive: bool = True, dry_run: bool = False) 
     only lists. Returns ``(removed_count, remaining_paths)`` (remaining: e.g. system-scope when not root)."""
     legacy = _find_legacy_hermes_units()
     if not legacy:
-        print("No legacy Hermes gateway units found.")
+        from agent.i18n import t
+
+        print(t("gateway.admin.legacy_none"))
         return 0, []
 
     print()
-    print("Legacy Hermes gateway unit(s) found:")
+    from agent.i18n import t
+
+    print(t("gateway.admin.legacy_found"))
     for name, path, is_system in legacy:
         print(f"  {path}  ({_service_scope_label(is_system)} scope)")
     print()
@@ -2692,10 +2696,12 @@ def print_systemd_scope_conflict_warning() -> None:
     if len(scopes) < 2:
         return
 
-    print_warning(f"Both user and system gateway services are installed ({' + '.join(scopes)}).")
-    print_info("  This is confusing and can make start/stop/status behavior ambiguous.")
-    print_info("  Default gateway commands target the user service unless you pass --system.")
-    print_info("  Keep one of these:")
+    from agent.i18n import t
+
+    print_warning(t("gateway.admin.conflict_both", scopes=' + '.join(scopes)))
+    print_info(t("gateway.admin.conflict_ambiguous"))
+    print_info(t("gateway.admin.conflict_default_user"))
+    print_info(t("gateway.admin.conflict_keep_one"))
     print_info("    hermes gateway uninstall")
     print_info("    sudo hermes gateway uninstall --system")
 
@@ -3690,8 +3696,10 @@ def systemd_uninstall(system: bool = False):
 
 def _print_service_not_installed(system: bool) -> None:
     sudo, scope_flag, _ = _systemd_cli_bits(system)
-    print("✗ Gateway service is not installed")
-    print(f"  Run: {sudo}hermes gateway install{scope_flag}")
+    from agent.i18n import t
+
+    print(t("gateway.admin.svc_not_installed"))
+    print(t("gateway.admin.admin_run_hint", cmd=f"{sudo}hermes gateway install{scope_flag}"))
 
 
 def _require_service_installed(action: str, system: bool = False) -> None:
@@ -3852,22 +3860,24 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
         print()
 
     if not systemd_unit_is_current(system=system):
-        print("⚠ Installed gateway service definition is outdated")
-        print(f"  Run: {sudo}hermes gateway restart{scope_flag}  # auto-refreshes the unit")
+        from agent.i18n import t
+
+        print(t("gateway.admin.status_outdated"))
+        print(t("gateway.admin.status_outdated_run", cmd=f"{sudo}hermes gateway restart{scope_flag}"))
         print()
 
     status_cmd = ["status", svc, "--no-pager"] + (["-l"] if full else [])
     _run_systemctl(status_cmd, system=system, capture_output=False, timeout=10)
     result = _run_systemctl(["is-active", svc], system=system, timeout=10, **_CAPTURE_TEXT)
     if result.stdout.strip() == "active":
-        print(f"✓ {scope_label} gateway service is running")
+        print(t("gateway.admin.status_running", scope=scope_label))
     else:
-        print(f"✗ {scope_label} gateway service is stopped")
-        print(f"  Run: {sudo}hermes gateway start{scope_flag}")
+        print(t("gateway.admin.status_stopped", scope=scope_label))
+        print(t("gateway.admin.admin_run_hint", cmd=f"{sudo}hermes gateway start{scope_flag}"))
 
     configured_user = _read_systemd_user_from_unit(unit_path) if system else None
     if configured_user:
-        print(f"Configured to run as: {configured_user}")
+        print(t("gateway.admin.status_run_as", user=configured_user))
 
     _print_runtime_health()
 
@@ -3875,34 +3885,37 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
     active_state = unit_props.get("ActiveState", "")
     result_code = unit_props.get("Result", "")
     if active_state == "activating" and unit_props.get("SubState", "") == "auto-restart":
-        print("  ⏳ Restart pending: systemd is waiting to relaunch the gateway")
+        print(t("gateway.admin.status_restart_pending"))
     elif _systemd_unit_is_start_limited(unit_props):
-        print("  ⏳ Restart pending: systemd is temporarily rate-limiting starts")
-        print(f"  Run after the start-limit window expires: {sudo}hermes gateway restart{scope_flag}")
-        print(f"  Or clear it manually: systemctl {user_flag}reset-failed {svc}")
+        print(t("gateway.admin.status_rate_limited"))
+        print(t("gateway.admin.status_rate_limited_run", cmd=f"{sudo}hermes gateway restart{scope_flag}"))
+        print(t("gateway.admin.status_clear_manually", cmd=f"{user_flag}reset-failed {svc}"))
     elif active_state == "failed" and unit_props.get("ExecMainStatus", "") == str(GATEWAY_SERVICE_RESTART_EXIT_CODE):
-        print("  ⚠ Planned restart is stuck in systemd failed state (exit 75)")
-        print(f"  Run: systemctl {user_flag}reset-failed {svc} && {sudo}hermes gateway start{scope_flag}")
+        print(t("gateway.admin.status_stuck_exit75"))
+        print(t("gateway.admin.admin_run_hint",
+                cmd=f"systemctl {user_flag}reset-failed {svc} && {sudo}hermes gateway start{scope_flag}"))
     elif active_state == "failed" and result_code:
-        print(f"  ⚠ Systemd unit result: {result_code}")
+        print(t("gateway.admin.status_unit_result", code=result_code))
 
     if system:
-        print("✓ System service starts at boot without requiring systemd linger")
+        print(t("gateway.admin.status_system_boot"))
     else:
         linger_enabled, linger_detail = get_systemd_linger_status()
         if linger_enabled is True:
-            print("✓ Systemd linger is enabled (service survives logout)")
+            print(t("gateway.admin.status_linger_enabled"))
         elif linger_enabled is False:
-            print("⚠ Systemd linger is disabled (gateway may stop when you log out)")
-            print("  Run: sudo loginctl enable-linger $USER")
+            print(t("gateway.admin.status_linger_disabled"))
+            print(t("gateway.admin.status_linger_run"))
         elif deep:
-            print(f"⚠ Could not verify systemd linger ({linger_detail})")
-            print("  If you want the gateway user service to survive logout, run:")
+            print(t("gateway.admin.status_linger_unknown", detail=linger_detail))
+            print(t("gateway.admin.status_linger_survive_hint"))
             print("  sudo loginctl enable-linger $USER")
 
     if deep:
+        from agent.i18n import t
+
         print()
-        print("Recent logs:")
+        print(t("gateway.admin.recent_logs"))
         log_cmd = ["journalctl"] + ([] if system else ["--user"]) + ["-u", svc, "-n", "20", "--no-pager"]
         if full:
             log_cmd.append("-l")
@@ -5022,8 +5035,10 @@ def _print_lines(*lines: str) -> None:
 def _print_runtime_health() -> None:
     runtime_lines = _runtime_health_lines()
     if runtime_lines:
+        from agent.i18n import t
+
         print()
-        print("Recent gateway health:")
+        print(t("gateway.admin.runtime_health"))
         for line in runtime_lines:
             print(f"  {line}")
 
