@@ -5160,71 +5160,32 @@ def _cmd_setup(args):
     gateway_setup()
 
 
-_WSL_FOREGROUND_HINT = (
-    "", "  hermes gateway run                              # direct foreground",
-    "  tmux new -s hermes 'hermes gateway run'         # persistent via tmux",
-    "  nohup hermes gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # background",
-)
-# ``(exit_code, *lines)`` when a subcommand has no service backend, keyed by (subcommand, reason).
+# ``(exit_code, catalog_key)`` when a subcommand has no service backend, keyed by (subcommand, reason).
 # Reasons in check order: "termux", "wsl" (no operational systemd), "s6" / "container", "unsupported".
-# ``None`` exit code means plain return.
+# ``None`` exit code means plain return; the lines resolve through gateway.admin.no_backend.<key>
+# so the localized text lives in the locale catalogs (CN fork).
 _NO_BACKEND_MESSAGES = {
-    ("install", "termux"): (1,
-        "Gateway service installation is not supported on Termux.", "Run manually: hermes gateway"),
-    ("install", "wsl"): (1,
-        "WSL detected but systemd is not running.",
-        "Either enable systemd (add systemd=true to /etc/wsl.conf and restart WSL)",
-        "or run the gateway in foreground mode:", *_WSL_FOREGROUND_HINT),
-    ("install", "s6"): (None,
-        "Per-profile gateways are auto-registered when you create a profile.", "",
-        "  hermes profile create <name>     # creates the s6 service slot",
-        "  hermes -p <name> gateway start   # bring it up via s6",
-        "  hermes status                    # see currently-supervised gateways"),
-    ("install", "container"): (0,
-        "Service installation is not needed inside a Docker container.",
-        "The container runtime is your service manager — use Docker restart policies instead:", "",
-        "  docker run --restart unless-stopped ...   # auto-restart on crash/reboot",
-        "  docker restart <container>                # manual restart", "",
-        "To run the gateway: hermes gateway run"),
-    ("install", "unsupported"): (1,
-        "Service installation not supported on this platform.", "Run manually: hermes gateway run"),
-    ("uninstall", "termux"): (1,
-        "Gateway service uninstall is not supported on Termux because there is no managed service to remove.",
-        "Stop manual runs with: hermes gateway stop"),
-    ("uninstall", "s6"): (None,
-        "Per-profile gateways are auto-unregistered when you delete the profile.", "",
-        "  hermes profile delete <name>     # tears down the s6 service slot",
-        "  hermes -p <name> gateway stop    # stop without deleting the profile"),
-    ("uninstall", "container"): (0,
-        "Service uninstall is not applicable inside a Docker container.",
-        "To stop the gateway, stop or remove the container:", "",
-        "  docker stop <container>", "  docker rm <container>"),
-    ("uninstall", "unsupported"): (1,
-        "Running the gateway as a background service is not available on this platform "
-        "(no systemd, launchd or Scheduled Tasks), so there is nothing to uninstall.",
-        "Stop a manually started gateway with: hermes gateway stop"),
-    ("start", "termux"): (1,
-        "Gateway service start is not supported on Termux because there is no system service manager.",
-        "Run manually: hermes gateway"),
-    ("start", "wsl"): (1,
-        "WSL detected but systemd is not available.",
-        "Run the gateway in foreground mode instead:", *_WSL_FOREGROUND_HINT, "",
-        "To enable systemd: add systemd=true to /etc/wsl.conf and run 'wsl --shutdown' from PowerShell."),
-    ("start", "container"): (0,
-        "Service start is not applicable inside a Docker container.",
-        "The gateway runs as the container's main process.", "",
-        "  docker start <container>     # start a stopped container",
-        "  docker restart <container>   # restart a running container", "",
-        "Or run the gateway directly: hermes gateway run"),
-    ("start", "unsupported"): (1,
-        "Running the gateway as a background service is not available on this platform "
-        "(no systemd, launchd or Scheduled Tasks).",
-        "Run it directly with: hermes gateway run"),
+    ("install", "termux"): (1, "no_backend.install_termux"),
+    ("install", "wsl"): (1, "no_backend.install_wsl"),
+    ("install", "s6"): (None, "no_backend.install_s6"),
+    ("install", "container"): (0, "no_backend.install_container"),
+    ("install", "unsupported"): (1, "no_backend.install_unsupported"),
+    ("uninstall", "termux"): (1, "no_backend.uninstall_termux"),
+    ("uninstall", "s6"): (None, "no_backend.uninstall_s6"),
+    ("uninstall", "container"): (0, "no_backend.uninstall_container"),
+    ("uninstall", "unsupported"): (1, "no_backend.uninstall_unsupported"),
+    ("start", "termux"): (1, "no_backend.start_termux"),
+    ("start", "wsl"): (1, "no_backend.start_wsl"),
+    ("start", "container"): (0, "no_backend.start_container"),
+    ("start", "unsupported"): (1, "no_backend.start_unsupported"),
 }
 
 
 def _no_backend_exit(subcommand: str, reason: str) -> None:
-    code, *lines = _NO_BACKEND_MESSAGES[(subcommand, reason)]
+    from agent.i18n import t
+
+    code, key = _NO_BACKEND_MESSAGES[(subcommand, reason)]
+    lines = t(f"gateway.admin.{key}").split("\n")
     _print_lines(*lines)
     if code is not None:
         sys.exit(code)
