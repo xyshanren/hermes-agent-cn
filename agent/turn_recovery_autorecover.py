@@ -31,14 +31,15 @@ _LADDER_CAP_S = 60.0
 _RETRY_AFTER_CAP_S = 120.0
 
 # How the user stops the wait on this surface; the ladder text must say so plainly.
-_STOP_HINTS = {
-    "cli": "press Esc to stop",
-    "tui": "press Esc to stop",
-    "desktop": "press Esc to stop",
-    "api_server": "cancel the request to stop",
-    "cron": "",
-}
-_DEFAULT_STOP_HINT = "send /stop to cancel"
+# platform suffix → runtime.stop_hint_* key (resolved at call time so a language switch applies).
+_STOP_HINT_PLATFORMS = {"cli": "esc", "tui": "esc", "desktop": "esc", "api_server": "api", "cron": ""}
+
+
+def _stop_hint(platform: str) -> str:
+    from agent.i18n import t
+
+    suffix = _STOP_HINT_PLATFORMS.get(platform)
+    return t(f"runtime.stop_hint_{suffix}") if suffix else ""
 
 
 def auto_recovery_cycles(agent: Any) -> int:
@@ -66,8 +67,10 @@ def ladder_eligible(agent: Any, classified: Any) -> bool:
 
 
 def ladder_notice(agent: Any, *, wait_s: float, cycle: int, total: int) -> str:
-    hint = _STOP_HINTS.get(str(getattr(agent, "platform", "") or "").lower(), _DEFAULT_STOP_HINT)
-    text = f"⏳ Provider temporarily unavailable — retrying automatically in {wait_s:.0f}s (cycle {cycle}/{total})"
+    from agent.i18n import t
+
+    hint = _stop_hint(str(getattr(agent, "platform", "") or "").lower()) or t("runtime.stop_hint_default")
+    text = t("runtime.ladder_retrying", wait=f"{wait_s:.0f}", cycle=cycle, total=total)
     return f"{text}; {hint}" if hint else text
 
 
@@ -86,9 +89,9 @@ def auto_recover_after_exhaustion(
     total = auto_recovery_cycles(agent)
     used = int(getattr(_retry, "auto_recovery_cycles_used", 0) or 0)
     if used >= total:
-        agent._emit_diagnostic_status(
-            f"⏳ Automatic recovery gave up after {total} cycles — the provider is still unavailable."
-        )
+        from agent.i18n import t
+
+        agent._emit_diagnostic_status(t("runtime.ladder_gave_up", total=total))
         return None
     cycle = used + 1
     _retry.auto_recovery_cycles_used = cycle

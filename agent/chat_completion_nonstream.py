@@ -196,7 +196,9 @@ class _NonStreamRequest:
             f"⚠️ No first stream event from provider in {int(elapsed)}s (codex stream, model: {self._model()}). "
             f"Reconnecting." + (f" {silent_hint}" if silent_hint else ""))
         self._abort_request("codex_ttfb_kill")
-        agent._emit_diagnostic_wait(f"⚠ no response from provider in {int(elapsed)}s — reconnecting...")
+        from agent.i18n import t
+
+        agent._emit_diagnostic_wait(t("runtime.no_response_reconnecting", elapsed=int(elapsed)))
         agent._touch_activity(f"codex stream killed after {int(elapsed)}s with no first stream event")
         self._await_worker_after_kill(
             f"Codex stream produced no parsed stream event within {int(elapsed)}s "

@@ -555,7 +555,9 @@ def apply_retry_restarts(
     # All retries may exhaust with `response` still None; break out cleanly.
     if response is None:
         _turn_exit_reason = "all_retries_exhausted_no_response"
-        agent._emit_diagnostic_status("❌ The model provider didn't answer after all retries. Send /retry, or switch models with /model.")
+        from agent.i18n import t
+
+        agent._emit_diagnostic_status(t("runtime.no_answer_after_retries"))
         agent._persist_session(messages, conversation_history)
         return _verdict("break")
     # A response arrived, so the turn is not stuck re-issuing a cancelled request: start

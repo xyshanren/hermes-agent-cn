@@ -276,7 +276,9 @@ def _content_filter_fallback(st: _Trunc, _retry: TurnRetryState) -> Optional[Tru
         f"{agent.log_prefix}🛡️  Content filter terminated stream — activating fallback provider...",
         force=True, diagnostic=True,
     )
-    agent._emit_diagnostic_status("Content filter terminated stream; switching to fallback...")
+    from agent.i18n import t
+
+    agent._emit_diagnostic_status(t("runtime.content_filter_fallback"))
     if agent._try_activate_fallback():
         # Roll partial content back to the last clean turn so the fallback gets a
         # coherent continuation point; unmark survivors (their text left the partial).
@@ -538,7 +540,9 @@ def recover_from_truncation(
         )
     # First message was truncated - mark as failed
     agent._flush_status_buffer()
-    agent._vprint(f"{agent.log_prefix}❌ First response truncated - cannot recover", force=True, diagnostic=True)
+    from agent.i18n import t
+
+    agent._vprint(f"{agent.log_prefix}{t('runtime.first_response_truncated')}", force=True, diagnostic=True)
     return st.end_turn(_FIRST_TRUNCATED_FINAL, cleanup=False, failed=True)
 
 
@@ -640,7 +644,9 @@ def continue_codex_incomplete(
                     f"{agent.log_prefix}↻ Codex reasoning-only stall after {streak} attempts — "
                     f"switching to fallback {agent.model} ({agent.provider})", diagnostic=True,
                 )
-            agent._emit_diagnostic_wait("↻ model stuck on internal reasoning — switching to fallback provider")
+            from agent.i18n import t
+
+            agent._emit_diagnostic_wait(t("runtime.stuck_reasoning_fallback"))
             agent._session_messages = messages
             return CODEX_FALLBACK_ACTIVATED
         # No fallback left: fall through to the terminal sentinel.
@@ -757,7 +763,9 @@ def handle_content_policy_refusal(
         getattr(response, "stop_reason", None) or "n/a", _stop_details or "n/a",
         _refusal_log or "(no text)",
     )
-    agent._emit_diagnostic_status("⚠️ The model declined to respond to this request (safety refusal).")
+    from agent.i18n import t
+
+    agent._emit_diagnostic_status(t("runtime.safety_refusal"))
     _refusal_response = "⚠️ " + content_policy_copy(
         label=provider_label_for(agent.provider),
         summary=_refusal_text or "the model returned no explanation",

@@ -311,7 +311,9 @@ def retry_invalid_response(
             return _verdict("break")
         # Terminal — flush buffered retry trace so user sees what happened.
         agent._flush_status_buffer()
-        agent._emit_diagnostic_status(f"❌ Max retries ({max_retries}) exceeded for invalid responses. Giving up.")
+        from agent.i18n import t
+
+        agent._emit_diagnostic_status(t("runtime.max_invalid_retries", max=max_retries))
         logger.error("%sInvalid API response after %d retries.", agent.log_prefix, max_retries)
         agent._persist_session(messages, conversation_history)
         # "model=<id>" is describe_invalid_response's OpenRouter fallback, not a provider name.

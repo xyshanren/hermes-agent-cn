@@ -184,7 +184,9 @@ def handle_api_interrupt(
         _retry.restart_with_redirected_messages = True
         return ApiInterruptVerdict("break", thinking_spinner, interrupted, final_response)
     api_elapsed = time.time() - api_start_time
-    agent._vprint(f"{agent.log_prefix}⚡ Interrupted during API call.", force=True)
+    from agent.i18n import t
+
+    agent._vprint(f"{agent.log_prefix}{t('runtime.interrupted_api_call')}", force=True)
     interrupted = True
     # A Stop during the empty-response nudge request leaves the synthetic assistant+nudge
     # pair after an executed tool result; strip it so the row appended below follows the tool

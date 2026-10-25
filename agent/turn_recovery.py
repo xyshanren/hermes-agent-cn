@@ -1005,7 +1005,9 @@ def nonretryable_client_error_result(
     _nonretryable_summary = agent._summarize_api_error(api_error)
     _plabel = provider_label_for(provider)
     _label = _NONRETRYABLE_LABELS.get(classified.reason, f"{_plabel} rejected the request and retrying won't help")
-    agent._emit_diagnostic_status(f"❌ {_label}: {_nonretryable_summary}")
+    from agent.i18n import t
+
+    agent._emit_diagnostic_status(t("runtime.nonretryable", label=_label, summary=_nonretryable_summary))
     # The endpoint/status trace is developer detail: verbose only (the log has it always).
     if getattr(agent, "verbose_logging", False):
         _vlines(
@@ -1142,12 +1144,13 @@ def max_retries_exhausted_result(
     if _is_billing:
         if classified.billing_unverified:
             # Ambiguous body — hedge the terminal line.
-            agent._emit_diagnostic_status(
-                "❌ Provider reported usage/credit exhaustion "
-                f"(unverified — may be a content-filter rejection) — {_final_summary}"
-            )
+            from agent.i18n import t
+
+            agent._emit_diagnostic_status(t("runtime.billing_unverified", summary=_final_summary))
         else:
-            agent._emit_diagnostic_status(f"❌ Billing or credits exhausted — {_final_summary}")
+            from agent.i18n import t
+
+            agent._emit_diagnostic_status(t("runtime.billing_exhausted", summary=_final_summary))
         _billing_kw = dict(
             capability="model access", provider=provider, base_url=str(base_url), model=model,
             unverified=classified.billing_unverified,
@@ -1155,13 +1158,17 @@ def max_retries_exhausted_result(
         _billing_guidance = _billing_or_entitlement_message(**_billing_kw)
         _print_billing_or_entitlement_guidance(agent, **_billing_kw)
     elif is_rate_limited:
+        from agent.i18n import t
+
         _reset = reset_hint(api_error)
         agent._emit_diagnostic_status(
-            f"❌ Rate limited after {attempts} {'attempt' if attempts == 1 else 'retries'} — {_final_summary}"
-            f"{f' (resets in {_reset})' if _reset else ''}"
+            t("runtime.rate_limited", attempts=attempts, summary=_final_summary,
+              reset=t("runtime.resets_in", when=_reset) if _reset else "")
         )
     else:
-        agent._emit_diagnostic_status(f"❌ API failed after {attempts} retries — {_final_summary}")
+        from agent.i18n import t
+
+        agent._emit_diagnostic_status(t("runtime.api_failed_retries", attempts=attempts, summary=_final_summary))
     _vlines(agent, f"   💀 Final error: {_final_summary}")
     _welcome_hint = _welcome_tier_guidance(classified, model=model, in_chat=False)
     if _welcome_hint:

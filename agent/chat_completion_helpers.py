@@ -4097,7 +4097,9 @@ class _StreamingCall(StreamingWaitMonitor):
         self._count_stale_attempt()
         # Reset the timer so we don't kill repeatedly while the worker unwinds.
         self.last_chunk_time["t"] = time.time()
-        self.agent._emit_diagnostic_wait(f"⚠ no output from provider for {int(elapsed)}s — reconnecting...")
+        from agent.i18n import t
+
+        self.agent._emit_diagnostic_wait(t("runtime.no_output_reconnecting", elapsed=int(elapsed)))
         self.agent._touch_activity(f"stale stream detected after {int(elapsed)}s, reconnecting")
 
     def _abort_for_interrupt(self, stale_elapsed: float) -> None:

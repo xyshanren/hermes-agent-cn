@@ -99,6 +99,8 @@
 - **路径习惯** — `~/.hermes/` vs upstream `~/.config/hermes/`
 - **国产 API 默认** — DeepSeek / Kimi / 智谱 / 阿里 / 小米 / MiMo / 通义千问 / 百度 / 火山（取代 OpenRouter / Anthropic 直连）
 - **GitHub 访问** — 优先 ssh（不只是网络问题，commit 签名验证更稳）
+- **界面默认语言 zh**（2026-10-21）— `hermes_cli/config_defaults.py` `display.language: "zh"`（upstream 不设此键，经 `agent/i18n.DEFAULT_LANGUAGE` 落 en）；优先级不变：`HERMES_LANGUAGE` > `display.language` > en。配套把 `hermes_cli/gateway_chat_view.py` 硬编码英文欢迎语改走 i18n（`cli.tui.welcome`，zh 目录已有翻译）。2026-10-22 补：gateway chat 视图其余 REPL 提示同样去硬编码走 i18n——Ctrl+C 提示 / Turn interrupted / Error 前缀 / unknown command / no output（新增 `cli.tui.kbdint_hint` `turn_interrupted` `unknown_command` `no_output` `error_prefix` 键，en+zh）；平台网关的 `gateway.unknown_command` zh 目录本就有翻译，随默认语言翻转自动生效。2026-10-22 第二批：Web dashboard 补 113 个缺失键（zh + zh-hant，catalog/board/内存横幅/遥测横幅等，键 parity 归零）；`setup.py` 向导 32 处 print 去硬编码（新增 `cli.setup.*` 39 键）；agent 运行时诊断提示第一批去硬编码（新增 `runtime.*` 24 键：ladder 倒计时/限流/额度耗尽/流中断续写/安全拒绝等，覆盖 `_emit_diagnostic_status/wait` 与 force vprint 常显路径；verbose-only 行留下批）。非中语言目录以英文占位满足键 parity 契约。**When-to-delete**：CN 化策略反转时测试侧在 `tests/conftest.py` 钉 `HERMES_LANGUAGE=en` 保持套件断言确定性。**When-to-delete**：CN 化策略反转时
+- **shared-metrics 首启问询裁剪**（2026-10-21）— 移除 `hermes_cli/main.py` 聊天前 `offer_consent_before_chat` 与 `hermes_cli/setup.py` 向导收尾 `offer_consent_if_undecided` 两个调用点（归入减法：Nous 遥测对 CN 用户无意义）。不问即不采集（`telemetry.shared_metrics.enabled` 默认 False）；`hermes setup telemetry` 手动开关与 `shared_metrics_consent.py` 模块保留。**When-to-delete**：若 CN 建立自己的遥测中继，可基于同模块重建问询
 
 ---
 

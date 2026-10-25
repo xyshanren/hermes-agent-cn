@@ -183,7 +183,9 @@ def recover_empty_response(
     if fallback and getattr(agent, '_last_content_tools_all_housekeeping', False):
         _turn_exit_reason = "fallback_prior_turn_content"
         logger.info("Empty follow-up after tool calls — using prior turn content as final response")
-        agent._emit_diagnostic_status("↻ Empty response after tool calls — using earlier content as final answer")
+        from agent.i18n import t
+
+        agent._emit_diagnostic_status(t("runtime.empty_after_tools"))
         agent._last_content_with_tools = None
         agent._last_content_tools_all_housekeeping = False
         agent._empty_content_retries = 0
@@ -262,10 +264,9 @@ def recover_empty_response(
             "skipping remaining retries",
             agent.model, agent.provider, finish_reason,
         )
-        agent._buffer_diagnostic_status(
-            "⚠️ Model is repeatedly returning empty content — skipping further retries "
-            "to avoid repeat charges"
-        )
+        from agent.i18n import t
+
+        agent._buffer_diagnostic_status(t("runtime.empty_repeated_skip"))
 
     # Exhausted retries — try the next provider in the chain before "(empty)".
     if _truly_empty and agent._fallback_chain:
