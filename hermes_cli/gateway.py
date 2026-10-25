@@ -519,7 +519,9 @@ def _escalate_wedged_gateway(pid: int, *, term_grace: float = 5.0, kill_wait: fl
         return True
     try:
         terminate_pid(pid, force=True, expected_start_time=expected_start_time)
-        print(f"⚠ Gateway PID {pid} unresponsive to SIGTERM; sent SIGKILL")
+        from agent.i18n import t
+
+        print(t("gateway.admin.pid_sigterm_kill", pid=pid))
     except (ProcessLookupError, PermissionError, OSError):
         pass
     return _wait_for_pid_exit(pid, max(float(kill_wait), 0.0))
@@ -1355,20 +1357,26 @@ def _wait_for_systemd_service_restart(
                     runtime_state = None
             gateway_state = (runtime_state or {}).get("gateway_state")
             if gateway_state in ("running", "degraded"):
-                print(f"✓ {scope_label} service restarted (PID {new_pid})")
+                from agent.i18n import t
+
+                print(t("gateway.admin.svc_restarted", scope=scope_label, pid=new_pid))
                 if gateway_state == "degraded":
                     # Serving, but a configured platform is parked or retrying: a real restart, not a
                     # failure — say so instead of waiting out the timeout and reporting one.
-                    print(f"⚠ {scope_label} gateway is DEGRADED — see `hermes gateway status`")
+                    print(t("gateway.admin.svc_degraded", scope=scope_label))
                 return True
             if gateway_state == "startup_failed":
+                from agent.i18n import t
+
                 reason = (runtime_state or {}).get("exit_reason") or "startup failed"
                 print(
-                    f"⚠ {scope_label} service process restarted (PID {new_pid}), but gateway startup failed: {reason}"
+                    t("gateway.admin.svc_started_startup_failed", scope=scope_label, pid=new_pid, reason=reason)
                 )
                 return False
             if not printed_runtime_wait:
-                print(f"⏳ {scope_label} service process started (PID {new_pid}); waiting for gateway runtime...")
+                from agent.i18n import t
+
+                print(t("gateway.admin.svc_waiting_runtime", scope=scope_label, pid=new_pid))
                 printed_runtime_wait = True
 
         if active_state == "activating" and sub_state == "auto-restart":
@@ -1425,11 +1433,13 @@ def _print_systemd_start_limit_wait(system: bool = False) -> None:
     svc = get_service_name()
     scope_label = _service_scope_label(system).capitalize()
     sudo, scope_flag, user_flag = _systemd_cli_bits(system)
-    print(f"⏳ {scope_label} service is temporarily rate-limited by systemd.")
-    print("  systemd is refusing another immediate start after repeated exits.")
-    print(f"  Wait for the start-limit window to expire, then run: {sudo}hermes gateway restart{scope_flag}")
-    print(f"  Or clear the failed state manually: systemctl {user_flag}reset-failed {svc}")
-    print(f"  Check logs: journalctl {user_flag}-u {svc} -l --since '5 min ago'")
+    from agent.i18n import t
+
+    print(t("gateway.admin.start_limit_wait", scope=scope_label))
+    print(t("gateway.admin.start_limit_reason"))
+    print(t("gateway.admin.start_limit_run", cmd=f"{sudo}hermes gateway restart{scope_flag}"))
+    print(t("gateway.admin.start_limit_clear", cmd=f"{user_flag}reset-failed {svc}"))
+    print(t("gateway.admin.start_limit_logs", cmd=f"{user_flag}-u {svc} -l --since '5 min ago'"))
 
 
 def _recover_pending_systemd_restart(system: bool = False, previous_pid: int | None = None) -> bool:
@@ -1448,7 +1458,9 @@ def _recover_pending_systemd_restart(system: bool = False, previous_pid: int | N
 
     active_state = props.get("ActiveState", "")
     if active_state == "activating" and props.get("SubState", "") == "auto-restart":
-        print("⏳ Service restart already pending — waiting for systemd relaunch...")
+        from agent.i18n import t
+
+        print(t("gateway.admin.restart_already_pending"))
         return _wait_for_systemd_service_restart(system=system, previous_pid=previous_pid)
 
     if active_state == "failed" and (
@@ -1456,7 +1468,9 @@ def _recover_pending_systemd_restart(system: bool = False, previous_pid: int | N
         or props.get("Result", "") == "exit-code"
     ):
         svc = get_service_name()
-        print(f"↻ Clearing failed state for pending {_service_scope_label(system)} service restart...")
+        from agent.i18n import t
+
+        print(t("gateway.admin.clearing_failed_state", scope=_service_scope_label(system)))
         _run_systemctl(["reset-failed", svc], system=system, check=False, timeout=30)
         _run_systemctl(["start", svc], system=system, check=False, timeout=90)
         return _wait_for_systemd_service_restart(system=system, previous_pid=previous_pid)
@@ -1743,9 +1757,13 @@ def kill_gateway_processes(force: bool = False, exclude_pids: set | None = None,
         except ProcessLookupError:
             pass
         except PermissionError:
-            print(f"⚠ Permission denied to kill PID {pid}")
+            from agent.i18n import t
+
+            print(t("gateway.admin.kill_permission_denied", pid=pid))
         except OSError as exc:
-            print(f"Failed to kill PID {pid}: {exc}")
+            from agent.i18n import t
+
+            print(t("gateway.admin.kill_failed", pid=pid, exc=exc))
     return killed
 
 
@@ -1869,7 +1887,9 @@ def _reap_unsupervised_gateway_orphans(
         except ProcessLookupError:
             continue
         except PermissionError:
-            print(f"⚠ Permission denied to kill orphaned gateway PID {pid}")
+            from agent.i18n import t
+
+            print(t("gateway.admin.kill_orphan_permission", pid=pid))
             continue
         reaped = True
 
@@ -2018,7 +2038,9 @@ def stop_profile_gateway() -> bool:
         except ProcessLookupError:
             pass  # Already gone
         except PermissionError:
-            print(f"⚠ Permission denied to kill PID {pid}")
+            from agent.i18n import t
+
+            print(t("gateway.admin.kill_permission_denied", pid=pid))
             return False
 
     # ``_pid_exists``, NOT ``os.kill(pid, 0)`` (TerminateProcess on Windows).
@@ -2487,7 +2509,9 @@ def _preflight_user_systemd(*, auto_enable_linger: bool = True) -> None:
         else:
             if result.returncode == 0:
                 if _wait_for_user_dbus_socket(timeout=5.0):
-                    print(f"✓ Enabled linger for {username} — user D-Bus now available")
+                    from agent.i18n import t
+
+                    print(t("gateway.admin.linger_enabled_user_dbus", username=username))
                     return
                 # enable-linger succeeded but the socket never appeared.
                 _raise_user_systemd_unavailable(
@@ -2614,12 +2638,14 @@ def print_legacy_unit_warning() -> None:
     legacy = _find_legacy_hermes_units()
     if not legacy:
         return
-    print_warning("Legacy Hermes gateway unit(s) detected from an older install:")
+    from agent.i18n import t
+
+    print_warning(t("gateway.admin.legacy_detected"))
     for name, path, is_system in legacy:
         print_info(f"    {path}  ({_service_scope_label(is_system)} scope)")
-    print_info("  These run alongside the current hermes-gateway service and")
-    print_info("  cause SIGTERM flap loops — both try to use the same bot token.")
-    print_info("  Remove them with:")
+    print_info(t("gateway.admin.legacy_alongside"))
+    print_info(t("gateway.admin.legacy_flap"))
+    print_info(t("gateway.admin.legacy_remove_with"))
     print_info("    hermes gateway migrate-legacy")
 
 
@@ -2642,11 +2668,11 @@ def remove_legacy_hermes_units(interactive: bool = True, dry_run: bool = False) 
     print()
 
     if dry_run:
-        print("(dry-run — nothing removed)")
+        print(t("gateway.admin.dry_run_note"))
         return 0, [p for _, p, _ in legacy]
 
-    if interactive and not prompt_yes_no("Remove these legacy units?", True):
-        print("Skipped. Run again with: hermes gateway migrate-legacy")
+    if interactive and not prompt_yes_no(t("gateway.admin.legacy_prompt_remove"), True):
+        print(t("gateway.admin.legacy_skipped"))
         return 0, [p for _, p, _ in legacy]
 
     removed = 0
@@ -2659,10 +2685,14 @@ def remove_legacy_hermes_units(interactive: bool = True, dry_run: bool = False) 
                 _run_systemctl(["stop", name], system=system, check=False, timeout=90)
                 _run_systemctl(["disable", name], system=system, check=False, timeout=30)
                 path.unlink(missing_ok=True)
-                print(f"  ✓ Removed {path}")
+                from agent.i18n import t
+
+                print(t("gateway.admin.legacy_removed_path", path=path))
                 removed += 1
             except (OSError, RuntimeError) as e:
-                print(f"  ⚠ Could not remove {path}: {e}")
+                from agent.i18n import t
+
+                print(t("gateway.admin.legacy_remove_failed", path=path, e=e))
                 remaining.append(path)
         with contextlib.suppress(RuntimeError):
             _run_systemctl(["daemon-reload"], system=system, check=False, timeout=30)
@@ -2675,18 +2705,22 @@ def remove_legacy_hermes_units(interactive: bool = True, dry_run: bool = False) 
     # System-scope removal (needs root)
     if system_units:
         if os.geteuid() != 0:  # windows-footgun: ok — Linux systemd removal path, guarded by `if system == "Linux"` / systemd-only branch
+            from agent.i18n import t
+
             print()
-            print_warning("System-scope legacy units require root to remove.")
-            print_info("  Re-run with: sudo hermes gateway migrate-legacy")
+            print_warning(t("gateway.admin.legacy_system_root"))
+            print_info(t("gateway.admin.legacy_system_rerun"))
             remaining.extend(path for _, path in system_units)
         else:
             _remove_units(system_units, system=True)
 
     print()
+    from agent.i18n import t
+
     if remaining:
-        print_warning(f"{len(remaining)} legacy unit(s) still present — see messages above.")
+        print_warning(t("gateway.admin.legacy_still_present", count=len(remaining)))
     else:
-        print_success(f"Removed {removed} legacy unit(s).")
+        print_success(t("gateway.admin.legacy_removed_count", count=removed))
 
     return removed, remaining
 
@@ -3401,18 +3435,20 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
 
 
 def _print_linger_enable_warning(username: str, detail: str | None = None, *, system: bool = False) -> None:
+    from agent.i18n import t
+
     print()
     if system:
-        print(f"⚠ Linger not enabled for {username} — cron and Kanban workers cannot start (no user D-Bus).")
+        print(t("gateway.admin.linger_warn_user", username=username))
     else:
-        print("⚠ Linger not enabled — gateway may stop when you close this terminal.")
+        print(t("gateway.admin.linger_warn_plain"))
     if detail:
-        print(f"  Auto-enable failed: {detail}")
+        print(t("gateway.admin.linger_autoenable_failed", detail=detail))
     print()
-    print("  Enable it manually:" if system else "  On headless servers (VPS, cloud instances) run:")
+    print(t("gateway.admin.linger_manual_hint") if system else t("gateway.admin.linger_headless_hint"))
     print(f"    sudo loginctl enable-linger {username}")
     print()
-    print("  Then restart the gateway:")
+    print(t("gateway.admin.linger_restart_hint"))
     sudo, _, user_flag = _systemd_cli_bits(system)
     print(f"    {sudo}systemctl {user_flag}restart {get_service_name()}.service")
     print()
@@ -3432,9 +3468,11 @@ def _ensure_linger_enabled(username: str | None = None, *, system: bool = False)
     if username is None:
         import getpass
         username = getpass.getuser()
+    from agent.i18n import t
+
     enabled_msg = (
-        f"✓ Systemd linger is enabled for {username} (worker D-Bus available)" if system
-        else "✓ Systemd linger is enabled (service survives logout)"
+        t("gateway.admin.linger_enabled_msg_system", username=username) if system
+        else t("gateway.admin.status_linger_enabled")
     )
     if Path(f"/var/lib/systemd/linger/{username}").exists():
         print(enabled_msg)
@@ -3450,9 +3488,9 @@ def _ensure_linger_enabled(username: str | None = None, *, system: bool = False)
         return False
 
     if system:
-        print(f"Enabling linger for {username} so cron and Kanban workers can reach systemd-run --user...")
+        print(t("gateway.admin.linger_enabling_system", username=username))
     else:
-        print("Enabling linger so the gateway survives SSH logout...")
+        print(t("gateway.admin.linger_enabling_user"))
     try:
         result = _loginctl_enable_linger(username)
     except Exception as e:
@@ -3462,7 +3500,8 @@ def _ensure_linger_enabled(username: str | None = None, *, system: bool = False)
     if result.returncode != 0:
         _print_linger_enable_warning(username, _completed_process_detail(result) or linger_detail, system=system)
         return False
-    print(f"✓ Enabled linger for {username}" if system else "✓ Linger enabled — gateway will persist after logout")
+    print(t("gateway.admin.linger_enabled_done_system", username=username) if system
+          else t("gateway.admin.linger_enabled_done_user"))
     return True
 
 
@@ -3479,12 +3518,18 @@ def _ensure_system_service_linger(username: str) -> None:
     import pwd
     uid = pwd.getpwnam(username).pw_uid  # windows-footgun: ok — POSIX systemd helper, never invoked on Windows
     if _wait_for_target_user_bus(uid):
-        print(f"✓ /run/user/{uid}/bus is up — cron and Kanban workers can use systemd-run --user")
+        from agent.i18n import t
+
+        print(t("gateway.admin.bus_up", uid=uid))
     else:
-        print(f"⚠ /run/user/{uid}/bus did not appear within 5s.")
-        print(f"  Start the user manager: sudo systemctl start user@{uid}.service")
+        from agent.i18n import t
+
+        print(t("gateway.admin.bus_missing", uid=uid))
+        print(t("gateway.admin.bus_start_manager", uid=uid))
     if _systemd_unit_is_active(system=True):
-        print("  The running gateway was started without a user D-Bus; restart it to pick one up:")
+        from agent.i18n import t
+
+        print(t("gateway.admin.bus_restart_hint"))
         print(f"    sudo systemctl restart {get_service_name()}.service")
 
 
@@ -3502,8 +3547,10 @@ def _system_scope_wizard_would_need_root(system: bool = False) -> bool:
 
 def _print_system_scope_remediation(action: str) -> None:
     """Print remediation when the wizard skips a system-scope action because the user isn't root."""
-    print_warning(f"Gateway is installed as a system-wide service — {action} requires root.")
-    print_info("  Options:")
+    from agent.i18n import t
+
+    print_warning(t("gateway.admin.system_scope_root_required", action=action))
+    print_info(t("gateway.admin.options_label"))
     print_info(f"    1. {action.capitalize()} it this time:")
     print_info(f"         sudo systemctl {action} {get_service_name()}")
     print_info("    2. Switch to a per-user service (recommended for personal use):")
@@ -3588,15 +3635,17 @@ def systemd_install(
         _sync_hermes_home_from_systemd_unit(system=system)
 
     if unit_path.exists() and not (force or force_unit_path):
+        from agent.i18n import t
+
         if not systemd_unit_is_current(system=system):
-            print(f"↻ Repairing outdated {scope_label} systemd service at: {unit_path}")
+            print(t("gateway.admin.install_repairing", scope=scope_label, path=unit_path))
             refresh_systemd_unit_if_needed(system=system)
             if enable_on_startup:
                 _run_systemctl(["enable", get_service_name()], system=system, check=True, timeout=30)
-            print(f"✓ {scope_label.capitalize()} service definition updated")
+            print(t("gateway.admin.install_updated", scope=scope_label.capitalize()))
         else:
-            print(f"Service already installed at: {unit_path}")
-            print("Use --force to reinstall")
+            print(t("gateway.admin.install_already", path=unit_path))
+            print(t("gateway.admin.install_force_hint"))
             # An existing, current unit may still be DISABLED (a host whose unit predates
             # enable-on-install, or a migration whose uninstall took the wrong unit's wants
             # symlink). Honour enable_on_startup for this branch too — it used to return without
@@ -3605,8 +3654,8 @@ def systemd_install(
             if enable_on_startup:
                 enabled = _run_systemctl(["enable", get_service_name()], system=system, check=False, timeout=30)
                 if getattr(enabled, "returncode", 0) != 0:
-                    print_warning(f"could not enable {get_service_name()} at boot "
-                                  f"(systemctl enable exited {enabled.returncode}); a reboot may come up with no gateway")
+                    print_warning(t("gateway.admin.install_enable_failed",
+                                    svc=get_service_name(), code=enabled.returncode))
         # Same post-install guarantee as a fresh install: a repaired user unit must survive logout too.
         configured_user = _read_systemd_user_from_unit(unit_path) if system else None
         if configured_user:
@@ -3619,7 +3668,9 @@ def systemd_install(
     new_unit = generate_systemd_unit(system=system, run_as_user=run_as_user)
     if gateway_service_owner.refuse_temp_home_service_write(new_unit, "systemd unit"):
         return
-    print(f"Installing {scope_label} systemd service to: {unit_path}")
+    from agent.i18n import t
+
+    print(t("gateway.admin.install_installing", scope=scope_label, path=unit_path))
     _prepare_service_launcher(system=system, run_as_user=run_as_user)
     unit_path.write_text(new_unit, encoding="utf-8")
 
@@ -3628,18 +3679,19 @@ def systemd_install(
         _run_systemctl(["enable", get_service_name()], system=system, check=True, timeout=30)
 
     print()
-    print(f"✓ {scope_label.capitalize()} service {'installed and enabled' if enable_on_startup else 'installed'}!")
+    print(t("gateway.admin.install_done_enabled", scope=scope_label.capitalize()) if enable_on_startup
+          else t("gateway.admin.install_done", scope=scope_label.capitalize()))
     print()
-    print("Next steps:")
-    print(f"  {sudo}hermes gateway start{scope_flag}              # Start the service")
-    print(f"  {sudo}hermes gateway status{scope_flag}             # Check status")
-    print(f"  journalctl {user_flag}-u {get_service_name()} -f  # View logs")
+    print(t("gateway.admin.install_next_steps"))
+    print(t("gateway.admin.install_next_start", cmd=f"{sudo}hermes gateway start{scope_flag}"))
+    print(t("gateway.admin.install_next_status", cmd=f"{sudo}hermes gateway status{scope_flag}"))
+    print(t("gateway.admin.install_next_logs", cmd=f"{user_flag}-u {get_service_name()}"))
     print()
 
     if system:
         configured_user = _read_systemd_user_from_unit(unit_path)
         if configured_user:
-            print(f"Configured to run as: {configured_user}")
+            print(t("gateway.admin.status_run_as", user=configured_user))
             _ensure_system_service_linger(configured_user)
     else:
         _ensure_linger_enabled()
@@ -3671,10 +3723,10 @@ def _systemd_unit_belongs_to_current_home(system: bool = False) -> bool:
     unit_home = _hermes_home_from_systemd_unit_file(system=system)
     if unit_home is None or Path(unit_home).expanduser().resolve() == get_hermes_home().resolve():
         return True
-    print_warning(
-        f"Refusing to remove {get_systemd_unit_path(system=system)}: it runs HERMES_HOME={unit_home}, "
-        f"but this process has HERMES_HOME={get_hermes_home()}"
-    )
+    from agent.i18n import t
+
+    print_warning(t("gateway.admin.refusing_remove", path=get_systemd_unit_path(system=system),
+                    home=unit_home, current=get_hermes_home()))
     return False
 
 
@@ -3688,10 +3740,14 @@ def systemd_uninstall(system: bool = False):
     unit_path = get_systemd_unit_path(system=system)
     if unit_path.exists():
         unit_path.unlink()
-        print(f"✓ Removed {unit_path}")
+        from agent.i18n import t
+
+        print(t("gateway.admin.uninstall_removed", path=unit_path))
 
     _run_systemctl(["daemon-reload"], system=system, check=True, timeout=30)
-    print(f"✓ {_service_scope_label(system).capitalize()} service uninstalled")
+    from agent.i18n import t
+
+    print(t("gateway.admin.svc_uninstalled", scope=_service_scope_label(system).capitalize()))
 
 
 def _print_service_not_installed(system: bool) -> None:
@@ -3713,7 +3769,9 @@ def systemd_start(system: bool = False):
     # HERMES_HOME sync happens in refresh's systemd_unit_is_current gate; the unit is guaranteed to exist here.
     refresh_systemd_unit_if_needed(system=system)
     _run_systemctl(["start", get_service_name()], system=system, check=True, timeout=30)
-    print(f"✓ {_service_scope_label(system).capitalize()} service started")
+    from agent.i18n import t
+
+    print(t("gateway.admin.svc_started", scope=_service_scope_label(system).capitalize()))
 
 
 def systemd_stop(system: bool = False):
@@ -3723,9 +3781,10 @@ def systemd_stop(system: bool = False):
     try:
         _run_systemctl(["stop", get_service_name()], system=system, check=True, timeout=90)
     except subprocess.TimeoutExpired:
+        from agent.i18n import t
+
         print(
-            f"Gateway {_service_scope_label(system)} service is still stopping after 90s; "
-            "check `hermes gateway status` or logs for final shutdown state."
+            t("gateway.admin.stop_still_stopping", scope=_service_scope_label(system))
         )
         return
     print(f"✓ {_service_scope_label(system).capitalize()} service stopped")
@@ -3740,18 +3799,19 @@ def systemd_restart(system: bool = False):
     pid = get_running_pid() or _systemd_main_pid(system=system)
     if pid is not None and probe_gateway_loop_liveness(pid) == GATEWAY_LOOP_WEDGED:
         # Event loop provably dead: SIGUSR1 can't drain it, so bounded SIGTERM → SIGKILL and let systemd relaunch.
+        from agent.i18n import t
+
         print(
             # Health probe says the event loop is provably dead (#81642): SIGUSR1 can never drain it, so the
             # graceful wait below would burn the full budget. A busy-but-alive gateway (fresh heartbeat)
             # never takes this path — its in-flight work, including the #86684 cron drain floor, keeps the
             # full graceful budget.
-            # Health probe says the event loop is provably dead (#81642): the gateway cannot process a
-            # graceful shutdown, so waiting the full drain budget only stalls the restart (and `hermes
-            # update` behind it) for 180s. Bounded escalation instead: SIGTERM grace → SIGKILL → proceed,
-            # ~10s worst case. Never taken for a busy-but-alive gateway — a fresh heartbeat keeps the drain
-            # path (and the #86684 cron drain floor) fully intact.
-            f"⚠ Gateway PID {pid} event loop is unresponsive — "
-            "skipping graceful drain and forcing a bounded stop..."
+        # Health probe says the event loop is provably dead (#81642): the gateway cannot process a
+        # graceful shutdown, so waiting the full drain budget only stalls the restart (and `hermes
+        # update` behind it) for 180s. Bounded escalation instead: SIGTERM grace → SIGKILL → proceed,
+        # ~10s worst case. Never taken for a busy-but-alive gateway — a fresh heartbeat keeps the drain
+        # path (and the #86684 cron drain floor) fully intact.
+        t("gateway.admin.wedged_event_loop", pid=pid)
         )
         _escalate_wedged_gateway(pid)
         svc = get_service_name()
@@ -3786,13 +3846,12 @@ def _systemd_graceful_restart_action(system: bool, pid: int) -> str | None:
     # feedback — the desktop updater's live output most of all, where a silent stop here reads as "update
     # stuck" (#44515).
     wait_budget = _get_restart_exit_wait_budget()
-    print(
-        f"⏳ {scope_label} service restarting gracefully (PID {pid}) — "
-        f"waiting up to {wait_budget:.0f}s for in-flight turns + drain..."
-    )
+    from agent.i18n import t
+
+    print(t("gateway.admin.graceful_restarting", scope=scope_label, pid=pid, budget=f"{wait_budget:.0f}"))
     from hermes_cli.update_cmd_drain_report import drain_progress_reporter
     if not _graceful_restart_via_sigusr1(pid, wait_budget, on_progress=drain_progress_reporter(budget_s=wait_budget)):
-        print(f"⚠ Graceful restart did not complete within {int(wait_budget)}s; forcing a service restart...")
+        print(t("gateway.admin.graceful_forcing", seconds=int(wait_budget)))
         return "restart"
 
     # Exit 75 hands restart ownership to systemd; observe that replacement rather than restarting again.
@@ -3814,7 +3873,9 @@ def _systemd_graceful_restart_action(system: bool, pid: int) -> str | None:
     ):
         return None
 
-    print("⚠ Systemd did not relaunch the gateway after its graceful exit; starting the inactive service...")
+    from agent.i18n import t
+
+    print(t("gateway.admin.systemd_no_relaunch"))
     # ``start`` is intentionally idempotent: a replacement appearing after the snapshot must not be stopped.
     return "start"
 
@@ -3995,7 +4056,9 @@ def _wait_for_gateway_exit(timeout: float = 10.0, force_after: float | None = 5.
             # Grace period expired — force-kill the specific PID.
             try:
                 terminate_pid(pid, force=True, expected_start_time=get_process_start_time(pid))
-                print(f"⚠ Gateway PID {pid} did not exit gracefully; sent SIGKILL")
+                from agent.i18n import t
+
+                print(t("gateway.admin.pid_sigkill", pid=pid))
             except (ProcessLookupError, PermissionError, OSError):
                 return True  # Already gone or we can't touch it.
             force_sent = True
@@ -4005,7 +4068,9 @@ def _wait_for_gateway_exit(timeout: float = 10.0, force_after: float | None = 5.
     # Timed out even after force-kill.
     remaining_pid = get_running_pid()
     if remaining_pid is not None:
-        print(f"⚠ Gateway PID {remaining_pid} still running after {timeout}s — restart may fail")
+        from agent.i18n import t
+
+        print(t("gateway.admin.pid_still_running", pid=remaining_pid, timeout=timeout))
         return False
     return True
 
