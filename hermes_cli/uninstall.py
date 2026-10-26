@@ -652,18 +652,22 @@ def run_data_uninstall(args):
         log_warn(str(exc))
         raise SystemExit(1) from exc
     if not plan.remove:
-        print(f"No Hermes user data found in {home}.")
+        from agent.i18n import t
+
+        print(t("uninstall.no_user_data", home=home))
         return
-    print("Data-only removal: installed code and other profiles stay intact.")
-    print("Will remove:")
+    from agent.i18n import t
+
+    print(t("uninstall.data_only_note"))
+    print(t("uninstall.will_remove"))
     for path in plan.remove:
         print(f"  {path}")
     if plan.keep:
-        print("Kept intact:")
+        print(t("uninstall.kept_intact"))
         for path in plan.keep:
             print(f"  {path}")
     if bool(getattr(args, "dry_run", False)):
-        print("Dry run: no data or processes changed.")
+        print(t("uninstall.dry_run_data"))
         return
     if not bool(getattr(args, "yes", False)) and not _confirm_yes("to remove this home's data"):
         return
@@ -673,16 +677,18 @@ def run_data_uninstall(args):
         with quiescent_home(plan.home):
             removed, failed = remove_data(plan)
     except (OSError, ValueError, RuntimeError) as exc:
-        log_warn(f"No data removed: {exc}")
+        log_warn(t("uninstall.log_no_data_removed", error=exc))
         raise SystemExit(1) from exc
     for path in removed:
-        log_success(f"Removed {path}")
+        log_success(t("uninstall.log_removed", path=path))
     if failed:
-        print("Hermes data was only partially removed. Surviving targets:")
+        from agent.i18n import t
+
+        print(t("uninstall.partially_removed"))
         for path, reason in failed:
-            log_warn(f"{path}: {reason}")
+            log_warn(t("uninstall.failed_target", path=path, reason=reason))
         raise SystemExit(1)
-    log_success("Hermes data removed.")
+    log_success(t("uninstall.data_removed"))
 
 
 def run_gui_uninstall(args):
@@ -707,49 +713,53 @@ def run_gui_uninstall(args):
     skip_confirm = bool(getattr(args, "yes", False))
 
     print()
-    _print_box("│         ☤ Hermes Chat GUI Uninstaller                  │", Colors.MAGENTA)
+    _print_box(t("uninstall.gui_box_title"), Colors.MAGENTA)
     print()
 
     if not summary["gui_installed"]:
-        print("No Hermes Chat GUI installation was found.")
-        print(f"  Checked: {hermes_home}, and the standard app locations for this OS.")
+        from agent.i18n import t
+
+        print(t("uninstall.gui_not_found"))
+        print(t("uninstall.gui_checked", home=hermes_home))
         return
 
-    print(color("This removes the Chat GUI only. The Hermes agent stays installed.", Colors.CYAN))
+    from agent.i18n import t
+
+    print(color(t("uninstall.gui_only_note"), Colors.CYAN))
     print()
-    print(color("Will remove:", Colors.YELLOW, Colors.BOLD))
+    print(color(t("uninstall.will_remove"), Colors.YELLOW, Colors.BOLD))
     for p in (*summary["source_built_artifacts"], *summary["packaged_app_paths"]):
         print(f"  • {p}")
     if (install_record := desktop_install_record()).exists():
-        print(f"  • {install_record}  (desktop install record)")
+        print(t("uninstall.gui_install_record", record=install_record))
     if summary["userdata_exists"]:
-        print(f"  • {summary['userdata_dir']}  (desktop app data)")
+        print(t("uninstall.gui_userdata", dir=summary['userdata_dir']))
     print()
     if agent_is_installed(hermes_home):
-        print(color("Kept intact:", Colors.GREEN, Colors.BOLD))
-        print(f"  • The Hermes agent at {hermes_home / 'hermes-agent'}")
-        print(f"  • Your config, sessions, and secrets under {hermes_home}")
+        print(color(t("uninstall.kept_intact"), Colors.GREEN, Colors.BOLD))
+        print(t("uninstall.gui_agent_kept", path=hermes_home / 'hermes-agent'))
+        print(t("uninstall.gui_config_kept", home=hermes_home))
         if (shared_modules := hermes_home / "hermes-agent" / "node_modules").exists():
-            print(f"  • Shared workspace dependencies at {shared_modules}")
+            print(t("uninstall.gui_shared_deps", path=shared_modules))
         print()
 
     if bool(getattr(args, "dry_run", False)):
-        print("Dry run: no files or processes changed.")
+        print(t("uninstall.dry_run_files"))
         return
 
     if not skip_confirm and not _confirm_yes("to remove the Chat GUI"):
         return
 
     print()
-    print(color("Uninstalling Chat GUI...", Colors.CYAN, Colors.BOLD))
+    print(color(t("uninstall.gui_uninstalling"), Colors.CYAN, Colors.BOLD))
     print()
     uninstall_gui(hermes_home)
 
     print()
-    _print_box("│            ✓ Chat GUI Uninstalled!                      │", Colors.GREEN)
+    _print_box(t("uninstall.gui_done_box"), Colors.GREEN)
     print()
-    print("The Hermes agent is still installed. Run 'hermes' to use the CLI,")
-    print("or 'hermes uninstall' to remove the agent too.")
+    print(t("uninstall.gui_agent_still_there"))
+    print(t("uninstall.gui_uninstall_agent_hint"))
     print()
 
 
@@ -786,39 +796,42 @@ def run_uninstall(args):
         return
 
     print()
-    _print_box("│            ☤ Hermes Agent Uninstaller                  │", Colors.MAGENTA)
+    _print_box(t("uninstall.agent_box_title"), Colors.MAGENTA)
     print()
 
     # Show what will be affected
-    print(color("Current Installation:", Colors.CYAN, Colors.BOLD))
-    print(f"  Code:    {project_root}")
-    print(f"  Config:  {hermes_home / 'config.yaml'}")
-    print(f"  Secrets: {hermes_home / '.env'}")
-    print(f"  Data:    {hermes_home / 'cron/'}, {hermes_home / 'sessions/'}, {hermes_home / 'logs/'}")
+    from agent.i18n import t
+
+    print(color(t("uninstall.current_installation"), Colors.CYAN, Colors.BOLD))
+    print(t("uninstall.current_code", path=project_root))
+    print(t("uninstall.current_config", path=hermes_home / 'config.yaml'))
+    print(t("uninstall.current_secrets", path=hermes_home / '.env'))
+    print(t("uninstall.current_data", cron=hermes_home / 'cron/', sessions=hermes_home / 'sessions/', logs=hermes_home / 'logs/'))
     from hermes_cli.gui_uninstall import desktop_userdata_dir
     if (desktop_userdata := desktop_userdata_dir()).exists():
-        print(f"  Desktop: {desktop_userdata}  (app data - kept by 'Keep data', removed by 'Full uninstall')")
+        print(t("uninstall.current_desktop", path=desktop_userdata))
     print()
 
     if named_profiles:
-        print(color("Other profiles detected:", Colors.CYAN, Colors.BOLD))
+        print(color(t("uninstall.other_profiles"), Colors.CYAN, Colors.BOLD))
         for p in named_profiles:
-            print(f"  • {p.name}{' (gateway running)' if getattr(p, 'gateway_running', False) else ''}: {p.path}")
+            print(t("uninstall.other_profile_row", name=p.name,
+                    gateway=' (gateway running)' if getattr(p, 'gateway_running', False) else '', path=p.path))
         print()
 
     # Ask for confirmation
-    print(color("Uninstall Options:", Colors.YELLOW, Colors.BOLD))
+    print(color(t("uninstall.options_header"), Colors.YELLOW, Colors.BOLD))
     print()
-    print("  1) " + color("Keep data", Colors.GREEN) + " - Remove code only, keep configs/sessions/logs")
-    print("     (Recommended - you can reinstall later with your settings intact)")
+    print("  1) " + color(t("uninstall.opt_keep_data"), Colors.GREEN) + t("uninstall.opt_keep_data_desc"))
+    print(t("uninstall.opt_keep_data_rec"))
     print()
-    print("  2) " + color("Full uninstall", Colors.RED) + " - Remove everything including all data")
-    print("     (Warning: This deletes all configs, sessions, and logs permanently)")
+    print("  2) " + color(t("uninstall.opt_full"), Colors.RED) + t("uninstall.opt_full_desc"))
+    print(t("uninstall.opt_full_warning"))
     print()
-    print("  3) " + color("Cancel", Colors.CYAN) + " - Don't uninstall")
+    print("  3) " + color(t("uninstall.opt_cancel"), Colors.CYAN) + t("uninstall.opt_cancel_desc"))
     print()
 
-    choice = _prompt(color("Select option [1/2/3]: ", Colors.BOLD))
+    choice = _prompt(color(t("uninstall.select_option"), Colors.BOLD))
     if choice is None:
         return
 
@@ -834,24 +847,28 @@ def run_uninstall(args):
     n_profiles = len(named_profiles)
     profile_names = ", ".join(p.name for p in named_profiles)
     if full_uninstall and named_profiles:
+        from agent.i18n import t
+
         print()
-        print(color("Other profiles will NOT be removed by default.", Colors.YELLOW))
-        print(f"Found {n_profiles} named profile(s): {profile_names}")
+        print(color(t("uninstall.profiles_kept_note"), Colors.YELLOW))
+        print(t("uninstall.profiles_found", count=n_profiles, names=profile_names))
         print()
-        resp = _prompt(color(f"Also stop and remove these {n_profiles} profile(s)? [y/N]: ", Colors.BOLD))
+        resp = _prompt(color(t("uninstall.profiles_remove_prompt", count=n_profiles), Colors.BOLD))
         if resp is None:
             return
         remove_profiles = resp in {"y", "yes"}
 
     # Final confirmation
     print()
+    from agent.i18n import t
+
     if full_uninstall:
-        print(color("⚠️  WARNING: This will permanently delete ALL Hermes data!", Colors.RED, Colors.BOLD))
-        print(color("   Including: configs, API keys, sessions, scheduled jobs, logs", Colors.RED))
+        print(color(t("uninstall.final_warning"), Colors.RED, Colors.BOLD))
+        print(color(t("uninstall.final_including"), Colors.RED))
         if remove_profiles:
-            print(color(f"   Plus {n_profiles} profile(s): {profile_names}", Colors.RED))
+            print(color(t("uninstall.final_plus_profiles", count=n_profiles, names=profile_names), Colors.RED))
     else:
-        print("This will remove the Hermes code but keep your configuration and data.")
+        print(t("uninstall.final_keep_data_note"))
 
     print()
     if not _confirm_yes("to confirm"):
@@ -864,30 +881,32 @@ def run_uninstall(args):
 
 def _print_uninstall_dry_run(*, project_root: Path, hermes_home: Path, full_uninstall: bool) -> None:
     """Print the uninstall plan without stopping services or deleting files."""
+    from agent.i18n import t
+
     print()
-    print(color("Dry run: no files, services, or environment entries will be changed.", Colors.CYAN, Colors.BOLD))
+    print(color(t("uninstall.dry_run_header"), Colors.CYAN, Colors.BOLD))
     print()
-    print(color("Would inspect/remove:", Colors.YELLOW, Colors.BOLD))
-    print("  • Gateway services and standalone gateway processes")
-    print("  • Hermes PATH entries from shell configs / Windows User PATH")
-    print("  • Hermes wrapper scripts and Hermes-managed node/npm/npx symlinks")
-    print("  • Desktop Chat GUI artifacts")
-    print(f"  • Code checkout: {project_root}")
+    print(color(t("uninstall.dry_run_would"), Colors.YELLOW, Colors.BOLD))
+    print(t("uninstall.dry_run_services"))
+    print(t("uninstall.dry_run_path_entries"))
+    print(t("uninstall.dry_run_wrappers"))
+    print(t("uninstall.dry_run_gui"))
+    print(t("uninstall.dry_run_checkout", path=project_root))
     from hermes_cli.gui_uninstall import desktop_userdata_dir
     userdata = desktop_userdata_dir()
     if not full_uninstall:
-        print(f"  • Keep Hermes config/data: {hermes_home}")
+        print(t("uninstall.dry_run_keep_data", path=hermes_home))
         if userdata.exists():
-            print(f"  • Keep desktop app data: {userdata}")
+            print(t("uninstall.dry_run_keep_desktop", path=userdata))
     else:
-        print(f"  • Hermes config/data: {hermes_home}")
+        print(t("uninstall.dry_run_config_data", path=hermes_home))
         if sys.platform == "darwin":
-            print("  • macOS: dashboard/serve launchd jobs, Electron + setup caches")
+            print(t("uninstall.dry_run_macos"))
         if userdata.exists():
-            print(f"  • Desktop app data: {userdata}")
+            print(t("uninstall.dry_run_desktop_data", path=userdata))
         profiles = _discover_named_profiles() if _is_default_hermes_home(hermes_home) else []
         if profiles:
-            print("  • Named profiles (interactive uninstall asks before removing):")
+            print(t("uninstall.dry_run_profiles"))
             for prof in profiles:
                 print(f"    - {prof.name}: {prof.path}")
     print()
@@ -905,14 +924,16 @@ def _remove_step(label: str, remove, success_fmt: str, none_msg: str) -> None:
 
 def _rmtree_step(path: Path, *, indent: str = "", fully: bool = True) -> None:
     """Best-effort ``rmtree`` with the shared success/warning lines."""
+    from agent.i18n import t
+
     try:
         if path.exists():
             shutil.rmtree(path)
-            log_success(f"{indent}Removed {path}")
+            log_success(t("uninstall.log_removed", path=f"{indent}{path}"))
     except Exception as e:
-        log_warn(f"{indent}Could not {'fully ' if fully else ''}remove {path}: {e}")
+        log_warn(t("uninstall.log_remove_failed", fully='fully ' if fully else '', path=path, error=e))
         if fully:
-            log_info("You may need to manually remove it")
+            log_info(t("uninstall.log_manual_removal"))
 
 
 def _macos_cache_leftover_dirs() -> list[Path]:
@@ -1083,15 +1104,19 @@ def _perform_uninstall(
     #     both the checkout removal and a "keep my data" uninstall. They
     #     are install tooling, not data, so removing them is correct in
     #     either mode.
-    log_info("Removing managed runtime trees...")
+    from agent.i18n import t
+
+    log_info(t("uninstall.removing_runtimes"))
     removed_runtimes = remove_legacy_runtime_trees(hermes_home)
     if removed_runtimes:
         for path in removed_runtimes:
-            log_success(f"Removed {path}")
+            log_success(t("uninstall.log_removed", path=path))
     else:
-        log_info("No legacy runtime trees to remove")
+        log_info(t("uninstall.no_runtime_trees"))
 
     # 5. Optionally remove ~/.hermes/ data directory (and named profiles)
+    from agent.i18n import t
+
     if full_uninstall:
         # 5a. Named profiles' homes live under <default>/profiles/ (swept by the rmtree below),
         #     but their services + alias scripts live OUTSIDE the default root.
@@ -1102,43 +1127,43 @@ def _perform_uninstall(
         #     mirroring the enumeration main_dashboard uses to find them (#62209).
         if sys.platform == "darwin":
             _remove_step(
-                "Removing dashboard/serve launchd jobs...",
+                t("uninstall.step_launchd_jobs"),
                 remove_dashboard_launchd_jobs, "Removed {}",
-                "No dashboard/serve launchd jobs found")
+                t("uninstall.step_launchd_none"))
         # 5c. macOS: Electron/Chromium and setup cache dirs written OUTSIDE HERMES_HOME
         #     survive both the checkout removal and the home rmtree below (#62209).
         if sys.platform == "darwin":
             _remove_step(
-                "Removing Electron and setup caches...",
+                t("uninstall.step_caches"),
                 lambda: _remove_each(_macos_cache_leftover_dirs(), _rmtree_if_exists), "Removed {}",
-                "No Electron or setup caches found")
-        log_info("Removing configuration and data...")
+                t("uninstall.step_caches_none"))
+        log_info(t("uninstall.removing_config_data"))
         _rmtree_step(hermes_home)
     else:
-        log_info(f"Keeping configuration and data in {hermes_home}")
+        log_info(t("uninstall.keeping_config_data", home=hermes_home))
 
     print()
-    _print_box("│              ✓ Uninstall Complete!                      │", Colors.GREEN)
+    _print_box(t("uninstall.done_box"), Colors.GREEN)
     print()
 
     if not full_uninstall:
-        print(color("Your configuration and data have been preserved:", Colors.CYAN))
+        print(color(t("uninstall.data_preserved"), Colors.CYAN))
         print(f"  {hermes_home}/")
         from hermes_cli.gui_uninstall import desktop_userdata_dir
         if (desktop_userdata := desktop_userdata_dir()).exists():
-            print(f"  {desktop_userdata}  (desktop app data)")
+            print(t("uninstall.preserved_desktop", path=desktop_userdata))
         _, preserved = _xdg_leftover_paths(full_uninstall=False)
         for path in preserved:
             print(f"  {path}/")
         print()
-        print("To reinstall later with your existing settings:")
+        print(t("uninstall.reinstall_later"))
         print(color(_REINSTALL_HINT[windows], Colors.DIM))
         print()
 
     for line, col in _RELOAD_HINT[windows]:
         print(color(line, col) if col else line)
     print()
-    print("Thank you for using Hermes Agent! ☤")
+    print(t("uninstall.thanks"))
     print()
 
 
