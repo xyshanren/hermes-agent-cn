@@ -12,6 +12,7 @@ Resolution order:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -20,6 +21,20 @@ from typing import Literal, cast
 
 from hermes_cli.steward import UPDATE_MECHANISMS
 from hermes_cli.update_channel import STABLE_TAG_RE
+
+# CN fork release tags: a stable core with a fork-serial suffix (v0.22.2+cn.2).
+# STABLE_TAG_RE deliberately rejects suffixed tags for the upstream stable feed,
+# but these are the fork's actual release tags, so base selection understands
+# both shapes and lets the CN tag win when its core is the newest.
+_CN_TAG_RE = re.compile(
+    r"^v(?P<core>(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\+cn\.(?P<n>\d+)$"
+)
+
+
+def _release_sort_key(version: str) -> tuple:
+    """Order stable and CN-suffixed release versions by (core tuple, fork serial)."""
+    core, _, serial = version.partition("+cn.")
+    return (tuple(int(part) for part in core.split(".")), int(serial) if serial else -1)
 
 
 @dataclass(frozen=True)
@@ -238,23 +253,33 @@ def _git_version_info(repo_dir: Path, *, include_untracked: bool = False) -> Ver
         dirty = False
 
     tags = _run_git(repo_dir, "tag", "--merged", "HEAD", "--list", "v[0-9]*")
+    tag_names = (tags or "").splitlines()
     releases = [
         tag[1:]
-        for tag in (tags or "").splitlines()
+        for tag in tag_names
         if STABLE_TAG_RE.fullmatch(tag)
     ]
-    base_version = (
-        max(releases, key=lambda value: tuple(int(part) for part in value.split(".")))
-        if releases else "unknown"
+    cn_releases = [
+        tag[1:]
+        for tag in tag_names
+        if _CN_TAG_RE.fullmatch(tag)
+    ]
+    release = (
+        max(releases + cn_releases, key=_release_sort_key)
+        if releases or cn_releases else None
     )
+    base_version = release.split("+", 1)[0] if release else "unknown"
     distance = _parse_nonnegative(
-        _run_git(repo_dir, "rev-list", "--count", f"v{base_version}..HEAD")
-    ) if releases else None
-    if not releases:
+        _run_git(repo_dir, "rev-list", "--count", f"v{release}..HEAD")
+    ) if release else None
+    if not release:
         base_version, distance = _calver_release_version(repo_dir) or ("unknown", None)
     short_commit = _run_git(repo_dir, "rev-parse", "--short=7", "HEAD")
     if base_version == "unknown" and short_commit:
         display_version = f"git.{short_commit}{'.dirty' if dirty else ''}"
+    elif release is not None and "+" in release:
+        # At or past a CN release tag: keep the fork identity in the display.
+        display_version = _derived_version(release, distance, dirty, short_commit)
     else:
         display_version = _derived_version(base_version, distance, dirty, short_commit)
 

@@ -355,3 +355,6 @@ apps/desktop/.dist-build*
 # 冒号在文件名里被替换成 PUA(U+F03A)/全角(U+FF1A)或直接剥掉——C*Users* 一条覆盖全部变体
 %SystemDrive*/
 C*Users*
+
+# Mimosa 安全扫描钩子的本地状态（never commit）
+**/.mimosa/

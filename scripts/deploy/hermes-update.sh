@@ -21,11 +21,13 @@ HERMES_BIN="$PROJECT_PATH/.hermes/bin/hermes"
 [ -x "$HERMES_BIN" ] || { echo "错误：PM 启动器不存在 ($HERMES_BIN)"; exit 1; }
 
 # 2. 拉取最新代码（先弃掉本地 uv.lock 的改动：sync 的重解析产物，仓库锁是权威，
-#    留着会挡 pull）
+#    留着会挡 pull）。fetch 显式带 --tags --force：pull 的分支 refspec 不会可靠地
+#    跟进 tag（tag 重打过时本地旧 tag 还会挡住更新），而版本号显示依赖 merged tag。
 cd "$PROJECT_PATH"
 echo "拉取最新代码 (origin/cn)..."
 git checkout -- uv.lock 2>/dev/null || true
-git pull origin cn
+git fetch origin cn --tags --force
+git merge --ff-only FETCH_HEAD
 
 # 3. 依赖与工具按锁装进 PM 环境（[all] 特性集；pm install 事务式，
 #    新环境提交前旧环境原样保留，中途失败不影响在跑的 gateway）

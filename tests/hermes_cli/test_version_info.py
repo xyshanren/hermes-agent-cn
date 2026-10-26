@@ -219,6 +219,49 @@ def test_get_version_info_takes_the_version_a_calver_only_release_shipped(tmp_pa
     assert info.derived_version == f"0.21.4+1.g{git('rev-parse', '--short=7', 'HEAD')}"
 
 
+def test_get_version_info_prefers_the_cn_fork_release_tag(tmp_path, monkeypatch):
+    """CN release tags (``v<stable>+cn.<n>``) are the fork's releases even though
+    STABLE_TAG_RE rejects suffixed tags: at the tag the display is the tag itself,
+    past it the distance chains onto the fork serial. The stable core still backs
+    ``base_version`` so plugin ``requires_hermes`` comparisons keep working."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=repo, text=True, capture_output=True, check=True,
+            env={"HOME": str(tmp_path), "PATH": __import__("os").environ["PATH"]},
+        )
+        return result.stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.name", "Hermes Test")
+    git("config", "user.email", "hermes@example.invalid")
+    (repo / "tracked").write_text("release\n", encoding="utf-8")
+    git("add", "tracked")
+    git("commit", "-qm", "release")
+    git("tag", "v0.16.0")
+    git("tag", "v0.22.2+cn.2")
+
+    monkeypatch.setattr("hermes_cli.version_info._resolve_stamp_file", lambda: None)
+    monkeypatch.setattr("hermes_cli.version_info._resolve_repo_dir", lambda: repo)
+
+    info = get_version_info()
+
+    assert info.base_version == "0.22.2"
+    assert info.derived_version == "0.22.2+cn.2"
+    assert info.distance == 0
+
+    (repo / "tracked").write_text("next\n", encoding="utf-8")
+    git("commit", "-qam", "next")
+    _reset_version_info_cache()
+
+    info = get_version_info()
+
+    assert info.base_version == "0.22.2"
+    assert info.derived_version == f"0.22.2+cn.2+1.g{git('rev-parse', '--short=7', 'HEAD')}"
+
+
 def test_resolve_stamp_file_honors_install_root(tmp_path, monkeypatch):
     """Sealed installs (the Nix wrapper) point HERMES_INSTALL_ROOT at the stamp dir."""
     stamp = {"commit": "e" * 40, "source": "nix", "distribution": "nix", "updateMechanism": "external"}

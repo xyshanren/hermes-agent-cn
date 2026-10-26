@@ -104,6 +104,7 @@
 - **gateway.py 错误表已重构**（no_backend.* 13 键）✓ 无遗留
 - **其他零散小文件**（main_query_file / anon_challenge 等低频边缘 ~百处）——找其他时间再继续**When-to-delete**：CN 化策略反转时测试侧在 `tests/conftest.py` 钉 `HERMES_LANGUAGE=en` 保持套件断言确定性。**When-to-delete**：CN 化策略反转时
 - **shared-metrics 首启问询裁剪**（2026-10-21）— 移除 `hermes_cli/main.py` 聊天前 `offer_consent_before_chat` 与 `hermes_cli/setup.py` 向导收尾 `offer_consent_if_undecided` 两个调用点（归入减法：Nous 遥测对 CN 用户无意义）。不问即不采集（`telemetry.shared_metrics.enabled` 默认 False）；`hermes setup telemetry` 手动开关与 `shared_metrics_consent.py` 模块保留。**When-to-delete**：若 CN 建立自己的遥测中继，可基于同模块重建问询
+- **CN 发版 tag 感知的版本解析**（2026-10-26）— CN 发版 tag 形如 `v<upstream>+cn.<n>`（如 v0.22.2+cn.2），upstream 的 `STABLE_TAG_RE` 按设计拒绝一切带后缀的 tag，版本解析会无视 CN tag、回落到旧 upstream tag（部署仓 tag 不全时甚至显示成 v0.16.0+46265）。`hermes_cli/version_info.py` 本地补 `_CN_TAG_RE` + `_release_sort_key`：stable 与 CN tag 同场竞逐（core tuple + fork serial），HEAD 恰在 CN tag 上时显示完整 `0.22.2+cn.2`，越过时 `0.22.2+cn.2+<dist>.g<sha>`；`base_version` 保持 stable core（插件 `requires_hermes` 比较不受影响）。同批修掉 base bump 引入的 `hermes_cli/__init__.py` 双 `__getattr__` 遮蔽（lazy-submodules 版遮蔽 old-updater 版，`hermes_cli.__version__` 因此恒 AttributeError）——old-updater 兼容改为 `_old_updater_version()` 辅助函数并入唯一 `__getattr__`。配套：`scripts/deploy/hermes-update.sh` fetch 显式 `--tags --force`（pull 的分支 refspec 不跟 tag，tag 重打后本地旧 tag 还会挡路）；`hermes_cli/__init__.py` `__release_date__` 常量随每次 CN 发版手动更新（当前 2026.10.26）。**When-to-delete**：CN 停止独立发版、回归跟随 upstream tag 时
 
 ---
 

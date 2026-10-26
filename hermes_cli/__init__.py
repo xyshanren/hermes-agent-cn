@@ -2,12 +2,12 @@
 
 import sys
 
-__release_date__ = "2026.9.24"
+__release_date__ = "2026.10.26"
 # Declared for type checkers and the old-updater surface audit; served lazily by __getattr__.
 __version__: str
 
 
-def __getattr__(name: str) -> str:
+def _old_updater_version() -> str:
     """Old-updater compat: shipped updaters import ``__version__`` after the checkout swap.
 
     tests/compat/old_updater_surface.json freezes that import. In-tree code resolves
@@ -15,13 +15,9 @@ def __getattr__(name: str) -> str:
     install stamp -- never git -- and keeps the pre-stamp placeholder when a checkout
     has no stamp.
 
-    Lazy because ``pm`` is not importable when this package loads: a venv
-    editable-installed from a pre-PM tree maps only the top-level packages it knew
-    at install time, and the repo root reaches ``sys.path`` only once
-    ``hermes_bootstrap`` runs -- after this ``__init__``, from ``hermes_cli.main``.
+    A helper (not ``__getattr__`` itself) because the lazy-submodule ``__getattr__``
+    below is the one module ``__getattr__``; a second def would shadow it.
     """
-    if name != "__version__":
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from hermes_cli.steward import read_install_stamp
     try:
         from pm.paths import repo_root
@@ -96,6 +92,8 @@ _LAZY_SUBMODULES = frozenset({"config", "quickstart"})
 
 
 def __getattr__(name):
+    if name == "__version__":
+        return _old_updater_version()
     if name in _LAZY_SUBMODULES:
         import importlib
         module = importlib.import_module(f".{name}", __name__)
