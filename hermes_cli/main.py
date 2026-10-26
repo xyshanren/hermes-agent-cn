@@ -461,10 +461,11 @@ def _looks_like_hermes_invocation() -> bool:
 
 
 def _exit_invalid_profile_name(value: str) -> None:
+    from agent.i18n import t
     from hermes_cli.profiles import _invalid_profile_name_error
 
-    print(f"Error: {_invalid_profile_name_error(value)}", file=sys.stderr)
-    print("Run `hermes profile list` to see your profiles.", file=sys.stderr)
+    print(t("cli.tui.error_prefix", error=_invalid_profile_name_error(value)), file=sys.stderr)
+    print(t("profile_list_hint"), file=sys.stderr)
     sys.exit(2)
 
 
@@ -653,7 +654,9 @@ def _apply_profile_override() -> None:
         sys.exit(1)
     except Exception as exc:
         # A bug in profiles.py must NEVER prevent hermes from starting
-        print(f"Warning: profile override failed ({exc}), using default", file=sys.stderr)
+        from agent.i18n import t
+
+        print(t("startup.profile_override_failed", error=exc), file=sys.stderr)
         return
     os.environ["HERMES_HOME"] = hermes_home
     if consume > 0:
@@ -1432,12 +1435,10 @@ def _resolve_continue_arg(args, *, use_tui: bool) -> None:
                     )
                     sys.exit(1)
             else:
-                print(f"No session found matching '{continue_val}'.", file=sys.stderr)
-                print(
-                    "Use 'hermes sessions list' to see available sessions, or "
-                    "pass --create-if-missing to start a new session with that title.",
-                    file=sys.stderr,
-                )
+                from agent.i18n import t
+
+                print(t("startup.no_session_match", value=continue_val), file=sys.stderr)
+                print(t("startup.no_session_match_hint"), file=sys.stderr)
                 sys.exit(1)
         else:
             # Bare -c: this terminal's breadcrumb (so side-by-side terminals
@@ -1484,12 +1485,16 @@ def _apply_in_dir(args) -> None:
 
     _target_dir = os.path.abspath(os.path.expanduser(_msys_to_windows_path(in_dir)))
     if not os.path.isdir(_target_dir):
-        print(f"Error: --in directory not found: {in_dir}")
+        from agent.i18n import t
+
+        print(t("startup.in_dir_not_found", in_dir=in_dir))
         sys.exit(1)
     try:
         os.chdir(_target_dir)
     except OSError as e:
-        print(f"Error: cannot enter --in directory {in_dir}: {e}")
+        from agent.i18n import t
+
+        print(t("startup.in_dir_enter_failed", in_dir=in_dir, error=e))
         sys.exit(1)
     # Every cwd consumer (resolve_agent_cwd -> Codex app-server thread cwd, the
     # terminal tool, context-file discovery) prefers TERMINAL_CWD over the process
@@ -1523,9 +1528,11 @@ def _resolve_chat_session_args(args, use_tui: bool) -> None:
         if _last_id:
             args.resume = _last_id
         else:
+            from agent.i18n import t
+
             kind = "TUI" if use_tui else "CLI"
-            print(f"No previous {kind} session found to resume.")
-            print("Use 'hermes sessions list' to see available sessions.")
+            print(t("startup.no_previous_session", kind=kind))
+            print(t("startup.sessions_list_hint"))
             sys.exit(1)
 
     _resolve_continue_arg(args, use_tui=use_tui)
@@ -1550,10 +1557,14 @@ def _resolve_chat_session_args(args, use_tui: bool) -> None:
         with _session_db() as db:  # never let cwd-restore break a resume
             _saved_cwd = ((db.get_session(args.resume) or {}).get("cwd") or "").strip()
             if _saved_cwd and not os.path.isdir(_saved_cwd):
-                print(f"⚠ session's recorded dir is gone ({_saved_cwd}); staying in {os.getcwd()}")
+                from agent.i18n import t
+
+                print(t("startup.saved_cwd_gone", saved=_saved_cwd, cwd=os.getcwd()))
             elif _saved_cwd and os.path.realpath(_saved_cwd) != os.path.realpath(os.getcwd()):
                 os.chdir(_saved_cwd)
-                print(f"↪ restored workspace dir: {_saved_cwd}")
+                from agent.i18n import t
+
+                print(t("startup.cwd_restored", cwd=_saved_cwd))
 
 
 def _warn_retired_xai_models() -> None:
@@ -1634,12 +1645,12 @@ def _start_chat_background_prefetch() -> None:
 
 def _first_run_setup_guard(args) -> None:
     """No provider configured: offer `hermes setup` (TTY) or exit 1 with guidance."""
+    from agent.i18n import t
+
     print()
-    print(
-        "It looks like Hermes isn't configured yet -- no API keys or providers found."
-    )
+    print(t("startup.not_configured"))
     print()
-    print("  Run:  hermes setup")
+    print(t("startup.run_setup"))
     print()
 
     from hermes_cli.setup import (
@@ -1649,19 +1660,19 @@ def _first_run_setup_guard(args) -> None:
 
     if not is_interactive_stdin():
         print_noninteractive_setup_guidance(
-            "No interactive TTY detected for the first-run setup prompt."
+            t("startup.no_tty_note")
         )
         sys.exit(1)
 
     try:
-        reply = input("Run setup now? [Y/n] ").strip().lower()
+        reply = input(t("startup.run_setup_now")).strip().lower()
     except (EOFError, KeyboardInterrupt):
         reply = "n"
     if reply in {"", "y", "yes"}:
         cmd_setup(args)
         return
     print()
-    print("You can run 'hermes setup' at any time to configure.")
+    print(t("startup.setup_anytime"))
     sys.exit(1)
 
 
@@ -1896,7 +1907,9 @@ def cmd_model(args):
         try:
             from hermes_cli.models import clear_provider_models_cache
             clear_provider_models_cache()
-            print("  Cleared model picker cache.")
+            from agent.i18n import t
+
+            print(t("startup.picker_cache_cleared"))
         except Exception:
             pass
     from hermes_cli.observability.shared_metrics_setup import provider_setup_surface
@@ -1975,11 +1988,9 @@ def _resolve_active_provider(config, model_cfg, effective_provider, custom_provi
                     active,
                 )
         else:
-            print(
-                f"Warning: Unknown provider '{effective_provider}'. Check 'hermes model' for "
-                "available providers, or run 'hermes doctor' to diagnose config "
-                "issues. Falling back to auto provider detection."
-            )
+            from agent.i18n import t
+
+            print(t("startup.unknown_provider", provider=effective_provider))
     if not active:
         try:
             active = resolve_provider("auto")
@@ -1987,9 +1998,13 @@ def _resolve_active_provider(config, model_cfg, effective_provider, custom_provi
             if exc.code == "no_provider_configured":
                 # The picker that is about to open IS the fix; a warning that says
                 # "run `hermes model`" from inside `hermes model` is circular.
-                print("No provider is set up yet — pick one below. (Nous Portal works without an API key.)")
+                from agent.i18n import t
+
+                print(t("startup.no_provider_yet"))
             elif effective_provider == "auto":
-                print(f"Warning: {format_auth_error(exc)} Falling back to auto provider detection.")
+                from agent.i18n import t
+
+                print(t("startup.auth_fallback", error=format_auth_error(exc)))
             active = None  # no provider yet; default to first in list
 
     # Detect custom endpoint
@@ -2057,8 +2072,10 @@ def select_provider_and_model(args=None):
         active_label = provider_labels.get(active, active) if active else "none"
 
     print()
-    print(f"  Current model:    {current_model}")
-    print(f"  Active provider:  {active_label}")
+    from agent.i18n import t
+
+    print(t("startup.current_model", model=current_model))
+    print(t("startup.active_provider", provider=active_label))
     print()
 
     selected_provider = _pick_provider(config, active, provider_labels, _custom_provider_map)
@@ -2544,7 +2561,9 @@ def _dashboard_lifecycle_flags(args, token_file) -> None:
 
         own_home = str(get_hermes_home())
         if not _find_stale_dashboard_pids(scope_home=own_home):
-            print("No hermes dashboard processes running for this profile.")
+            from agent.i18n import t
+
+            print(t("startup.no_dashboard_processes"))
             sys.exit(0)
         # Reuse the same SIGTERM-grace-SIGKILL path used after `hermes update`;
         # it prints outcomes itself. Exit 1 only if a pid was unkillable — judged
@@ -2682,7 +2701,9 @@ def _dashboard_prepare_runtime(args, headless_backend) -> bool:
     except Exception as exc:
         # Must not block startup; the gate's fail-closed branch surfaces a
         # missing provider if it matters.
-        print(f"⚠ Plugin discovery failed: {exc}", file=sys.stderr)
+        from agent.i18n import t
+
+        print(t("startup.plugin_discovery_failed", error=exc), file=sys.stderr)
 
     # Desktop chat uses the in-process /api/ws gateway (tui_gateway.server
     # ._make_agent), which only snapshots the tool registry and never starts
