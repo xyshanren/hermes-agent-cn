@@ -93,16 +93,14 @@ def _print_curator_first_run_notice() -> None:
     except Exception:
         hours = 24 * 7
     days = max(1, hours // 24)
+    from agent.i18n import t
+
     print()
-    print("ℹ Skill curator")
-    print(
-        f"  Background skill maintenance is enabled. First pass is deferred "
-        f"~{days}d after installation; only agent-created skills are in "
-        f"scope and nothing is ever auto-deleted (archive is recoverable)."
-    )
-    print("  Preview now:  hermes curator run --dry-run")
-    print("  Pause it:     hermes curator pause")
-    print("  Docs:         https://hermes-agent.nousresearch.com/docs/user-guide/features/curator")
+    print(t("maint.curator_header"))
+    print(t("maint.curator_intro", days=days))
+    print(t("maint.curator_preview"))
+    print(t("maint.curator_pause"))
+    print(t("maint.curator_docs"))
 
 
 def _print_fts_optimize_available_notice() -> None:
@@ -169,38 +167,26 @@ def _print_fts_optimize_available_notice() -> None:
         return  # current layout already present (fresh/optimized)
 
     if interrupted:
+        from agent.i18n import t
+
         print()
-        print("◆ Session database optimization incomplete")
-        print(
-            "  A previous `hermes sessions optimize-storage` run was "
-            "interrupted. Search still works; re-run the command to resume "
-            "and finish reclaiming disk:"
-        )
+        print(t("maint.fts_incomplete"))
+        print(t("maint.fts_incomplete_detail"))
         print("    hermes sessions optimize-storage")
         return
 
     est_reclaim = size_gb * 0.6
+    from agent.i18n import t
+
     print()
     if mode == "require":
-        print("◆ Session database upgrade required")
-        print(
-            f"  Your search index uses the OLD storage layout and should be "
-            f"upgraded. The new layout typically frees ~60% of state.db "
-            f"(≈{est_reclaim:.1f} GB of your current {size_gb:.1f} GB) and is "
-            f"required for continued optimal operation."
-        )
+        print(t("maint.fts_upgrade_required"))
+        print(t("maint.fts_upgrade_required_detail", reclaim=f"{est_reclaim:.1f}", size=f"{size_gb:.1f}"))
     else:
-        print("◆ Reclaim ~60% of your session database disk")
-        print(
-            f"  Your search index uses the old storage layout. Upgrading it "
-            f"typically frees ~60% of state.db — about {est_reclaim:.1f} GB "
-            f"of your current {size_gb:.1f} GB."
-        )
-    print("  Run when convenient:  hermes sessions optimize-storage")
-    print(
-        "  It runs in the foreground with a progress bar, is safe to "
-        "interrupt/re-run, and never changes your conversations."
-    )
+        print(t("maint.fts_reclaim"))
+        print(t("maint.fts_reclaim_detail", reclaim=f"{est_reclaim:.1f}", size=f"{size_gb:.1f}"))
+    print(t("maint.fts_run_hint"))
+    print(t("maint.fts_safety_note"))
 
 
 def _print_curator_recent_run_notice() -> None:
@@ -223,11 +209,13 @@ def _print_curator_recent_run_notice() -> None:
 
     # Only a multi-line summary (rename map) is worth showing; still stamp it shown.
     if "\n" in summary:
+        from agent.i18n import t
+
         print()
-        print(f"ℹ Skill curator — last run {_format_time_ago(last_run_at)}")
+        print(t("maint.curator_last_run", when=_format_time_ago(last_run_at)))
         for line in summary.splitlines():
             print(f"  {line}")
-        print("  (This message shows once per curator run. View anytime: hermes curator status)")
+        print(t("maint.curator_once_note"))
 
     with suppress(Exception):
         state["last_run_summary_shown_at"] = last_run_at
@@ -293,18 +281,22 @@ def _refresh_dashboard_after_update(*, already_restarted_units: set[str] | None 
         # reconciliation (an owed gateway_restart follow-up).
         logger.warning("Post-update dashboard cleanup failed: %s", exc)
         _record_update_step("dashboard_cleanup", False, f"{type(exc).__name__}: {exc}")
+        from agent.i18n import t
+
         print()
-        print(f"⚠ Could not refresh running dashboard/serve process(es): {exc}")
-        print("  If one is still running, restart it so it serves the updated code:")
+        print(t("maint.dashboard_refresh_failed", error=exc))
+        print(t("maint.dashboard_restart_hint"))
         print("    hermes dashboard --port <port>   (or: systemctl --user restart hermes-dashboard)")
         return set()
     unrecovered = {int(pid) for pid in stop_result.get("unrecovered") or ()}
     if not unrecovered:
         return unrecovered
 
+    from agent.i18n import t
+
     print()
-    print("⚠ A web dashboard/serve process was stopped during update and could not be auto-restarted.")
-    print("  Re-launch it when you want the web UI back:")
+    print(t("maint.dashboard_stopped_unrecovered"))
+    print(t("maint.dashboard_relaunch_hint"))
     print("    hermes dashboard --port <port>")
     return unrecovered
 
@@ -415,11 +407,12 @@ def _restore_state_db_from_snapshot(state_path: Path, snap_state: Path) -> bool:
     if not verify_sqlite_integrity(snap_state, check_header=True, run_pragma=True).get("valid"):
         return False
     if not _safe_restore_db(snap_state, state_path):
-        print("  ✗ Auto-restore refused or failed; state.db was not restored.")
-        print("    Stop the owning runtime and close database handles before retrying.")
-        print("    If the canonical runtime epoch is unreadable, do not restore in place:")
-        print("    use `hermes sessions recover --source <snapshot> --output <separate-path>`")
-        print("    to salvage transcripts into a separate output.")
+        from agent.i18n import t
+
+        print(t("maint.autorestore_refused"))
+        print(t("maint.autorestore_stop_runtime"))
+        print(t("maint.autorestore_epoch_hint"))
+        print(t("maint.autorestore_recover_hint"))
         return False
     restored = verify_sqlite_integrity(state_path, check_header=True, run_pragma=True)
     return bool(restored.get("valid"))
@@ -438,10 +431,12 @@ def _verify_and_restore_one_state_db(home: Path, *, label: str) -> None:
             logger.debug("Post-update state.db integrity OK (%s): %s", label, ok.get("message"))
             return
         print()
-        print(f"⚠ state.db is corrupted after update ({label}): " + ok.get("message", "unknown error"))
+        from agent.i18n import t
+
+        print(t("maint.state_db_corrupted", label=label, error=ok.get("message", "unknown error")))
         snap_root = _quick_snapshot_root(home)
         if not snap_root.exists():
-            print("  ⚠ No pre-update snapshot for this home")
+            print(t("maint.no_snapshot_home"))
             return
         for snap_dir in sorted((d for d in snap_root.iterdir() if d.is_dir()), reverse=True):
             snap_state = snap_dir / "state.db"
@@ -451,13 +446,13 @@ def _verify_and_restore_one_state_db(home: Path, *, label: str) -> None:
                 continue
             try:
                 if _restore_state_db_from_snapshot(state_path, snap_state):
-                    print(f"  ✓ Auto-restored from snapshot {snap_dir.name} ({label})")
+                    print(t("maint.autorestored", snapshot=snap_dir.name, label=label))
                 else:
-                    print("  ✗ Auto-restore did not complete; see the restore diagnostic above.")
+                    print(t("maint.autorestore_incomplete"))
             except OSError as exc:
-                print(f"  ✗ Auto-restore file copy failed: {exc}")
+                print(t("maint.autorestore_copy_failed", error=exc))
             return
-        print("  ⚠ No valid pre-update snapshot found for this home")
+        print(t("maint.no_valid_snapshot"))
     except Exception as exc:
         logger.debug("Post-update state.db guard (%s) failed: %s", label, exc)
 
@@ -498,21 +493,23 @@ def _invalidate_live_plugin_catalog_caches() -> None:
 
 def _print_bundled_skills_sync_report() -> None:
     """Run ``sync_skills`` (copies new, updates changed, respects user deletions) and print its summary."""
+    from agent.i18n import t
     from tools.skills_sync import sync_skills
+
     result = sync_skills(quiet=True)
     if result["copied"]:
-        print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
+        print(t("maint.skills_new", count=len(result['copied']), names=', '.join(result['copied'])))
     if result.get("updated"):
-        print(f"  ↑ {len(result['updated'])} updated: {', '.join(result['updated'])}")
+        print(t("maint.skills_updated", count=len(result['updated']), names=', '.join(result['updated'])))
     if result.get("user_modified"):
-        print(f"  ~ {len(result['user_modified'])} user-modified (kept)")
-        print("    → see them: hermes skills list-modified  (diff/reset to resume updates)")
+        print(t("maint.skills_user_modified", count=len(result['user_modified'])))
+        print(t("maint.skills_modified_hint"))
     if result.get("cleaned"):
-        print(f"  − {len(result['cleaned'])} removed from manifest")
+        print(t("maint.skills_cleaned", count=len(result['cleaned'])))
     if result.get("relocated"):
-        print(f"  → {len(result['relocated'])} moved to new upstream paths: {', '.join(result['relocated'])}")
+        print(t("maint.skills_relocated", count=len(result['relocated']), names=', '.join(result['relocated'])))
     if not result["copied"] and not result.get("updated"):
-        print("  ✓ Skills are up to date")
+        print(t("maint.skills_up_to_date"))
 
 
 def _ensure_fhs_path_guard() -> None:
@@ -585,12 +582,18 @@ def _ensure_fhs_path_guard() -> None:
             with cfg.open("a", encoding="utf-8") as f:
                 f.write("\n" + path_comment + "\n" + path_line + "\n")
         except OSError as e:
-            print(f"  ⚠ Could not update {cfg}: {e}")
+            from agent.i18n import t
+
+            print(t("maint.path_update_failed", cfg=cfg, error=e))
             continue
-        print(f"  ✓ Added /usr/local/bin to PATH in {cfg}")
+        from agent.i18n import t
+
+        print(t("maint.path_added", cfg=cfg))
         wrote_any = True
     if wrote_any:
-        print("    (reload your shell or run 'source ~/.bashrc' to pick it up)")
+        from agent.i18n import t
+
+        print(t("maint.path_reload_hint"))
 
 
 def _ensure_acp_launcher() -> None:
@@ -646,15 +649,17 @@ def _verify_state_db_after_snapshot(snapshot_id: str) -> None:
     )
     if _integrity.get("valid"):
         return
-    print(f"  ⚠ state.db integrity check FAILED after snapshot: {_integrity.get('message', 'unknown error')}")
+    from agent.i18n import t
+
+    print(t("maint.snapshot_integrity_failed", error=_integrity.get('message', 'unknown error')))
     _snap_state = _quick_snapshot_root(get_hermes_home()) / snapshot_id / "state.db"
     if not _snap_state.exists():
-        print("  ⚠ Snapshot does not contain state.db (was skipped or too large).")
+        print(t("maint.snapshot_no_state_db"))
     elif verify_sqlite_integrity(_snap_state, check_header=True, run_pragma=True).get("valid"):
-        print("  ✓ Snapshot copy is valid — continuing update.")
-        print("    If state.db is lost after update it will be auto-restored.")
+        print(t("maint.snapshot_valid"))
+        print(t("maint.snapshot_valid_note"))
     else:
-        print("  ✗ Snapshot copy ALSO failed integrity — the source was already corrupted before the backup.")
+        print(t("maint.snapshot_also_corrupt"))
     print()
 
 
@@ -667,7 +672,9 @@ def _run_quick_snapshots() -> Optional[str]:
     )
     if snapshot_id:
         _verify_state_db_after_snapshot(snapshot_id)
-        print(f"◆ Pre-update snapshot: {snapshot_id}")
+        from agent.i18n import t
+
+        print(t("maint.snapshot_header", snapshot=snapshot_id))
 
     # The code swap + fleet restart touch EVERY profile, so each gets the same snapshot
     # under its own state-snapshots/. Best-effort per profile.
@@ -677,7 +684,9 @@ def _run_quick_snapshots() -> Optional[str]:
             keep=_PRE_UPDATE_SNAPSHOT_KEEP, max_file_size=_PRE_UPDATE_SNAPSHOT_MAX_FILE_SIZE,
         )
         if _sibling_snaps:
-            print("◆ Sibling profile snapshot(s): " + ", ".join(sorted(_sibling_snaps)))
+            from agent.i18n import t
+
+            print(t("maint.sibling_snapshots", snaps=", ".join(sorted(_sibling_snaps))))
             _record_update_step(
                 "sibling_profile_snapshots",
                 True,
@@ -694,7 +703,9 @@ def _run_full_backup() -> None:
     try:
         from hermes_cli.backup import create_pre_update_backup
     except Exception as exc:
-        print(f"⚠ Pre-update backup: could not load backup module ({exc}); continuing update.")
+        from agent.i18n import t
+
+        print(t("maint.backup_module_failed", error=exc))
         print()
         return
 
@@ -703,19 +714,21 @@ def _run_full_backup() -> None:
     except Exception:
         _keep = 5
 
-    print("◆ Creating pre-update backup...")
+    from agent.i18n import t
+
+    print(t("maint.backup_creating"))
     t0 = _time.monotonic()
     try:
         out_path = create_pre_update_backup(keep=int(_keep))
     except Exception as exc:  # defensive — helper already swallows, but just in case
-        print(f"  ⚠ Backup failed: {exc}")
-        print("  Continuing with update.")
+        print(t("maint.backup_failed", error=exc))
+        print(t("maint.backup_continuing"))
         print()
         return
     elapsed = _time.monotonic() - t0
 
     if out_path is None:
-        print("  ⚠ Backup skipped (no files found or write failed); continuing update.")
+        print(t("maint.backup_skipped"))
         print()
         return
 
@@ -732,9 +745,9 @@ def _run_full_backup() -> None:
     except Exception:
         display_path = str(out_path)
 
-    print(f"  Saved:    {display_path} ({format_bytes(size_bytes)}, {elapsed:.1f}s)")
-    print(f"  Restore:  hermes import {out_path}")
-    print("  Disable:  set updates.pre_update_backup: quick (or off) in config.yaml")
+    print(t("maint.backup_saved", path=display_path, size=format_bytes(size_bytes), elapsed=f"{elapsed:.1f}"))
+    print(t("maint.backup_restore_cmd", path=out_path))
+    print(t("maint.backup_disable_hint"))
     print()
 
 
@@ -751,7 +764,9 @@ def _run_pre_update_backup(args) -> Optional[str]:
 
     if mode == "off":
         if getattr(args, "no_backup", False):
-            print("◆ Pre-update backup: skipped (--no-backup)")
+            from agent.i18n import t
+
+            print(t("maint.backup_skipped_flag"))
             print()
         # Config-level off is silent: the user opted out.
         return None
@@ -769,8 +784,10 @@ def _run_pre_update_backup(args) -> Optional[str]:
         # swallowed failure is how a user discovers post-hoc that the receipt says
         # ``ok: false`` and nothing was there to restore (#114592). Say it on stdout, once,
         # before any code moves.
-        print(f"  ⚠ Pre-update snapshot FAILED — no recovery point was saved{snapshot_detail}.")
-        print("  Continuing with update (set updates.pre_update_backup: off to silence this).")
+        from agent.i18n import t
+
+        print(t("maint.snapshot_failed", detail=snapshot_detail))
+        print(t("maint.snapshot_failed_hint"))
         print()
 
     if mode != "full":
@@ -795,7 +812,9 @@ def _sweep_bytecode_after_update(branch: str) -> None:
     try:
         removed = _m()._clear_bytecode_cache(_m().PROJECT_ROOT)
         if removed:
-            print(f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}")
+            from agent.i18n import t
+
+            print(t("maint.pycache_cleared", count=removed))
         _m()._record_bytecode_fingerprint()
     except Exception as exc:  # health: allow BLE001 -- owed to the next launch's fingerprint sweep
         record_followup("bytecode_sweep", str(exc) or type(exc).__name__)
@@ -828,7 +847,9 @@ def _sync_profiles_after_update() -> None:
         all_profiles = list_profiles()
         if all_profiles:
             print()
-            print("→ Syncing bundled skills to all profiles...")
+            from agent.i18n import t
+
+            print(t("maint.syncing_all_profiles"))
             for p in all_profiles:
                 try:
                     print(f"  {p.name}: {_profile_skill_sync_status(seed_profile_skills(p.path, quiet=True))}")
@@ -842,14 +863,18 @@ def _sync_profiles_after_update() -> None:
         from hermes_cli.profiles import backfill_profile_envs
         backfilled = backfill_profile_envs(quiet=True)
         if backfilled:
+            from agent.i18n import t
+
             print()
-            print(f"→ Seeded .env for {len(backfilled)} profile(s) (copied from default): {', '.join(backfilled)}")
+            print(t("maint.env_seeded", count=len(backfilled), names=', '.join(backfilled)))
 
     with suppress(Exception):
         from plugins.memory import import_provider_module
         synced = import_provider_module("honcho", "cli").sync_honcho_profiles_quiet()
         if synced:
-            print(f"\n-> Honcho: synced {synced} profile(s)")
+            from agent.i18n import t
+
+            print(t("maint.honcho_synced", count=synced))
 
 
 def _refresh_cua_driver_after_update() -> None:
@@ -865,10 +890,14 @@ def _refresh_cua_driver_after_update() -> None:
     if sys.platform == "win32":
         # The scheduled task targets a versioned binary. Selecting a new pin
         # without re-registering leaves it stale; registration requires UAC.
-        print("\n→ Windows cua-driver refresh deferred (autostart registration requires UAC).")
-        print("  Run `hermes computer-use install --upgrade` in an interactive terminal.")
+        from agent.i18n import t
+
+        print(t("maint.cua_deferred"))
+        print(t("maint.cua_manual_hint"))
         return
-    print("\n→ Preparing pinned cua-driver (Computer Use)...")
+    from agent.i18n import t
+
+    print(t("maint.cua_preparing"))
     if sys.platform == "darwin":
         # PM preserves the signed app; setup validates and registers its new path
         # with LaunchServices. This path never requests permissions or elevation.
@@ -900,12 +929,14 @@ def _install_default_tools_after_update() -> None:
     for name in default_packages(Lockfile(lockfile_path()).names()):
         if pm.installed_package(name) is not None:
             continue
-        print(f"\n→ Installing {name} (default tool; opt out with `hermes pm install --without {name}`)...")
+        from agent.i18n import t
+
+        print(t("maint.pm_default_installing", name=name))
         try:
             pm.ensure(name, explicit=True)
         except (pm.InstallError, OSError) as exc:
-            print(f"  ⚠ {name} was not installed: {exc}")
-            print(f"    Retry with: hermes pm install {name}")
+            print(t("maint.pm_default_failed", name=name, error=exc))
+            print(t("maint.pm_default_retry", name=name))
 
 
 def _print_checkpoint_footprint_notice() -> None:
@@ -1013,16 +1044,22 @@ def _run_post_update_maintenance(
         from hermes_cli.gitlock import fetch_full_commit_graph
         from hermes_cli.update_cmd import _no_prompt_git_kwargs
         if fetch_full_commit_graph(Path(_m().PROJECT_ROOT), **_no_prompt_git_kwargs()):
-            print("  ✓ Fetched release history (commits only) for version identity")
+            from agent.i18n import t
+
+            print(t("maint.release_history_fetched"))
     except (OSError, subprocess.SubprocessError) as exc:
         detail = (getattr(exc, "stderr", None) or str(exc)).strip().splitlines()[-1:] or [type(exc).__name__]
-        print(f"  ⚠ Could not refresh release history ({detail[0]}); the version label may be stale or unknown until the next update")
+        from agent.i18n import t
+
+        print(t("maint.release_history_failed", detail=detail[0]))
 
     # Seed the model-catalog cache from the checkout instead of a bot-gated, flaky fetch.
     with _best_effort('Model catalog seed during update failed: %s'):
         from hermes_cli.model_catalog import seed_cache_from_checkout
         if seed_cache_from_checkout(_m().PROJECT_ROOT):
-            print("  ✓ Model catalog cache refreshed from checkout")
+            from agent.i18n import t
+
+            print(t("maint.model_catalog_refreshed"))
 
     # Drop the cached live plugin catalog under every profile: the checkout is shared, so a
     # pre-update snapshot must not out-vote the pins/entries this update just installed for the
@@ -1031,8 +1068,10 @@ def _run_post_update_maintenance(
         _invalidate_live_plugin_catalog_caches()
 
     with _best_effort('Skills sync during update failed: %s'):
+        from agent.i18n import t
+
         print()
-        print("→ Syncing bundled skills...")
+        print(t("maint.syncing_bundled_skills"))
         _print_bundled_skills_sync_report()
 
     owed_step("profile_sync", _sync_profiles_after_update)
