@@ -298,10 +298,14 @@ def _heal_stale_shallow_checkout(repo_root: Path, branch: str) -> None:
 
     try:
         if heal_shallow_history(repo_root, branch, **_no_prompt_git_kwargs()):
-            print("  ✓ Fetched the commit history this shallow checkout was missing")
+            from agent.i18n import t
+
+            print(t("update.shallow_fetched"))
     except (OSError, subprocess.SubprocessError) as exc:
         detail = (getattr(exc, "stderr", None) or str(exc)).strip().splitlines()[-1:] or [type(exc).__name__]
-        print(f"  ⚠ Could not fetch the missing commit history ({detail[0]}); a very stale install may time out")
+        from agent.i18n import t
+
+        print(t("update.shallow_fetch_failed", detail=detail[0]))
 
 
 def _capture_head_sha(git_cmd, cwd) -> str | None:
@@ -391,7 +395,9 @@ def _gateway_prompt(prompt_text: str, default: str = "", timeout: float = 300.0)
     from hermes_constants import get_hermes_home
 
     if _posix_pause.gateways_paused():  # the gateway that would relay it is stopped for the update
-        print(f"  → {prompt_text} → {default or '(empty)'} (gateways are paused for the update)")
+        from agent.i18n import t
+
+        print(t("update.prompt_paused", prompt_text=prompt_text, default=default or '(empty)'))
         return default
     home = get_hermes_home()
     prompt_path = home / ".update_prompt.json"
@@ -656,7 +662,9 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
 
     root = _m().PROJECT_ROOT
     if not (root / ".git").exists():
-        print("✗ Not a git repository — cannot check for updates.")
+        from agent.i18n import t
+
+        print(t("update.not_git_repo"))
         sys.exit(1)
 
     git_cmd = _base_git_cmd()
@@ -686,7 +694,9 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
         _check.repair_shallow_grafts(root)
 
     if not _check.compare_ref_exists(git_cmd, root, compare_branch):
-        print(f"✗ Branch '{branch}' not found on {compare_branch.split('/', 1)[0]}.")
+        from agent.i18n import t
+
+        print(t("update.branch_not_found", branch=branch, remote=compare_branch.split('/', 1)[0]))
         sys.exit(1)
     if is_shallow:
         _check.report_shallow_verdict(git_cmd, root, compare_branch)
@@ -713,15 +723,17 @@ def _tip_shas(git_cmd, target_ref: str, base: str = "HEAD") -> tuple[str, str]:
 
 def _print_update_check_result(behind: int | None, compare_branch: str) -> None:
     """Report ``--check``'s verdict: up to date, N commits behind, or behind by an unknown count."""
+    from agent.i18n import t
+    from hermes_cli.config import recommended_update_command
+
     if behind == 0:
-        print("✓ Already up to date.")
+        print(t("update.already_up_to_date"))
         return
     if behind is not None:
-        print(f"☤ Update available: {behind} {'commit' if behind == 1 else 'commits'} behind {compare_branch}.")
+        print(t("update.update_available_commits", behind=behind, branch=compare_branch))
     else:
-        print(f"☤ Update available (behind {compare_branch}).")
-    from hermes_cli.config import recommended_update_command
-    print(f"  Run '{recommended_update_command()}' to install.")
+        print(t("update.update_available_branch", branch=compare_branch))
+    print(t("update.run_to_install", cmd=recommended_update_command()))
 
 
 def _source_completion_request(opts, plan, snapshot_id, windows_resume, desktop, gateway_mode) -> dict:
@@ -842,7 +854,9 @@ def _complete_source_update(request: dict | None) -> None:
         return  # a retired channel is adopted after a verified completion only; the next update adopts it
     try:
         if adopt_retired_channel(request):
-            print(f"→ Source subscription moved to {request['channel_retirement']['destination']}")
+            from agent.i18n import t
+
+            print(t("update.channel_moved", destination=request['channel_retirement']['destination']))
     except Exception as exc:  # health: allow BLE001 -- the code is committed (C3); the next update re-adopts
         from hermes_cli.update_receipt import owe_followup
 
@@ -862,16 +876,19 @@ def _reconcile_diverged_checkout(git_cmd, branch: str, pre_pull_sha, *, target_r
     merge_ref = target_ref if target_ref is not None else f"origin/{branch}"
     _cur_branch = (_git_run(git_cmd, ["branch", "--show-current"]).stdout or "").strip()
     if _cur_branch and _cur_branch != branch:
+        from agent.i18n import t
+
         print(
-            f"  ⚠ Checkout is on custom branch '{_cur_branch}' — "
-            f"merging origin/{branch} instead of resetting so local commits survive...")
+            t("update.custom_branch_merge", branch=_cur_branch, origin=f"origin/{branch}"))
         # Best-effort safety tag as a recovery anchor.
         _git_run(git_cmd, ["tag", f"pre-update-{_time.strftime('%Y%m%d-%H%M%S')}"])
         if _git_run(git_cmd, ["merge", "--no-edit", merge_ref]).returncode != 0:
             _git_run(git_cmd, ["merge", "--abort"])
-            print("✗ Merge conflict between local commits and upstream — update stopped, nothing was changed.")
-            print(f"  Resolve manually: cd {_m().PROJECT_ROOT} && git merge origin/{branch}")
-            print("  Then re-run the update. Local work is untouched.")
+            from agent.i18n import t
+
+            print(t("update.merge_conflict"))
+            print(t("update.merge_conflict_resolve", root=_m().PROJECT_ROOT, branch=branch))
+            print(t("update.merge_conflict_rerun"))
             _record_stop("merge_conflict")
             sys.exit(1)
         return
@@ -884,37 +901,40 @@ def _reconcile_diverged_checkout(git_cmd, branch: str, pre_pull_sha, *, target_r
         merge_base_result.returncode == 0 and merge_base_result.stdout.strip())
     if pre_pull_sha:
         from datetime import datetime as _dt, timezone
+        from agent.i18n import t
+
         # SHA suffix so two updates in the same second get distinct refs.
         kind = "diverged" if has_common_ancestor else "orphan"
         rescue_ref = (
             f"refs/hermes-update-backups/{kind}-{branch}-"
             f"{_dt.now(UTC).strftime('%Y%m%d-%H%M%S')}-{pre_pull_sha[:12]}")
         head = (
-            f"  ⚠ Local history has diverged from origin/{branch} — "
+            t("update.diverged_head", branch=f"origin/{branch}")
             if has_common_ancestor else
-            f"  ⚠ Local history shares no common ancestor with origin/{branch} (orphan divergence) — ")
+            t("update.orphan_head", branch=f"origin/{branch}"))
         if _git_run(git_cmd, ["update-ref", rescue_ref, pre_pull_sha]).returncode == 0:
             print(
-                f"{head}backed up current HEAD to {rescue_ref} before resetting. "
-                f"This backup expires after {_ORPHAN_RESCUE_REF_MAX_AGE_DAYS} days.")
+                f"{head}" + t("update.backup_ok", ref=rescue_ref,
+                              days=_ORPHAN_RESCUE_REF_MAX_AGE_DAYS))
             if has_common_ancestor:
                 dropped = (_git_run(
                     git_cmd, ["rev-list", "--count", f"origin/{branch}..{pre_pull_sha}"]).stdout or "").strip()
-                print(f"    {dropped or 'Some'} commit(s) not on origin/{branch} leave the branch; "
-                      f"list them with: git log origin/{branch}..{rescue_ref}")
+                print(t("update.diverged_dropped", dropped=dropped or t("update.some"),
+                        branch=f"origin/{branch}", ref=rescue_ref))
         else:
             # update-ref failure is intentionally non-fatal, but never claim a backup exists.
             print(
-                f"{head}attempted to back up current HEAD to {rescue_ref} before resetting, "
-                f"but the backup write failed (pre-reset SHA was {pre_pull_sha}).")
+                f"{head}" + t("update.backup_failed", ref=rescue_ref, sha=pre_pull_sha))
         _prune_orphan_rescue_refs(git_cmd, _m().PROJECT_ROOT, branch)
-    print("  ⚠ Fast-forward not possible (history diverged), resetting to match remote...")
+    from agent.i18n import t
+
+    print(t("update.ff_not_possible"))
     reset_result = _git_run(git_cmd, ["reset", "--hard", merge_ref])
     if reset_result.returncode != 0:
-        print(f"✗ Failed to reset to origin/{branch}.")
+        print(t("update.reset_failed", branch=f"origin/{branch}"))
         if reset_result.stderr.strip():
             print(f"  {reset_result.stderr.strip()}")
-        print(f"  Try manually: git fetch origin && git reset --hard origin/{branch}")
+        print(t("update.reset_manual"))
         _record_stop("checkout_move_failed")
         sys.exit(1)
 
@@ -949,9 +969,11 @@ def _roll_back_broken_update(git_cmd, pre_pull_sha, failing_path, syntax_error, 
     if pre_pull_sha:
         # Restore the checkout the update left, never reset the update branch onto commits from
         # a parked feature branch or a detached checkout.
+        from agent.i18n import t
+
         root = _m().PROJECT_ROOT
         parked = rollback_branch not in (None, "HEAD")
-        print(f"→ Rolling back to {rollback_branch if parked else pre_pull_sha[:10]}...")
+        print(t("update.rolling_back", target=rollback_branch if parked else pre_pull_sha[:10]))
         # HEAD and the index go back FIRST, without writing a file, then the files follow. A kill in
         # between leaves HEAD on pre_pull_sha with the broken files reading as the move's own
         # writes, so the next launch's restore lands on pre_pull_sha, never on the broken commit;
@@ -963,7 +985,9 @@ def _roll_back_broken_update(git_cmd, pre_pull_sha, failing_path, syntax_error, 
         except (OSError, subprocess.SubprocessError) as exc:  # its symbolic-ref can time out
             # Refusing would leave the broken tree in place: roll back unmarked, and only a tree
             # verified whole at pre_pull_sha below may report success (else the manual recipe).
-            print(f"  ⚠ Could not write the interrupted-pull marker ({exc}); rolling back without it.")
+            from agent.i18n import t
+
+            print(t("update.marker_write_failed", exc=exc))
         # The paused gateways' tree gate knows the rollback's target before git writes a file.
         with _checkout_move(_windows_gateway_resume, pre_pull_sha):
             added = _commit.files_added_by(git_cmd, root, pre_pull_sha, target_sha)
@@ -989,23 +1013,31 @@ def _roll_back_broken_update(git_cmd, pre_pull_sha, failing_path, syntax_error, 
                 # Same commit, so only HEAD's name changes. The parked branch can be unavailable (e.g.
                 # checked out in another worktree): its commit then stays checked out detached.
                 if _git_run(git_cmd, ["checkout", rollback_branch]).returncode != 0:
-                    print(f"  ✗ Could not check out {rollback_branch}; restoring its commit detached.")
+                    from agent.i18n import t
+
+                    print(t("update.checkout_parked_failed", branch=rollback_branch))
         if rollback_result.returncode == 0:
+            from agent.i18n import t
+
             interrupted_pull_marker(root).unlink(missing_ok=True)
             _commit.disarm_commit_obligations()  # back on the code this run started from
-            print("  ✓ Rollback complete — your install is unchanged.")
-            print("  Try ``hermes update`` again later once a fix lands.")
+            print(t("update.rollback_complete"))
+            print(t("update.rollback_retry"))
         else:
-            print("  ✗ Rollback failed. Recover manually with:")
-            print(f"    cd {root} && git {shlex.join(rollback_args)}")
+            from agent.i18n import t
+
+            print(t("update.rollback_failed"))
+            print(t("update.rollback_manual", root=root, args=shlex.join(rollback_args)))
             if rollback_result.stderr.strip():
                 print(f"    ({rollback_result.stderr.strip().splitlines()[0]})")
             if interrupted_pull_marker(root).is_file():
                 _commit.owe_restore_of(root, pre_pull_sha)
-                print(f"  The next `hermes` launch also finishes the rollback to {pre_pull_sha[:10]} on its own.")
+                print(t("update.rollback_next_launch", sha=pre_pull_sha[:10]))
     else:
-        print("  Could not capture pre-pull SHA — recover manually with:")
-        print(f"    cd {_m().PROJECT_ROOT} && git reflog && git reset --hard <prev-sha>")
+        from agent.i18n import t
+
+        print(t("update.no_pre_pull_sha"))
+        print(t("update.recover_reflog", root=_m().PROJECT_ROOT))
     _record_stop(stop_class)
     sys.exit(1)
 
@@ -1025,8 +1057,9 @@ def _refuse_unselected_head(git_cmd, target_sha: str, unmoved: str | None) -> No
     landed on a commit other than the armed one (review O2/O3). A HEAD still on ``unmoved`` is
     ``_verify_head_after_pull``'s "code did not move" refusal."""
     if (landed := _landed_off_target(git_cmd, target_sha)) not in (None, unmoved):
-        print(f"✗ The checkout landed on {landed[:10]}, not the selected commit {target_sha[:10]} "
-              "(a ref moved during the update).")
+        from agent.i18n import t
+
+        print(t("update.landed_off_target", landed=landed[:10], target=target_sha[:10]))
         _record_stop("head_moved")
         sys.exit(1)
 
@@ -1071,18 +1104,22 @@ def _move_checkout_to(git_cmd, branch, merge_ref, target_sha, pre_pull_sha) -> N
     if ancestry.returncode == 1:
         _reconcile_diverged_checkout(git_cmd, branch, pre_pull_sha, target_ref=target_sha)
         return
-    print("✗ Fast-forward failed; refusing to reset because history divergence was not proven.")
+    from agent.i18n import t
+
+    print(t("update.ff_not_possible"))
     detail = (merge_result.stderr or merge_result.stdout or "").strip()
     if detail:
         print(f"  {detail}")
+    from agent.i18n import t
+
     if ancestry.returncode == 0:
-        print(f"  HEAD is still an ancestor of {merge_ref}.")
+        print(t("update.head_ancestor", ref=merge_ref))
     else:
-        print(f"  Could not verify whether HEAD is an ancestor of {merge_ref}.")
+        print(t("update.head_ancestor_unknown", ref=merge_ref))
         ancestry_detail = (ancestry.stderr or ancestry.stdout or "").strip()
         if ancestry_detail:
             print(f"  {ancestry_detail}")
-    print("  Resolve the Git error and re-run `hermes update`; no reset was attempted.")
+    print(t("update.resolve_git_rerun"))
     from hermes_cli.update_receipt import git_output_stop_class
 
     # The shared classifier: an index.lock that EXISTS is another git's; "Permission denied" on it is not.
@@ -1113,15 +1150,18 @@ def _pull_updates(
                       or "").strip()
         if not is_object_id(target_sha):
             # The marker must name the commit git moves to, or a killed move is unrecoverable.
-            print(f"✗ Could not resolve {merge_ref} to a commit. No update was applied.")
+            from agent.i18n import t
+
+            print(t("update.ref_unresolved", ref=merge_ref))
             _record_stop("target_unresolved")
             sys.exit(1)
         movement_baseline = _update_movement_baseline(
             git_cmd, pre_pull_sha, pre_sync_sha, rollback_branch, target_sha)
         if expected_sha and target_sha != expected_sha:
             # Channel verification is a precondition: refuse before anything moves.
-            print(f"✗ {merge_ref} resolves to {target_sha[:10]}, not the selected channel commit "
-                  f"{expected_sha[:10]}. No update was applied.")
+            from agent.i18n import t
+
+            print(t("update.wrong_channel_commit", ref=merge_ref, sha=target_sha[:10], expected=expected_sha[:10]))
             _record_stop("head_moved")
             sys.exit(1)
         # The commit point: the tail, the fleet restart and the marker are durable BEFORE git writes.
@@ -1181,8 +1221,10 @@ def _pull_updates(
         if auto_stash_ref is not None:
             # No stash restore if the update failed — tree state is unknown.
             if not update_succeeded:
-                print(f"  ℹ️  Local changes preserved in stash (ref: {auto_stash_ref})")
-                print("  Restore manually with: git stash apply")
+                from agent.i18n import t
+
+                print(t("update.stash_preserved", ref=auto_stash_ref))
+                print(t("update.stash_restore_manual"))
                 _clear_pending_autostash()  # named just above; a later boundary must not repeat it
             elif discard_local_changes:
                 # Non-interactive + updates.non_interactive_local_changes: discard.
@@ -1243,7 +1285,9 @@ def _switch_branch_at_commit_point(git_cmd, branch, target_ref, *, pre, stash):
         if result.returncode == 0 and (landed := _landed_off_target(git_cmd, target, merged=False)) is not None:
             # The branch moved between its resolution and the checkout: the tree is whole at a commit
             # the debt does not name. Settled like a failed move: the debt follows the landed HEAD.
-            print(f"  ✗ The branch moved to {landed[:10]} after {target[:10]} was selected.")
+            from agent.i18n import t
+
+            print(t("update.branch_moved", landed=landed[:10], target=target[:10]))
             if _commit.settle_failed_tree_move(root):
                 _commit.disarm_commit_obligations()  # off the run's start: re-owed for the landed HEAD
             else:
@@ -1272,7 +1316,9 @@ def _refuse_before_commit_point(git_cmd, target_ref, _windows_gateway_resume) ->
     if reason is None:
         return
     print(reason)
-    print("  No update was applied; your install is unchanged.")
+    from agent.i18n import t
+
+    print(t("update.no_update_applied"))
     _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
     sys.exit(1)
 
@@ -1286,12 +1332,14 @@ def _exit_after_failed_branch_switch(
     """
     detail = (track_result.stderr or "").strip()
     if interrupted_pull_marker(_m().PROJECT_ROOT).is_file():
-        print(f"✗ Switching to '{branch}' stopped part-way; the next `hermes` launch puts the checkout back.")
+        from agent.i18n import t
+
+        print(t("update.switch_stopped", branch=branch))
         if detail:
             print(f"  {detail.splitlines()[0]}")
         if auto_stash_ref is not None:
-            print(f"  ℹ️  Local changes preserved in stash (ref: {auto_stash_ref})")
-            print("  Restore manually with: git stash apply")
+            print(t("update.stash_preserved", ref=auto_stash_ref))
+            print(t("update.stash_restore_manual"))
             _clear_pending_autostash()
         _record_stop("checkout_move_failed")
         sys.exit(1)
@@ -1304,7 +1352,9 @@ def _exit_after_failed_branch_switch(
         print(f"✗ {detail}.")
         _record_stop("commit_point_refused" if track_result.args is _ARM_REFUSED else "head_moved")
     else:
-        print(f"✗ Branch '{branch}' does not exist locally or on origin.")
+        from agent.i18n import t
+
+        print(t("update.branch_missing", branch=branch))
         if detail:
             print(f"  {detail.splitlines()[0]}")
         _record_stop(_missing_branch_stop(git_cmd, branch))
@@ -1357,12 +1407,16 @@ def _apply_parked_branch_guard(
         _m()._print_parked_branch_skip_warning(
             git_cmd, _m().PROJECT_ROOT, current_branch, branch, switch_block_reason)
         print()
-        print(f"⚠ Update finished — code update SKIPPED{_branch_head_suffix(git_cmd, _m().PROJECT_ROOT)}")
+        from agent.i18n import t
+
+        print(t("update.code_skipped", suffix=_branch_head_suffix(git_cmd, _m().PROJECT_ROOT)))
         _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
         _record_stop("parked_branch_blocked")
         sys.exit(1)
     if not switch_block_reason.startswith("unmerged:"):
-        print(f"  ⚠ Checkout was parked on '{current_branch}' (fully merged) — switching back to {branch}...")
+        from agent.i18n import t
+
+        print(t("update.parked_switching_back", current_branch=current_branch, branch=branch))
         return True, False, switch_block_reason
     _in_place_configured = False
     with _best_effort('Could not read updates.parked_branch_strategy: %s'):
@@ -1374,12 +1428,15 @@ def _apply_parked_branch_guard(
         return True, False, switch_block_reason
     # --branch typos used to surface via the checkout failing, which this path skips.
     if _git_run(git_cmd, ["rev-parse", "--verify", "--quiet", f"origin/{branch}"]).returncode != 0:
-        print(f"✗ Branch '{branch}' does not exist locally or on origin.")
+        from agent.i18n import t
+
+        print(t("update.branch_missing", branch=branch))
         _record_stop("branch_missing")
         sys.exit(1)
+    from agent.i18n import t
+
     print(
-        f"  ℹ On branch '{current_branch}' — updating it in place from "
-        f"origin/{branch} (no branch switch; local commits preserved).")
+        t("update.in_place_update", current_branch=current_branch, branch=f"origin/{branch}"))
     return False, True, switch_block_reason
 
 
@@ -1402,7 +1459,9 @@ def _prepare_checkout_for_update(
             _windows_gateway_resume=_windows_gateway_resume)
 
     if not release_tag and not in_place_update and current_branch == "HEAD" != branch:
-        print(f"  ⚠ Currently on detached HEAD — switching to {branch} for update...")
+        from agent.i18n import t
+
+        print(t("update.detached_head_switching", branch=branch))
         # Before the stash: its refs/stash would contain HEAD until it is dropped.
         _park_detached_head(git_cmd, _m().PROJECT_ROOT, branch)
     auto_stash_ref = _m()._stash_local_changes_if_needed(
@@ -1479,8 +1538,10 @@ def _prepare_checkout_for_update(
                 checkout_move=_moves_for(_windows_gateway_resume))
         except UpstreamTargetBroken as broken:  # nothing moved; local edits stay parked, like a rollback
             if auto_stash_ref is not None:
-                print(f"  ℹ️  Local changes preserved in stash (ref: {auto_stash_ref})")
-                print("  Restore manually with: git stash apply")
+                from agent.i18n import t
+
+                print(t("update.stash_preserved", ref=auto_stash_ref))
+                print(t("update.stash_restore_manual"))
                 _clear_pending_autostash()
             _roll_back_broken_update(git_cmd, pre_sync_sha, broken.path, broken.error,
                                      header=_upstream_broken_header(broken),
@@ -1572,9 +1633,11 @@ def _begin_update_receipt_and_plan(args):
         _pre_update_plan = collect_runtime_inventory()
         record_plan_in_receipt(_pre_update_plan)
         if _pre_update_plan.runtimes:
+            from agent.i18n import t
+
             _n = len(_pre_update_plan.runtimes)
             _profiles = ", ".join(sorted({r.profile for r in _pre_update_plan.runtimes}))
-            print(f"→ Fleet: {_n} running service(s) across profiles: {_profiles}")
+            print(t("update.fleet_inventory", count=_n, profiles=_profiles))
     _completion_receipt.record_stage("plan", "failed" if _pre_update_plan is None else "success")
     return _pre_update_plan
 
@@ -1597,7 +1660,9 @@ def _prepare_git_command(*, checkout_move=None) -> tuple[bool, list, bool]:
     git_dir = _m().PROJECT_ROOT / ".git"
     use_zip_update = not git_dir.exists()
     if use_zip_update and sys.platform != "win32":
-        print("✗ Not a git repository. Please reinstall:")
+        from agent.i18n import t
+
+        print(t("update.not_git_reinstall"))
         print("  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash")
         _record_stop("not_git_checkout")
         sys.exit(1)
@@ -1626,7 +1691,9 @@ def _prepare_git_command(*, checkout_move=None) -> tuple[bool, list, bool]:
     is_fork = _is_fork(origin_url)
 
     if is_fork:
-        print("⚠ Updating from fork:")
+        from agent.i18n import t
+
+        print(t("update.updating_from_fork"))
         print(f"  {origin_url}")
         print()
     return use_zip_update, git_cmd, is_fork
@@ -1647,14 +1714,14 @@ def _verify_head_after_pull(
     # claiming success.
     post_pull_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
     if pre_pull_sha and post_pull_sha == pre_pull_sha:
+        from agent.i18n import t
+
         print()
-        print("✗ Code did not move — update was a no-op.")
+        print(t("update.code_did_not_move"))
         print(
-            f"  HEAD is pinned to {pre_pull_sha[:10]} (detached checkout); "
-            f"origin/{branch} advanced but the working tree stayed put.")
+            t("update.head_pinned", sha=pre_pull_sha[:10], branch=f"origin/{branch}"))
         print(
-            "  Reattach to the branch and retry: "
-            f"git -C {_m().PROJECT_ROOT} checkout {branch} && hermes update")
+            t("update.reattach_retry", root=_m().PROJECT_ROOT, branch=branch))
         _commit.disarm_commit_obligations()  # nothing moved: no tail is owed (refused if HEAD did)
         _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
         _record_stop("detached_head")
@@ -1690,8 +1757,10 @@ def _handle_update_called_process_error(
         print(unrestored)  # a stash taken this run that no settle step reported (#122557)
     stage = _format_update_failure_stage(e)
     if _should_zip_fallback_on_update_error(e):
-        print(f"⚠ {stage}: {e}")
-        print("→ Falling back to ZIP download...")
+        from agent.i18n import t
+
+        print(t("update.zip_fallback_header", stage=stage, error=e))
+        print(t("update.zip_fallback"))
         print()
         _update_via_zip(
             args, had_desktop_app_before_update=had_desktop_app_before_update,
@@ -1699,14 +1768,15 @@ def _handle_update_called_process_error(
             **({"target_repository": target_repository} if target_repository else {}))
 
     else:
+        from agent.i18n import t
+
         if _called_process_error_is_python_dep_install(e):
-            print(f"✗ {stage} (the code update itself succeeded).")
+            print(t("update.dep_install_failed", stage=stage))
             _print_called_process_error_tail(e)
             print()
-            print("  Hermes may not start until the dependencies are installed. Fix the error above")
-            print("  (usually network or disk space), then run `hermes update` again.")
+            print(t("update.dep_fix_hint"))
             if _m()._is_windows():
-                print("  If `hermes update` itself will not start, retry through the venv interpreter:")
+                print(t("update.dep_windows_venv_hint"))
                 print(
                     '    venv\\Scripts\\python.exe -c '
                     '"from hermes_cli.main import main; main()" update --yes')
@@ -1740,13 +1810,14 @@ def _finish_already_up_to_date(
             git_cmd, _m().PROJECT_ROOT, _plan.auto_stash_ref, prompt_user=_plan.prompt_for_restore,
             input_fn=gw_input_fn, checkout_move=_moves_for(_windows_gateway_resume))
     if _plan.parked_branch_switched:
+        from agent.i18n import t
+
         if _plan.switch_block_reason.startswith("unmerged:"):
             _count = _plan.switch_block_reason.split(":", 1)[1]
             print(
-                f"  ✓ Checkout was parked on '{current_branch}' — switched back to {branch}; "
-                f"{_count} unmerged commit(s) kept on '{current_branch}'.")
+                t("update.parked_unmerged", current_branch=current_branch, branch=branch, count=_count))
         else:
-            print(f"  ✓ Checkout was parked on '{current_branch}' (fully merged) — switched back to {branch}.")
+            print(t("update.parked_merged", current_branch=current_branch, branch=branch))
 
     if completion_request is not None:
         # Same code, same host obligation: an SHA-less arm would REPLACE the standing record
@@ -1771,7 +1842,9 @@ def _apply_pulled_update(
         observed = _capture_head_sha(git_cmd, _m().PROJECT_ROOT) or post_pull_sha
         pinned = completion_request.get("expected_sha")
         if pinned is not None and observed != pinned:
-            print("✗ Checkout no longer matches the selected channel commit. No completion was applied.")
+            from agent.i18n import t
+
+            print(t("update.channel_mismatch_completion"))
             _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
             _record_stop("head_moved")
             sys.exit(1)
@@ -1808,8 +1881,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
     git_operation = git_operation_in_progress(_m().PROJECT_ROOT)
     if git_operation:
         root = _m().PROJECT_ROOT
-        print(f"✗ Cannot update while a Git {git_operation} is in progress in {root}.")
-        print(f"  Finish it or run `git {git_operation} --abort`, then re-run `hermes update`.")
+        from agent.i18n import t
+
+        print(t("update.git_in_progress", git_operation=git_operation, root=root))
+        print(t("update.git_in_progress_hint", git_operation=git_operation))
         _record_stop("git_in_progress", without_receipt="failed")  # before the receipt opens: a metrics row only
         sys.exit(1)
 
@@ -1828,7 +1903,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
     opts = _resolve_update_options(args, gateway_mode)
     gw_input_fn, assume_yes = opts.gw_input_fn, opts.assume_yes
 
-    print("☤ Updating Hermes Agent...")
+    from agent.i18n import t
+
+    print(t("update.updating_banner"))
     print()
 
     _pre_update_plan = _begin_update_receipt_and_plan(args)
@@ -1914,8 +1991,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 lambda gc, a: _git_run(gc, a, network=True), git_cmd, fetch_args, _m().PROJECT_ROOT)
         if fetch_result.returncode != 0:
             if is_partial_clone_pack_objects_crash(fetch_result.stderr or ""):
-                print("✗ git still crashed after marking this checkout's packs. See 'Fetch fails with"
-                      " should_include_obj' in https://hermes-agent.nousresearch.com/docs/getting-started/updating")
+                from agent.i18n import t
+
+                print(t("update.pack_crash"))
             _print_fetch_failure(fetch_result.stderr)
             _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
             _record_stop("git_timeout" if fetch_result.returncode == 124 else "disk_full"
@@ -1938,14 +2016,23 @@ def _cmd_update_impl(args, gateway_mode: bool):
             return
 
         if release_sha:
-            print(f"→ Switching to source commit {release_sha[:10]}")
+            from agent.i18n import t
+
+            print(t("update.switching_source_commit", sha=release_sha[:10]))
         elif commit_count > 0:
-            print(f"→ Found {commit_count} new commit(s)")
+            from agent.i18n import t
+
+            print(t("update.found_commits", count=commit_count))
         elif _plan.switched_without_new_commits:
-            print(f"→ Switched the running checkout to {branch} (no new commits to count)")
+            from agent.i18n import t
+
+            print(t("update.switched_no_commits", branch=branch))
         else:
             # Shallow, exact count unrecoverable — but the tips differ, so there IS an update.
-            print("→ Updates available (commit count unknown on this shallow checkout)")
+            from agent.i18n import t
+
+            print(t("update.updates_unknown_shallow"))
+            print(t("update.updates_available_shallow"))
 
         print("→ Pulling updates...")
         movement_baseline = _pull_updates(
