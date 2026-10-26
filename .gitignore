@@ -350,3 +350,8 @@ archive/2026-08-*/
 /pm/.lock.json.lock
 
 apps/desktop/.dist-build*
+
+# Windows 路径垃圾：测试跑动时 Windows 风格 tmp 路径被当相对路径写入仓库 cwd；
+# 冒号在文件名里被替换成 PUA(U+F03A)/全角(U+FF1A)或直接剥掉——C*Users* 一条覆盖全部变体
+%SystemDrive*/
+C*Users*
