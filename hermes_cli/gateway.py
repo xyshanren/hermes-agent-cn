@@ -2841,6 +2841,8 @@ def prompt_linux_gateway_install_scope() -> str | None:
 
 
 def install_linux_gateway_from_setup(force: bool = False, enable_on_startup: bool = True) -> tuple[str | None, bool]:
+    from agent.i18n import t
+
     scope = prompt_linux_gateway_install_scope()
     if scope is None:
         return None, False
@@ -3920,6 +3922,8 @@ def _systemd_reset_and_run(action: str, *, system: bool, previous_pid) -> None:
 
 
 def systemd_status(deep: bool = False, system: bool = False, full: bool = False):
+    from agent.i18n import t
+
     system = _select_systemd_scope(system)
     unit_path = get_systemd_unit_path(system=system)
     svc = get_service_name()
@@ -3939,8 +3943,6 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
         print()
 
     if not systemd_unit_is_current(system=system):
-        from agent.i18n import t
-
         print(t("gateway.admin.status_outdated"))
         print(t("gateway.admin.status_outdated_run", cmd=f"{sudo}hermes gateway restart{scope_flag}"))
         print()
@@ -3991,8 +3993,6 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
             print("  sudo loginctl enable-linger $USER")
 
     if deep:
-        from agent.i18n import t
-
         print()
         print(t("gateway.admin.recent_logs"))
         log_cmd = ["journalctl"] + ([] if system else ["--user"]) + ["-u", svc, "-n", "20", "--no-pager"]

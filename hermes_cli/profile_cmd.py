@@ -155,12 +155,11 @@ def _shared_credential_warnings(profiles) -> list:
 
 
 def _profile_use(args):
+    from agent.i18n import t
     from hermes_cli.profiles import set_active_profile
     name = args.profile_name
     try:
         set_active_profile(name)
-        from agent.i18n import t
-
         print(t("profile.switched_default") if name == "default" else t("profile.switched", name=name))
     except (ValueError, FileNotFoundError) as e:
         _die(t("profile.error", error=e))
@@ -423,6 +422,7 @@ def _profile_show(args):
 
 
 def _profile_alias(args):
+    from agent.i18n import t
     from hermes_cli.profiles import (
         _get_wrapper_dir, _is_wrapper_dir_in_path, check_alias_collision, create_wrapper_script,
         profile_exists, remove_wrapper_script, validate_alias_name,
@@ -436,8 +436,6 @@ def _profile_alias(args):
     except ValueError as exc:
         _die(f"Error: {exc}")
     if remove:  # runs without the profile: an orphan alias outlives it
-        from agent.i18n import t
-
         exists = profile_exists(name)
         if custom_name and not exists:  # orphan cleanup is `alias <alias> --remove`
             _die(t("profile.alias_profile_missing", name=name))
@@ -531,6 +529,7 @@ def _profile_import(args):
 
 
 def _profile_install(args):
+    from agent.i18n import t
     import tempfile
     from hermes_cli.profile_distribution import DistributionError, install_distribution, plan_install
     try:

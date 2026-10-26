@@ -699,6 +699,7 @@ def run_gui_uninstall(args):
     userData dir — nothing under ``$HERMES_HOME`` config/sessions/.env, and
     never the Python agent or its venv.
     """
+    from agent.i18n import t
     from hermes_cli.gui_uninstall import (
         agent_is_installed,
         desktop_install_record,
@@ -717,13 +718,9 @@ def run_gui_uninstall(args):
     print()
 
     if not summary["gui_installed"]:
-        from agent.i18n import t
-
         print(t("uninstall.gui_not_found"))
         print(t("uninstall.gui_checked", home=hermes_home))
         return
-
-    from agent.i18n import t
 
     print(color(t("uninstall.gui_only_note"), Colors.CYAN))
     print()
@@ -771,6 +768,8 @@ def run_uninstall(args):
     - Full uninstall: removes code + ~/.hermes/ (configs, data, logs)
     - Keep data: removes code but keeps ~/.hermes/ for future reinstall
     """
+    from agent.i18n import t
+
     _refuse_if_steward_owned()
 
     project_root = get_project_root()
@@ -800,8 +799,6 @@ def run_uninstall(args):
     print()
 
     # Show what will be affected
-    from agent.i18n import t
-
     print(color(t("uninstall.current_installation"), Colors.CYAN, Colors.BOLD))
     print(t("uninstall.current_code", path=project_root))
     print(t("uninstall.current_config", path=hermes_home / 'config.yaml'))
@@ -847,8 +844,6 @@ def run_uninstall(args):
     n_profiles = len(named_profiles)
     profile_names = ", ".join(p.name for p in named_profiles)
     if full_uninstall and named_profiles:
-        from agent.i18n import t
-
         print()
         print(color(t("uninstall.profiles_kept_note"), Colors.YELLOW))
         print(t("uninstall.profiles_found", count=n_profiles, names=profile_names))
@@ -860,8 +855,6 @@ def run_uninstall(args):
 
     # Final confirmation
     print()
-    from agent.i18n import t
-
     if full_uninstall:
         print(color(t("uninstall.final_warning"), Colors.RED, Colors.BOLD))
         print(color(t("uninstall.final_including"), Colors.RED))

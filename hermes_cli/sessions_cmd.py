@@ -807,6 +807,8 @@ def _note_pinned_skipped(db, filters, action):
 
 
 def _cmd_prune_or_archive(db, args, action):
+    from agent.i18n import t
+
     prune = action == "prune"
     if prune and getattr(args, "never_active", False):
         return _prune_never_active_keyed(db, args)
@@ -819,13 +821,9 @@ def _cmd_prune_or_archive(db, args, action):
     try:
         filters = build_prune_filters(args)
     except ValueError as e:
-        from agent.i18n import t
-
         print(t("sessions.usage_error", message=e))
         return 1
     if not prune and not any(v for k, v in filters.items() if k != "older_than_days"):
-        from agent.i18n import t
-
         print(t("sessions.archive_refuse_all"))
         return
 
@@ -848,16 +846,10 @@ def _cmd_prune_or_archive(db, args, action):
     # misdescribe its effect.
     skipped_open = db.count_open_prune_matches(**filters) if (prune or not include_open) else 0
     if skipped_open and prune:
-        from agent.i18n import t
-
         print(t("sessions.archive_open_note", count=skipped_open))
     elif skipped_open:
-        from agent.i18n import t
-
         print(t("sessions.archive_match_note", count=skipped_open))
     if not candidates:
-        from agent.i18n import t
-
         print(t("sessions.no_match", filters=describe_filters(filters)))
         return
     # Candidates are oldest-activity-first; show the span so a long-lived but recently used
@@ -876,19 +868,14 @@ def _cmd_prune_or_archive(db, args, action):
         if len(candidates) > len(shown):
             print_truncated(len(candidates) - len(shown))
         if args.dry_run:
-            from agent.i18n import t
-
             print(t("sessions.dry_run_archived" if not prune else "sessions.dry_run_nothing_deleted"))
             return
     verb = t("sessions.verb_delete") if prune else t("sessions.verb_archive")
     if not args.yes and not _confirm_prompt(t("sessions.prune_confirm", verb=verb, count=len(candidates), span=_span)):
-        from agent.i18n import t
-
         print(t("sessions.cancelled"))
         return
     if prune and getattr(args, "owner_endpoint", None) is not None:
         # The live gateway owns the store: it deletes, through the housekeeping retirement path.
-        from agent.i18n import t
         from hermes_cli.gateway_client import GatewayClientError
         from hermes_cli.sessions_owner import owner_prune, report_owner_failure
         try:
@@ -896,12 +883,8 @@ def _cmd_prune_or_archive(db, args, action):
         except (GatewayClientError, OSError, TimeoutError) as exc:
             return report_owner_failure(exc)
     elif prune:
-        from agent.i18n import t
-
         print(t("sessions.pruned_db", count=db.prune_sessions(sessions_dir=_sessions_dir(), exclude_active_write_guards=True, **filters)))
     else:
-        from agent.i18n import t
-
         print(t("sessions.archived_done", count=db.archive_sessions(**filters)))
 
 
@@ -1230,14 +1213,14 @@ def _cmd_repair_prompts(db, args):
     reported as unverifiable and never changed by a scan. An explicit session_id remains the
     operator escape hatch and clears that row regardless of detector evidence.
     """
+    from agent.i18n import t
+
     findings = []
     unverifiable = []
     target = getattr(args, "session_id", None)
     if target:
         session_id = db.resolve_session_id(target)
         if not session_id:
-            from agent.i18n import t
-
             print(t("sessions.no_match_target", target=repr(target)))
             return 1
         row = db.get_session(session_id)
@@ -1299,12 +1282,8 @@ def _cmd_repair_prompts(db, args):
         if as_json:
             print(json.dumps(_payload([]), indent=2))
         elif target:
-            from agent.i18n import t
-
             print(t("sessions.prompt_already_clear"))
         else:
-            from agent.i18n import t
-
             print(t("sessions.no_degraded_prompts"))
             if unverifiable:
                 print(t("sessions.unverifiable_left", count=len(unverifiable)))
@@ -1314,23 +1293,17 @@ def _cmd_repair_prompts(db, args):
         for finding in findings:
             print(f"  {finding['id']}  ({finding['prompt_chars']} chars) - {finding['reason']}")
         if unverifiable:
-            from agent.i18n import t
-
             print(t("sessions.unverifiable_skipped", count=len(unverifiable)))
 
     if not apply:
         if as_json:
             print(json.dumps(_payload([]), indent=2))
         else:
-            from agent.i18n import t
-
             print(t("sessions.prompts_repairable", count=len(findings)))
         return 0
 
     # JSON mode is the non-interactive automation surface; --apply is the explicit mutation opt-in.
     if not as_json and not _confirm_prompt(t("sessions.prompts_clear_confirm", count=len(findings))):
-        from agent.i18n import t
-
         print(t("sessions.aborted"))
         return 0
 
@@ -1343,8 +1316,6 @@ def _cmd_repair_prompts(db, args):
         print(json.dumps(_payload(cleared), indent=2))
     else:
         print(t("sessions.prompts_cleared", count=len(cleared)))
-        from agent.i18n import t
-
         print(t("sessions.repaired_warning_expected"))
     return 0
 
@@ -1396,15 +1367,13 @@ _DB_HANDLERS = {
 
 def _print_empty_store(action: str, args) -> None:
     """A profile that never created state.db: report empty instead of opening a writer that creates it."""
-    if action == "stats":
-        from agent.i18n import t
+    from agent.i18n import t
 
+    if action == "stats":
         print(t("sessions.totals", sessions=0, messages=0))
     elif action == "pinned":
         print("[]" if getattr(args, "json", False) else t("sessions.no_pinned"))
     else:
-        from agent.i18n import t
-
         print(t("sessions.no_sessions"))
 
 
