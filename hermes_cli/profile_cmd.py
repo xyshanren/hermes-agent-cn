@@ -41,15 +41,17 @@ def _render_distribution_plan(plan) -> None:
     """Print a human-readable summary of a pending distribution install."""
     from hermes_cli.profile_distribution import MANIFEST_FILENAME
     mf = plan.manifest
-    print(f"\nDistribution: {mf.name} v{mf.version}")
+    from agent.i18n import t
+
+    print(t("profile.dist_plan_header", name=mf.name, version=mf.version))
     if mf.description:
         print(f"  {mf.description}")
     if mf.author:
-        print(f"  Author:   {mf.author}")
+        print(t("profile.dist_plan_author", author=mf.author))
     if mf.hermes_requires:
-        print(f"  Requires: Hermes {mf.hermes_requires}")
-    print(f"  Source:   {plan.provenance}")
-    print(f"  Target:   {plan.target_dir}")
+        print(t("profile.dist_plan_requires", version=mf.hermes_requires))
+    print(t("profile.dist_plan_source", source=plan.provenance))
+    print(t("profile.dist_plan_target", target=plan.target_dir))
     if plan.existing:
         # Updating an existing distribution (dist-owned overwritten, config preserved, user
         # data untouched) vs overwriting a hand-built plain profile (same mechanics, but the
@@ -92,16 +94,18 @@ def _profile_status(args):
     dhh = display_hermes_home()
     current = next((p for p in list_profiles() if _is_active(p, profile_name)), None)
     label = format_profile_label(profile_name, current.display_name if current else "")
-    print(f"\nActive profile: {label}")
-    print(f"Path:           {dhh}")
+    from agent.i18n import t
+
+    print(t("profile.status_active", label=label))
+    print(t("profile.status_path", path=dhh))
     if current is not None:
         p = current
         if p.model:
-            print(f"Model:          {p.model}" + (f" ({p.provider})" if p.provider else ""))
-        print(f"Gateway:        {'running' if p.gateway_running else 'stopped'}")
-        print(f"Skills:         {p.skill_count} installed")
+            print(t("profile.status_model", model=p.model, provider=f" ({p.provider})" if p.provider else ""))
+        print(t("profile.status_gateway", state='running' if p.gateway_running else 'stopped'))
+        print(t("profile.status_skills", count=p.skill_count))
         if p.alias_path:
-            print(f"Alias:          {p.alias_name or p.name} → hermes -p {p.name}")
+            print(t("profile.status_alias", alias=p.alias_name or p.name, name=p.name))
     print()
 
 
@@ -110,7 +114,9 @@ def _profile_list(args):
     profiles = list_profiles()
     active = get_active_profile_name()
     if not profiles:
-        print("No profiles found.")
+        from agent.i18n import t
+
+        print(t("sessions.no_profiles_found"))
         return
     print(f"\n {'Profile':<16} {'Model':<28} {'Gateway':<12} {'Alias':<12} {'Distribution'}")
     print(f" {'─' * 15}    {'─' * 27}    {'─' * 11}    {'─' * 11}    {'─' * 20}")
@@ -153,9 +159,11 @@ def _profile_use(args):
     name = args.profile_name
     try:
         set_active_profile(name)
-        print("Switched to: default (~/.hermes)" if name == "default" else f"Switched to: {name}")
+        from agent.i18n import t
+
+        print(t("profile.switched_default") if name == "default" else t("profile.switched", name=name))
     except (ValueError, FileNotFoundError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
 
 
 def _source_profile_dir(source_label: str) -> Path:
@@ -211,21 +219,22 @@ def _profile_create(args):
         _die(f"Error: {e}")
     print(f"\nProfile '{name}' created at {profile_dir}")
     if cloned:
+        from agent.i18n import t
+
         if clone_all:
-            print(f"Full copy from {source_label} (excluding session history, cron jobs, backups, and snapshots).")
+            print(t("profile.clone_all_done", source=source_label))
         else:
-            print(f"Cloned config, .env, SOUL.md, and skills from {source_label}.")
+            print(t("profile.clone_config_done", source=source_label))
             from hermes_cli.profiles import cloned_plugin_names
             plugin_names = cloned_plugin_names(profile_dir)
             if plugin_names:
-                print(f"Cloned installed plugins too: {', '.join(plugin_names)}.")
+                print(t("profile.clone_plugins", names=', '.join(plugin_names)))
             from hermes_cli.profile_memory_config import cloned_memory_provider
             memory_provider = cloned_memory_provider(profile_dir)
             if memory_provider:
-                print(f"Cloned memory provider config ({memory_provider}) too.")
+                print(t("profile.clone_memory_provider", provider=memory_provider))
         if sync_imports:
-            print(f"Import sources carried over — `hermes -p {name} import-agent --sync` "
-                  "keeps pulling the same Claude Code / Codex trees.")
+            print(t("profile.clone_imports", name=name))
         _print_channel_clone_notice(name, source_label, clone_channels, "--clone-all" if clone_all else "--clone")
         # Auto-clone Honcho config for the new profile (only with clone operations)
         try:
@@ -236,58 +245,63 @@ def _profile_create(args):
         if honcho_cli is not None:
             try:
                 if honcho_cli.clone_honcho_for_profile(name):
-                    print(f"Honcho config cloned (peer: {name})")
+                    print(t("profile.honcho_cloned", peer=name))
             except honcho_cli.ConfigWriteRefused as e:
-                print(f"Honcho config not cloned: {e}")
+                print(t("profile.honcho_not_cloned", error=e))
             except Exception:
                 pass  # Honcho not configured
     else:
         # Fresh profiles only: clones already carry the source's (user-curated) skills.
+        from agent.i18n import t
+
         result = seed_profile_skills(profile_dir)
         if result and result.get("skipped_opt_out"):
-            print("No bundled skills seeded (--no-skills). Delete .no-bundled-skills in the profile to opt back in.")
+            print(t("profile.no_skills_seeded"))
         elif result:
-            print(f"{len(result.get('copied', []))} bundled skills synced.")
+            print(t("profile.skills_synced", count=len(result.get('copied', []))))
         else:
-            print(f"⚠ Skills could not be seeded. Run `{name} update` to retry.")
+            print(t("profile.skills_seed_failed", name=name))
     if not no_alias:
+        from agent.i18n import t
+
         collision = check_alias_collision(name)
         if collision:
-            print(f"\n⚠ Cannot create alias '{name}' — {collision}")
-            print(f"  Choose a custom alias:  hermes profile alias {name} --name <custom>")
-            print(f"  Or access via flag:     hermes -p {name} chat")
+            print(t("profile.alias_collision", name=name, collision=collision))
+            print(t("profile.alias_custom_hint", name=name))
+            print(t("profile.alias_flag_hint", name=name))
         else:
             wrapper_path = create_wrapper_script(name)
             if wrapper_path:
-                print(f"Wrapper created: {wrapper_path}")
+                print(t("profile.wrapper_created", path=wrapper_path))
                 if not _is_wrapper_dir_in_path():
-                    print(f"\n⚠ {_get_wrapper_dir()} is not in your PATH.")
-                    print("  Add to your shell config (~/.bashrc or ~/.zshrc):")
-                    print('    export PATH="$HOME/.local/bin:$PATH"')
+                    print(t("profile.wrapper_not_in_path", dir=_get_wrapper_dir()))
+                    print(t("profile.wrapper_path_hint"))
     try:
         profile_dir_display = "~/" + profile_dir.relative_to(Path.home()).as_posix()
     except ValueError:
         profile_dir_display = str(profile_dir)
-    print("\nNext steps:")
-    print(f"  {name} setup              Configure API keys and model")
-    print(f"  {name} chat               Start chatting")
+    from agent.i18n import t
+
+    print(t("profile.next_steps_header"))
+    print(t("profile.next_setup", name=name))
+    print(t("profile.next_chat", name=name))
     from hermes_cli.gateway_multiplex_served import live_default_gateway_pid, recorded_served_profiles
     from hermes_cli.profiles import normalize_profile_name
     served = recorded_served_profiles() if live_default_gateway_pid() is not None else None
     if served is not None and normalize_profile_name(name) in {normalize_profile_name(p) for p in served}:
-        print("  (served now by the running multiplexed gateway — add its bot token and it connects)")
+        print(t("profile.next_served_now"))
     elif served is not None:
         # The multiplexer did not pick the profile up (older gateway or the signal failed): a restart serves it.
-        print("  hermes gateway restart    Serve this profile from the running multiplexed gateway")
+        print(t("profile.next_gateway_restart"))
     else:
-        print(f"  {name} gateway start      Start the messaging gateway")
+        print(t("profile.next_gateway_start", name=name))
     if clone or clone_all:
-        print(f"\n  Edit {profile_dir_display}/.env for different API keys")
-        print(f"  Edit {profile_dir_display}/SOUL.md for different personality")
+        print(t("profile.next_env_edit", dir=profile_dir_display))
+        print(t("profile.next_soul_edit", dir=profile_dir_display))
     else:
-        print(f"\n  ⚠ This profile has no API keys yet. Run '{name} setup' first,")
-        print("    or it will inherit keys from your shell environment.")
-        print(f"  Edit {profile_dir_display}/SOUL.md to customize personality")
+        print(t("profile.next_no_keys", name=name))
+        print(t("profile.next_inherit_hint"))
+        print(t("profile.next_soul_customize", dir=profile_dir_display))
     print()
 
 
@@ -310,6 +324,7 @@ def _describe_target_dir(name: str) -> Path:
 
 
 def _profile_describe(args):
+    from agent.i18n import t
     from hermes_cli import profiles as _profiles_mod
     all_flag = bool(getattr(args, "all_missing", False))
     auto_flag = bool(getattr(args, "auto", False))
@@ -330,13 +345,13 @@ def _profile_describe(args):
         try:
             profile_dir = _describe_target_dir(name)
         except Exception as exc:
-            _die(f"Error: {exc}", err=True)
+            _die(t("profile.error", error=exc), err=True)
         if not profile_dir.is_dir():
-            _die(f"Error: profile '{name}' not found", err=True)
+            _die(t("profile.describe_not_found", name=name), err=True)
         meta = _profiles_mod.read_profile_meta(profile_dir)
         desc = meta.get("description") or ""
         if not desc:
-            print(f"(no description set for '{name}')")
+            print(t("profile.describe_none_set", name=name))
         else:
             tag = "[auto] " if meta.get("description_auto") else ""
             print(f"{tag}{desc}")
@@ -346,9 +361,9 @@ def _profile_describe(args):
     if text_value:
         try:
             _profiles_mod.write_profile_meta(_describe_target_dir(name), description=text_value, description_auto=False)
-            print(f"Description updated for '{name}'.")
+            print(t("profile.description_updated", name=name))
         except Exception as exc:
-            _die(f"Error: {exc}", err=True)
+            _die(t("profile.error", error=exc), err=True)
         sys.exit(0)
 
     # --auto path: invoke the LLM describer.
@@ -356,7 +371,7 @@ def _profile_describe(args):
     if all_flag:
         targets = _pd.list_describable_profiles(missing_only=True)
         if not targets:
-            _die("All profiles already have descriptions.", 0)
+            _die(t("profile.describe_all_done"), 0)
     else:
         targets = [name]
     ok_count = 0
@@ -364,7 +379,7 @@ def _profile_describe(args):
         outcome = _pd.describe_profile(tgt, overwrite=overwrite_flag)
         if outcome.ok:
             ok_count += 1
-            print(f"Described '{outcome.profile_name}': {outcome.description}")
+            print(t("profile.described", name=outcome.profile_name, description=outcome.description))
         else:
             print(f"profile describe {outcome.profile_name}: {outcome.reason}", file=sys.stderr)
     sys.exit(0 if (ok_count > 0 if all_flag else ok_count == 1) else 1)
@@ -377,29 +392,33 @@ def _profile_show(args):
         _served_by_running_multiplexer, _count_skills, _read_distribution_meta, _wrapper_path,
         find_alias_for_profile, format_profile_label, read_profile_meta,
     )
+    from agent.i18n import t
+
     if not profile_exists(name):
-        _die(f"Error: Profile '{name}' does not exist.")
+        _die(t("profile.alias_profile_missing", name=name))
     profile_dir = get_profile_dir(name)
     model, provider = _read_config_model(profile_dir)
     gw = _check_gateway_running(profile_dir) or _served_by_running_multiplexer(name)
     dist_name, dist_version, dist_source = _read_distribution_meta(profile_dir)
     alias_name = find_alias_for_profile(name)
     display = read_profile_meta(profile_dir).get("display_name", "")
-    print(f"\nProfile: {format_profile_label(name, display)}")
-    print(f"Path:    {profile_dir}")
+    from agent.i18n import t
+
+    print(t("profile.info_header", label=format_profile_label(name, display)))
+    print(t("profile.info_path", path=profile_dir))
     if model:
-        print(f"Model:   {model}" + (f" ({provider})" if provider else ""))
-    print(f"Gateway: {'running' if gw else 'stopped'}")
-    print(f"Skills:  {_count_skills(profile_dir)}")
-    print(f".env:    {'exists' if (profile_dir / '.env').exists() else 'not configured'}")
-    print(f"SOUL.md: {'exists' if (profile_dir / 'SOUL.md').exists() else 'not configured'}")
+        print(t("profile.info_model", model=model, provider=f" ({provider})" if provider else ""))
+    print(t("profile.info_gateway", state='running' if gw else 'stopped'))
+    print(t("profile.info_skills", count=_count_skills(profile_dir)))
+    print(t("profile.info_env", state='exists' if (profile_dir / '.env').exists() else 'not configured'))
+    print(t("profile.info_soul", state='exists' if (profile_dir / 'SOUL.md').exists() else 'not configured'))
     if dist_name:
-        print(f"Distribution: {dist_name}@{dist_version or '?'}")
+        print(t("profile.info_distribution", name=dist_name, version=dist_version or '?'))
         if dist_source:
-            print(f"Installed from: {dist_source}")
-        print(f"  (run `hermes profile info {name}` for full manifest)")
+            print(t("profile.info_dist_source", source=dist_source))
+        print(t("profile.info_manifest_hint", name=name))
     if alias_name:
-        print(f"Alias:   {alias_name} → hermes -p {name}  ({_wrapper_path(alias_name)})")
+        print(t("profile.info_alias", alias=alias_name, name=name, path=_wrapper_path(alias_name)))
     print()
 
 
@@ -417,93 +436,98 @@ def _profile_alias(args):
     except ValueError as exc:
         _die(f"Error: {exc}")
     if remove:  # runs without the profile: an orphan alias outlives it
+        from agent.i18n import t
+
         exists = profile_exists(name)
         if custom_name and not exists:  # orphan cleanup is `alias <alias> --remove`
-            _die(f"Error: Profile '{name}' does not exist.")
+            _die(t("profile.alias_profile_missing", name=name))
         if remove_wrapper_script(alias_name):
-            print(f"✓ Removed alias '{alias_name}'")
+            print(t("profile.alias_removed", alias=alias_name))
         elif not exists:
-            _die(f"Error: No alias '{alias_name}' and no profile '{name}'. `hermes doctor` lists orphan aliases.")
+            _die(t("profile.alias_and_profile_missing", alias=alias_name, name=name))
         else:
-            print(f"No alias '{alias_name}' found to remove.")
+            print(t("profile.alias_not_found", alias=alias_name))
         return
     if not profile_exists(name):
-        _die(f"Error: Profile '{name}' does not exist.")
+        _die(t("profile.alias_profile_missing", name=name))
     collision = check_alias_collision(alias_name)
     if collision:
-        _die(f"Error: {collision}")
+        _die(t("profile.collision_error", collision=collision))
     wrapper_path = create_wrapper_script(alias_name, target=name if custom_name else None)
     if wrapper_path:
-        print(f"✓ Alias created: {wrapper_path}")
+        print(t("profile.alias_created", path=wrapper_path))
         if not _is_wrapper_dir_in_path():
-            print(f"⚠ {_get_wrapper_dir()} is not in your PATH.")
+            print(t("profile.wrapper_not_in_path", dir=_get_wrapper_dir()))
 
 
 def _profile_rename(args):
+    from agent.i18n import t
     from hermes_cli.profiles import normalize_profile_name, rename_profile
     try:
         new_dir = rename_profile(args.old_name, args.new_name)
         if normalize_profile_name(args.old_name) != "default":
-            print(f"\nProfile renamed: {args.old_name} → {args.new_name}")
-            print(f"Path: {new_dir}\n")
+            print(t("profile.renamed", old=args.old_name, new=args.new_name))
+            print(t("profile.rename_path", path=new_dir))
     except (ValueError, FileExistsError, FileNotFoundError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
 
 
 def _profile_migrate_identity(args):
     """Retry the identity migration of a rename that already completed. Exits non-zero when a
     live gateway would not migrate (it still owns the routing index in memory), or when a
     database rejected the rewrite (collision, lock, partial failure)."""
+    from agent.i18n import t
     from hermes_cli.profile_identity import migrate_profile_identity
     try:
         migrated = migrate_profile_identity(args.old_name, args.new_name)
     except (ValueError, FileNotFoundError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
     if not migrated:
-        _die(f"Error: session identity was not migrated. Restart or stop the gateway, then run:\n"
-             f"    hermes profile migrate-identity {args.old_name} {args.new_name}", err=True)
-    print(f"✓ Session/routing identity migrated: {args.old_name} → {args.new_name}")
+        _die(t("profile.identity_migrate_failed", old=args.old_name, new=args.new_name), err=True)
+    print(t("profile.identity_migrated", old=args.old_name, new=args.new_name))
 
 
 def _profile_purge_identity(args):
     """Retry the identity purge of a delete that already completed. Exits non-zero when a live
     gateway would not purge (it still owns the routing index in memory), or when a database rejected
     the delete (lock, partial failure)."""
+    from agent.i18n import t
     from hermes_cli.profile_identity import purge_profile_identity
     try:
         purged = purge_profile_identity(args.profile_name)
     except ValueError as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
     if not purged:
-        _die(f"Error: session identity was not purged. Restart or stop the gateway, then run:\n"
-             f"    hermes profile purge-identity {args.profile_name}", err=True)
-    print(f"✓ Session/routing identity purged: {args.profile_name}")
+        _die(t("profile.identity_purge_failed", name=args.profile_name), err=True)
+    print(t("profile.identity_purged", name=args.profile_name))
 
 
 def _profile_export(args):
+    from agent.i18n import t
     from hermes_cli.profiles import export_profile, get_profile_export_path
     name = args.profile_name
     try:
         output = args.output or str(get_profile_export_path(name))
         result_path = export_profile(name, output)
-        print(f"✓ Exported '{name}' to {result_path}")
+        print(t("profile.exported", name=name, path=result_path))
     except (ValueError, FileNotFoundError, OSError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
 
 
 def _profile_import(args):
+    from agent.i18n import t
     from hermes_cli.profiles import check_alias_collision, create_wrapper_script, import_profile
     try:
         profile_dir = import_profile(args.archive, name=getattr(args, "import_name", None))
         name = profile_dir.name
-        print(f"✓ Imported profile '{name}' at {profile_dir}")
+        print(t("profile.imported", name=name, path=profile_dir))
         if not check_alias_collision(name):
             wrapper_path = create_wrapper_script(name)
             if wrapper_path:
-                print(f"  Wrapper created: {wrapper_path}")
+                print(t("profile.wrapper_created", path=wrapper_path))
         print()
     except (ValueError, FileExistsError, FileNotFoundError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
 
 
 def _profile_install(args):
@@ -522,52 +546,44 @@ def _profile_install(args):
             args.source, name=getattr(args, "install_name", None), force=getattr(args, "force", False),
             create_alias=getattr(args, "alias", False),
         )
-        print(f"\n✓ Installed '{plan.manifest.name}' v{plan.manifest.version}")
-        print(f"  Profile path: {plan.target_dir}")
+        print(t("profile.installed_header", name=plan.manifest.name, version=plan.manifest.version))
+        print(t("profile.installed_path", path=plan.target_dir))
         if plan.manifest.env_requires:
-            print(
-                f"  Next: copy .env.EXAMPLE to .env and fill in required keys:\n"
-                f"    {plan.target_dir}/.env.EXAMPLE"
-            )
+            print(t("profile.installed_env_next", example=plan.target_dir))
         if plan.has_cron:
-            print(
-                "  Cron jobs were included but are NOT scheduled automatically.\n"
-                f"  Review them with:  hermes -p {plan.manifest.name} cron list"
-            )
-        print(f"\n  Use with:      hermes -p {plan.manifest.name} chat")
+            print(t("profile.installed_cron_note", name=plan.manifest.name))
+        print(t("profile.installed_use", name=plan.manifest.name))
     except (DistributionError, ValueError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
 
 
 def _profile_update(args):
+    from agent.i18n import t
     from hermes_cli.profile_distribution import DistributionError, read_manifest, update_distribution
     from hermes_cli.profiles import get_profile_dir, normalize_profile_name
     try:
         canon = normalize_profile_name(args.profile_name)
         current = read_manifest(get_profile_dir(canon))
         if current is None:
-            _die(
-                f"Error: Profile '{canon}' is not a distribution (no distribution.yaml). "
-                "Only profiles installed via `hermes profile install` can be updated."
-            )
+            _die(t("profile.update_not_distribution", name=canon))
         force_config = getattr(args, "force_config", False)
         if not getattr(args, "yes", False):
-            print(f"\nUpdate '{canon}' from: {current.source or '(no source)'}")
-            print(f"  Currently at version {current.version}")
+            print(t("profile.update_source", name=canon, source=current.source or '(no source)'))
+            print(t("profile.update_current_version", version=current.version))
             if force_config:
-                print("  --force-config set: config.yaml WILL be overwritten.")
+                print(t("profile.update_force_config"))
             else:
-                print("  config.yaml will be preserved (pass --force-config to overwrite).")
-            print("  User data (memories, sessions, auth, .env) will NOT be touched.")
-            if not _confirm("\nProceed? [y/N] "):
-                print("Update cancelled.")
+                print(t("profile.update_preserve_config"))
+            print(t("profile.update_userdata_untouched"))
+            if not _confirm(t("profile.update_confirm")):
+                print(t("profile.update_cancelled"))
                 return
         plan = update_distribution(canon, force_config=force_config)
-        print(f"\n✓ Updated '{plan.manifest.name}' → v{plan.manifest.version}")
+        print(t("profile.update_done", name=plan.manifest.name, version=plan.manifest.version))
         if plan.has_cron:
-            print(f"  Cron files were refreshed.  Review with:  hermes -p {plan.manifest.name} cron list")
+            print(t("profile.update_cron_note", name=plan.manifest.name))
     except (DistributionError, ValueError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
 
 
 _INFO_FIELDS = (
@@ -581,16 +597,17 @@ _INFO_FIELDS = (
 
 
 def _profile_info(args):
+    from agent.i18n import t
     from hermes_cli.profile_distribution import describe_distribution, DistributionError
     try:
         data = describe_distribution(args.profile_name)
     except (DistributionError, ValueError) as e:
-        _die(f"Error: {e}")
+        _die(t("profile.error", error=e))
     if not data:
-        print(f"Profile '{args.profile_name}' is not a distribution (no distribution.yaml).")
+        print(t("profile.info_not_distribution", name=args.profile_name))
         return
-    print(f"\nDistribution: {data.get('name')}")
-    print(f"Version:      {data.get('version', '?')}")
+    print(t("profile.dist_header", name=data.get('name')))
+    print(t("profile.dist_version", version=data.get('version', '?')))
     for key, label in _INFO_FIELDS:
         if data.get(key):
             print(f"{label}{data[key]}")
