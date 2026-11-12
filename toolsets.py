@@ -41,6 +41,8 @@ _FEISHU_TOOLS = [
     "feishu_doc_read", "feishu_drive_list_comments", "feishu_drive_list_comment_replies",
     "feishu_drive_reply_comment", "feishu_drive_add_comment",
 ]
+# CN (K-40): yuanbao stays a bundled platform; upstream removed this list with its adapter.
+_YUANBAO_TOOLS = ["yb_query_group_info", "yb_query_group_members", "yb_send_dm", "yb_search_sticker", "yb_send_sticker"]
 
 
 def _ts(description, tools=(), includes=(), **extra):
