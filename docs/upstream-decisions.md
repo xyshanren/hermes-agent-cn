@@ -425,3 +425,19 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 **新发现**：① CN 维护者的 gateway 后台任务重构（6cfdb53323）已进上游——CN↔上游双桥打通，CN 重构可直接提上游；② 上游 optional-skills 删 22 个与 CN 海外组裁剪完全同向（减法互证）；③ **CN 成为 yuanbao 最后维护方**，国产平台上游维护格局从"帮 CN 养"转为分化（feishu/qqbot 活跃、yuanbao/dingtalk 停滞）；④ 上游 velocity 加速到 ~1000 commits/日，季度窗口复核节奏可能需要缩短。
 
 **Revisit**：bump 拍板会（K-38~K-44 七项 + K-61~K-70 排期）｜v0.24.0 出来后本窗口 v0.23.0→v0.23.1 段（618 PR）的 curated notes 补核对｜上游 catalog 2MiB→16MiB cap 修复（v0.23.1）不影响 CN（类别级 reject catalog）。
+
+---
+
+### 2026-11-12 拍板：bump 前置 K-38~K-44 全部落锤
+
+| ID | 拍板 | what / why | when-to-delete |
+|---|---|---|---|
+| K-38 | **跟随上游 browser_exec-only** | 上游删旧 browser_* 全家只剩 `browser_exec` + `browser_session` 层（browser-harness CDP 引擎）。CN 复用上游 session 层（底盘文件 cdp/supervisor/vault/lightpanda 上游全保留，此前"CN 自持 session 层"估 1-2d 高估）；CN 实际工作量 = 14 个 skill 文档旧工具名替换 + model_tools 工具表收敛 + agent(18)/gateway(2) 引用清理，~0.5-1d。删细粒度工具层对 prompt cache 也是减负 | 若 CN 放弃 browser 能力或上游 browser_exec 路线撤废 |
+| K-39 | **reject 上游删除 CJK FTS5** | CN 自编译 bigram 分词器 .so 是 1-2 字中文词会话搜索的根基（FTS5 默认 unicode61 不切中文）；上游"从未随包发布 .so"理由对 CN 不成立。bump 时人工保 `native/fts5_cjk/` + `hermes_state_fts.py` CJK 集成 + 2 个测试，不采纳上游 2 个 retirement 测试 | 若 CN 放弃自编译 .so 或上游重新官方分发 CJK tokenizer |
+| K-40 | **CN 自维护 yuanbao** | 上游 e1f7b59ec2 整目录删去外部插件，CN 成最后维护方；12 条 left-core 修复（4755c925b1 族）手工重放进 CN bundled 保留面，进 cn-divergences 声明 | 若上游回迁 bundled yuanbao 或 CN 裁掉 yuanbao |
+| K-41 | **按建议组合** | `hermes mcp serve` 本地保留（reject 搬迁，CN 无外部插件分发装不到 mcp-serve）；`hermes claw` 跟删（skills hub 已移除，减法一致）；`hermes import-agent` 本地保留 diverge | 若 CN 建立外部插件分发或对应功能裁掉 |
+| K-42 | **vendor OneBot** | 社区 OneBot 11 插件（NapCat/Lagrange/LLOneBot）vendor 进 `plugins/platforms/onebot/`，覆盖 QQ 个人号/群主自部署（CN 官方 qqbot 插件不覆盖的场景），含汉化 ~1-1.5d；保留 loopback-bind+token 强制 | 若上游官方吸收 OneBot 入 bundled 或 CN 裁 QQ 场景 |
+| K-43 | **defer vault keychain** | .env 本地部署已够；"keychain 算不算 secrets 正当居所"需重述 .env 边界，不随 bump 顺手做 | bump 后按需另立项 |
+| K-44 | **全量 bump 到 v0.23.1** | one-gateway（K-34）v0.22 bump 已带入，v0.23.1 bump = 同步其一年收敛修复，无"不带"选项；不 bump 只 cherry-pick 则 gateway 面 375 vs 276 文件漂移持续涨价。`session_authority.py`/`session_controls.py`/`gateway/run.py` 列入强制同步白名单 | bump 完成后本条即历史 |
+
+**下一步**：起草 bump 执行计划（merge-plan，照 `~/projects/hermes-agent-cn-notes/merge-plan-v*/` 惯例）——阶段划分：前置（K-38 browser 收敛 + K-39 冲突点标记）→ 主体 merge（含 K-44 白名单 + contracts 22 文件 + 平台/技能搬迁）→ CN 重放（K-40 12 条 + 汉化债务 K-70 + SIGUSR2/glyph 等 CN 本地补丁回放）→ verify（0 regression + .env 保护 + tag）。

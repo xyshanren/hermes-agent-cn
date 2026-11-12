@@ -1218,17 +1218,17 @@
 > 窗口 `9cb34e9e28..3b42157858` = 11,374 commits（8,286 non-merge）；上游 v0.22.3→**v0.23.1**（含 v0.23.0 Hearth minor）；CN base 仍 ≈v0.22.2+384。
 > 性质 = **base bump 前置分析**。上游 velocity 加速到 ~1000 commits/日。
 
-### 拍板前置（bump 冲突失控点）
+### 拍板前置（✅ 2026-11-12 拍板会已全部落锤，详见 upstream-decisions.md「2026-11-12 拍板」节）
 
-| ID | 议题 | 判定 | 说明 |
+| ID | 议题 | 拍板结果 | 说明 |
 |---|---|---|---|
-| K-38 | **browser 工具面断裂**：上游删旧 browser_* 全家 + agent-browser + 捆绑 Camofox（68500d9ff9/b87977cadd），只剩 browser_exec + browser_session 层 | 拍板（倾向跟随 + CN 自持 session 层 1-2d） | CN model_tools.py:184/358/454、tools/browser_*.py 整层、gateway/browser_control_{broker,artifacts}.py 仍持旧形态 |
-| K-39 | **CJK FTS5**：上游删 native/fts5_cjk/（0a0dab0686，理由"从未随包发布 .so"对 CN 不成立） | **reject 上游删除** | CN bigram 索引是 1-2 字中文词主路径；bump 时人工保 CJK 侧，不采纳上游 2 个 retirement 测试 |
-| K-40 | **yuanbao 上游撤退**：e1f7b59ec2 删整目录 + tools/yuanbao_tools.py（493 行）+17 locale 键 | CN 自维护声明 + 12 条 left-core 修复（4755c925b1 族）手工重放 | K-24"上游原生维护"前提对 yuanbao 失效；涉 14 个 core 文件的 cherry-pick 都会撞 yuanbao 分支 |
-| K-41 | mcp serve / claw / import-agent 三命令去留 | mcp serve 本地保留 reject 搬迁；claw 跟删；import-agent 保留 diverge | mcp-serve 无 shim 只有提示（e3a962d087） |
-| K-42 | OneBot 平台（1f47d67116 族，OneBot 11/NapCat） | 建议 vendor 进 plugins/platforms/onebot/ | QQ 个人号/群主自部署 = CN qqbot（官方 API）不覆盖的场景；1-1.5d 含汉化 |
-| K-43 | vault OS-keychain（7abb9cc0fa） | defer | .env"只放 secrets"边界需重述 |
-| K-44 | K-34 one-gateway 强制带入 + 三大热文件（session_authority/session_controls/run.py）强制同步白名单 | bump 拍板时定 | 上游已落地+收敛完毕；CN gateway 面 375 vs 276 文件，defer 价格在涨 |
+| K-38 | **browser 工具面断裂**：上游删旧 browser_* 全家 + agent-browser + 捆绑 Camofox（68500d9ff9/b87977cadd），只剩 browser_exec + browser_session 层 | ✅ **跟随 browser_exec-only** | 复用上游 session 层（底盘文件上游全保留）；CN 工作量 ~0.5-1d = 14 个 skill 文档旧工具名替换 + model_tools 工具表收敛 + agent(18)/gateway(2) 引用清理 |
+| K-39 | **CJK FTS5**：上游删 native/fts5_cjk/（0a0dab0686，理由"从未随包发布 .so"对 CN 不成立） | ✅ **reject 上游删除** | CN bigram 索引是 1-2 字中文词主路径；bump 时人工保 CJK 侧，不采纳上游 2 个 retirement 测试 |
+| K-40 | **yuanbao 上游撤退**：e1f7b59ec2 删整目录 + tools/yuanbao_tools.py（493 行）+17 locale 键 | ✅ **CN 自维护** | 12 条 left-core 修复（4755c925b1 族）手工重放，进 cn-divergences 声明；涉 14 个 core 文件的 cherry-pick 都会撞 yuanbao 分支 |
+| K-41 | mcp serve / claw / import-agent 三命令去留 | ✅ **按建议组合** | mcp serve 本地保留 reject 搬迁；claw 跟删；import-agent 保留 diverge（mcp-serve 无 shim 只有提示，e3a962d087） |
+| K-42 | OneBot 平台（1f47d67116 族，OneBot 11/NapCat） | ✅ **vendor** | 进 plugins/platforms/onebot/；QQ 个人号/群主自部署 = CN qqbot（官方 API）不覆盖的场景；~1-1.5d 含汉化 |
+| K-43 | vault OS-keychain（7abb9cc0fa） | ✅ **defer** | .env 边界重述另立项，不随 bump |
+| K-44 | K-34 one-gateway 强制带入 + 三大热文件同步白名单 | ✅ **全量 bump v0.23.1** | session_authority/session_controls/run.py 强制同步白名单；one-gateway v0.22 bump 已带入，无"不带"选项 |
 
 ### 阶段一 P0（CVE/红线/中文用户，立即可做或随 bump 白拿）
 
