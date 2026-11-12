@@ -4,7 +4,7 @@
 
 [project]
 name = "hermes-agent"
-version = "0.22.2"  # CN：手动版本，跟 tag v0.22.2+cn.1 对齐（上游用 0.0.0 + 从 tag 算）
+version = "0.23.1"  # CN：手动版本，跟 tag v0.23.1+cn.1 对齐（上游用 0.0.0 + 从 tag 算）
 description = "The self-improving AI agent — creates skills from experience, improves them during use, and runs anywhere"
 readme = "README.md"
 # 3.14 is the newest python we know we have wheels for.
@@ -12,9 +12,10 @@ readme = "README.md"
 # to get thru their update step on old python.
 # Shortly after they do, we update to our latest python.
 # See tests/compat/README.md for the updater contract this keeps.
-requires-python = ">=3.11,<3.15"  # CN: 上界跟上游一致（pm 托管 3.14 可用）；
-# 3.11-3.13 也能装齐依赖——上游那 46 个 3.14 专属 marker 已在 K-28 里剥离，
-# 所以下界保持 3.11。
+requires-python = ">=3.12,<3.15"  # CN（2026-11-13，v0.23.1 bump）：从 3.11 收紧到 3.12——
+# 上游新依赖树（numpy 2.5.4 等）已不支持 3.11，3.11-3.14 全区间解析 unsatisfiable。
+# 上游本就视 3.11 为 pre-PM 安装桥（never a runtime），CN 运行目标 3.13/3.14（PM 栈）
+# 不受影响。上游那 46 个 3.14 专属 marker 仍在 K-28 剥离（3.12/3.13 可用）。
 authors = [{ name = "Nous Research" }]
 license = "MIT"
 license-files = ["LICENSE"]
