@@ -408,3 +408,20 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 **when-to-delete**：若上游把 CN 六个平台 / 13 个 provider 回迁进 core（不再是 plugin），`CN_DISABLED_PLATFORMS` 与本表整体作废，可直接删。
 
 **Revisit**：季度窗口（2027-01-01）复核 `plugins/model-providers/` 是否又长出新的海外 provider；`gateway/relay/` 若上游开源化 connector 协议并有国内可用部署，再评估。
+
+---
+
+### 2026-11-12 — v0.23.1 缺口深扫（8,286 non-merge commits，v0.23.0 Hearth minor）
+
+> 完整扫描：`archive/2026-11-12/scan-2026-10-19-to-11-12.md`（4 路子代理深扫）｜候选池：`CANDIDATES.md` K-38~K-70
+> 窗口 `9cb34e9e28..3b42157858`（2026-10-19→11-09），上游 v0.22.3→v0.23.1（含 **v0.23.0 Hearth** minor + 5 patch）；CN base ≈v0.22.2+384。上游日 commit 加速到 ~1000。
+
+**总体判定**：**bump 必要性高**。2026-10-20 拍板的 defer 项已全部上游落地——K-34 one-gateway 完整落地并修完一轮 breakage、K-30 cli 拆解终态定型（cli.py 1,792 行 + 18 mixin，CN 欠 8 个新文件）、K-35 local_runtime 底盘继续演化（llama.cpp b11671 + DFlash）。**K-37 cron 重写疑似被取代**（38 条全为既有调度器修补，降级"逐条吸收"）。
+
+**bump 前置拍板**（K-38~K-44，详见 CANDIDATES）：① browser 工具面断裂（上游删旧 browser_* 全家只剩 browser_exec，倾向跟随+CN 自持 session 层）；② CJK FTS5 reject 上游删除（上游"从未发布 .so"理由对 CN 不成立）；③ yuanbao 上游撤退→CN 自维护 + 12 条 left-core 修复手工重放；④ mcp serve/claw/import-agent 三命令去留；⑤ OneBot vendor 拍板；⑥ vault keychain defer；⑦ K-34 强制带入 + 三大热文件同步白名单。
+
+**P0 adopt 精华**（K-45~K-60）：CVE 依赖批（Pillow 13 critical 等 6 项）、**CJK 终端渲染修复族**（中文用户直接痛点）、delegation subagent cache 热身门（红线增量）、compression prepare_ahead+UNVERIFIED（缓存安全）、cron cancel+timezone、approval 硬化系列（K-20/K-25 延续）、redact 拆分+40 条精度（K-26 延续）、CN 6 平台更新金矿（feishu 21/qqbot 9）、代理秘钥掩码长线 35 条、bot 互嗨防护、hermes-update.sh 加固三件、pm 加固选抄、edge-tts 403 修复。
+
+**新发现**：① CN 维护者的 gateway 后台任务重构（6cfdb53323）已进上游——CN↔上游双桥打通，CN 重构可直接提上游；② 上游 optional-skills 删 22 个与 CN 海外组裁剪完全同向（减法互证）；③ **CN 成为 yuanbao 最后维护方**，国产平台上游维护格局从"帮 CN 养"转为分化（feishu/qqbot 活跃、yuanbao/dingtalk 停滞）；④ 上游 velocity 加速到 ~1000 commits/日，季度窗口复核节奏可能需要缩短。
+
+**Revisit**：bump 拍板会（K-38~K-44 七项 + K-61~K-70 排期）｜v0.24.0 出来后本窗口 v0.23.0→v0.23.1 段（618 PR）的 curated notes 补核对｜上游 catalog 2MiB→16MiB cap 修复（v0.23.1）不影响 CN（类别级 reject catalog）。

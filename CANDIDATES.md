@@ -1212,6 +1212,73 @@
 
 ---
 
+## 窗口 2026-10-19 → 11-12（2026-11-12 v0.23.1 缺口深扫）
+
+> 完整扫描（4 路子代理深扫）：`archive/2026-11-12/scan-2026-10-19-to-11-12.md`；分桶原始数据 `D:\work\workspace\Qoder\_tmp_upstream_scan\`（不进仓库）。
+> 窗口 `9cb34e9e28..3b42157858` = 11,374 commits（8,286 non-merge）；上游 v0.22.3→**v0.23.1**（含 v0.23.0 Hearth minor）；CN base 仍 ≈v0.22.2+384。
+> 性质 = **base bump 前置分析**。上游 velocity 加速到 ~1000 commits/日。
+
+### 拍板前置（bump 冲突失控点）
+
+| ID | 议题 | 判定 | 说明 |
+|---|---|---|---|
+| K-38 | **browser 工具面断裂**：上游删旧 browser_* 全家 + agent-browser + 捆绑 Camofox（68500d9ff9/b87977cadd），只剩 browser_exec + browser_session 层 | 拍板（倾向跟随 + CN 自持 session 层 1-2d） | CN model_tools.py:184/358/454、tools/browser_*.py 整层、gateway/browser_control_{broker,artifacts}.py 仍持旧形态 |
+| K-39 | **CJK FTS5**：上游删 native/fts5_cjk/（0a0dab0686，理由"从未随包发布 .so"对 CN 不成立） | **reject 上游删除** | CN bigram 索引是 1-2 字中文词主路径；bump 时人工保 CJK 侧，不采纳上游 2 个 retirement 测试 |
+| K-40 | **yuanbao 上游撤退**：e1f7b59ec2 删整目录 + tools/yuanbao_tools.py（493 行）+17 locale 键 | CN 自维护声明 + 12 条 left-core 修复（4755c925b1 族）手工重放 | K-24"上游原生维护"前提对 yuanbao 失效；涉 14 个 core 文件的 cherry-pick 都会撞 yuanbao 分支 |
+| K-41 | mcp serve / claw / import-agent 三命令去留 | mcp serve 本地保留 reject 搬迁；claw 跟删；import-agent 保留 diverge | mcp-serve 无 shim 只有提示（e3a962d087） |
+| K-42 | OneBot 平台（1f47d67116 族，OneBot 11/NapCat） | 建议 vendor 进 plugins/platforms/onebot/ | QQ 个人号/群主自部署 = CN qqbot（官方 API）不覆盖的场景；1-1.5d 含汉化 |
+| K-43 | vault OS-keychain（7abb9cc0fa） | defer | .env"只放 secrets"边界需重述 |
+| K-44 | K-34 one-gateway 强制带入 + 三大热文件（session_authority/session_controls/run.py）强制同步白名单 | bump 拍板时定 | 上游已落地+收敛完毕；CN gateway 面 375 vs 276 文件，defer 价格在涨 |
+
+### 阶段一 P0（CVE/红线/中文用户，立即可做或随 bump 白拿）
+
+| ID | 簇 | commits | 判定 | 价值 |
+|---|---|---|---|---|
+| K-45 | CVE 依赖批（Pillow 13 critical / aiohttp 3.14.5 high / certifi critical / oauthlib 4 PKCE / starlette 1.9 CVE-2026-48710 / requests 2.34.2） | 27c6146381, 33836d5054, 5aa2f1b56c, a5856c1a51, 128b101efd | adopt | 🔴 0.5d；K-29 同批（httpx2 2.15.1 白拿） |
+| K-46 | CJK 终端渲染修复族（全角空格/CJK 折行/组合字符/paste burst） | 06466a6512, d9bdc49612, 5de49e24ac, d569ce08b2, 2432e31e2b | adopt | 🔴 中文用户直接痛点，最高性价比；与 CN glyph layout 冲突中等 |
+| K-47 | delegation 批量 subagent prompt-cache 热身门（opt-in） | 6d0686ba3c | adopt | 🔴 红线直接受益 |
+| K-48 | compression prepare_ahead（opt-in）+ UNVERIFIED 标签 + Skill Safety Rule 存活 | 32a636bc8d, 73bfb9ce7e, 93286ffd87 族 | adopt | UNVERIFIED 只动 summarizer prompt 尾部=缓存安全 |
+| K-49 | cron cancel + per-job timezone/grace_minutes/run-now | 8c228c5b89, ee394bd921, bfa67878cd, f656543e03 族 | adopt | 运维刚需 ~6-9h；**K-37 cron 重写疑似被取代**（38 条全为修补），降级"逐条吸收" |
+| K-50 | sessions refresh-prompts | e240d617e8, 0216b1a320 | adopt | 长会话吃 SOUL.md 更新刚需 |
+| K-51 | approval 硬化系列（PowerShell/wmic/pipe-to-shell/upload/隐藏字符/过期卡不批下一个/actor 绑定 approval_actor.py） | 3d4b6cfb93 族, 3f5612cde6 族, 5ab58da1f6, 466591fe65 族 | adopt + reimplement | K-20/K-25 延续；CN floor 补齐绕过案例清单 |
+| K-52 | redact 掩码重构（redact_headers/redact_connstr 拆分）+ ~40 条精度修复 | 603a07f56d, a9d55a3603, 037b8da607 族 | adopt | K-26 延续；CN agent/redact.py 单文件随拆 |
+| K-53 | CN 6 平台更新：feishu 21（clarify 卡+picker f94194ba73 族）/ qqbot 9（审批卡 085d8b5d98）/ weixin+wecom 掩码线（3df2cfc35b 族）/ dingtalk 0 | 见扫描报告桶 B | adopt | K-24 后续金矿 |
+| K-54 | 代理秘钥掩码长线 35 条（base_log_safety.py 为轴） | 3df2cfc35b 族 | adopt | 国内代理场景排障黑盒痛点，1-1.5d |
+| K-55 | bot 互嗨防护（runtime 通知不达 bot/hop 上限/bot_chain.py） | 4e93f80e47, 0754ec0e28 | adopt + reimplement | CN 多 hermes 群对轰经典事故 |
+| K-56 | state 探针误判整修 ~10 条 + FTS 布局诊断 | 7b01fac977 族, f42c307ef8 族 | adopt | K-22 延续；WSL 满盘受益 |
+| K-57 | mcp Unicode TAG 剥离进 core + hooks pre_llm_call 整轮拦截 | b3a35c49c8, ad9229c843 | adopt | firewall 恢复的上游原生挂点（比轮后更早） |
+| K-58 | hermes-update.sh 加固三件（fetch 超时 30s/代理优先级/commit-graph 刷新） | 0fbefc8c28, ca69d857c3, 0c81251886 | adopt | 0.25d；代理优先级国内高频痛点 |
+| K-59 | pm 加固选抄（损坏缓存清扫/pm install --without/--bump/坏锁回收） | 67d3d5076c 族, fe95d04fac, 7d093a4e0f | adopt | PM 栈是 CN 部署命脉 |
+| K-60 | edge-tts 7.3.1（403 修复） | 67acaae656 | adopt | CN voice 路径必修 |
+
+### 阶段二 P1（bump 主体结构工程）
+
+| ID | 项 | 判定 | 说明 |
+|---|---|---|---|
+| K-61 | backtrack//rewind 全套（8 个新 cli_* 文件 + CLIBacktrackMixin + zh.tui.yaml 上游已给 key） | adopt（随 bump） | 产品力级 UX；1.5d |
+| K-62 | 终端内联图片全套（TUI 转录 + CLI scrollback + 多终端后端） | adopt（随 bump） | 截图工作流 |
+| K-63 | tui_gateway contracts 全量重生成（22 文件 + canonical_stored_reads.py）+ stored-reads 分页 | adopt（随 bump 整套跟随） | CN TUI/Desktop 共用协议；server.py 有尺寸 lint 要守 |
+| K-64 | curator per-skill lock（tools/skill_lock.py） | adopt | 保护 CN 本地化技能不被 agent 改写 |
+| K-65 | K-30 欠账：8 个新 cli_* 文件 + 18 号 mixin 跟进 | adopt（随 bump） | CN 本地功能重放落点未被上游搬动，风险低 |
+| K-66 | 技能 58→44 跟随：office 三合一（低成本低成本跟）+ 12 技能移动逐个过（notion/airtable/box 裁，opencode/design-md 等留） | adopt + 逐项 | CN 保留技能无一被上游删 |
+| K-67 | 依赖大版本重写上界（oauthlib 4/Pillow 13/filelock 4/openai 2.54/anthropic 0.125/uvicorn 0.54） | adopt（随 bump） | CN `>=floor,<next_major` 每项重写 |
+| K-68 | aux 回退分类学大修（~35 条 + route verdict 按 endpoint 归属） | reimplement | CN 多国产网关 fallback 同构问题，2-3d |
+| K-69 | 孤儿进程治理（spawn_owned 唯一通道 + CI ratchet） | reimplement | CN Windows 孤儿进程真实；bump 后 ratchet 会拦裸 detached spawn |
+| K-70 | 汉化债务：locales/en.yaml +96 键 × 17 语言 ≈1,650 行 + ~280-360 硬编码串 | 记账 | 2-3d；webapp reject 则减 80 串 |
+
+### Reject（类别级，随 bump 处理）
+
+telegram 202 / 海外平台 ~144 / plugin-catalog 新条目 680 yaml（official 10 含 mcp-serve、hermes-security 留档待手工移植）/ catalog re-pin ~800 / config_backends 29 / copilot 58 / relay 13 / apps/desktop 813（Electron 44 弃 macOS 11/12+32 位 Windows 记一条）/ webapp 命令（~120 commits，Nous 账号耦合 3,700+ 行，借思路接 CN 鉴权）/ stable 通道 / just+pnpm / WhatsApp 配对。
+
+### 本窗口启示
+
+- **defer 红利第三次兑现但开始收费**: K-34 上游做完+修完，bump 即强制带入；K-37 被上游修补路线取代——defer 不是免费的，gateway/contracts 面的同步成本随窗口线性增长
+- **CN↔上游桥是通的**: 6cfdb53323（CN 维护者的 gateway 后台任务重构）已进上游——CN 重构可直接提上游避免双维护
+- **上游替 CN 做了减法**: optional-skills 删 22 个（HF/whisper/duckduckgo/searxng 系）与 CN 海外组裁剪完全同向；T3 不活跃代码（mcp_serve/mini_swe_runner/Honcho）上游直接删=白拿
+- **CN 成为 yuanbao 最后维护方**: 上游国产平台维护从"帮 CN 养"转为"退场"，国产平台资产归属要重新评估（feishu/qqbot 仍活跃，yuanbao/dingtalk 已停）
+
+---
+
 ## 触发条件总表 (扩展)
 
 | 触发 | 看哪些 ID |
