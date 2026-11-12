@@ -2,8 +2,8 @@
 
 ``BaseEnvironment.execute`` is request/response: it captures output and returns. The desktop that
 follows the terminal backend needs three things that are not: the RFB byte stream between the
-Desktop pane and the sandbox's Xvnc, cua-driver's MCP-over-stdio server, and agent-browser
-invocations whose daemon must outlive the call. All three are "spawn argv in the sandbox, keep
+Desktop pane and the sandbox's Xvnc, cua-driver's MCP-over-stdio server, and the bot's Chromium,
+which must outlive the call that started it. All three are "spawn argv in the sandbox, keep
 stdin/stdout as pipes". Each spawn-per-call backend has a local argv prefix that gives exactly that
 (``docker exec -i``, ``ssh``, ``apptainer exec``); this module is the one place that knows it.
 

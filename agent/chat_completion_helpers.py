@@ -2587,8 +2587,8 @@ def cleanup_task_resources(agent, task_id: str) -> None:
     and ``cleanup_browser`` in headed mode (the inactivity reaper handles idle sessions)."""
     def _headed() -> bool:
         try:
-            from tools.browser_tool_cloud import _is_headed_mode
-            return _is_headed_mode()
+            from tools.browser_session_cloud import is_headed_mode
+            return is_headed_mode()
         except Exception:
             return bool(os.environ.get("AGENT_BROWSER_HEADED"))
 

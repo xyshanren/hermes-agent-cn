@@ -327,9 +327,9 @@ def _refresh_tui_before_print(cli) -> None:
 def _print_lightpanda_engine_status() -> None:
     """``/browser status`` line(s) about ``browser.engine: lightpanda`` — silent unless set;
     says whether it is in use or which higher-precedence setting shadows it."""
-    if not _probe("tools.browser_tool_lightpanda_fallback", "_using_lightpanda_engine", False):
+    if not _probe("tools.browser_lightpanda", "using_lightpanda_engine", False):
         return
-    used, reason = _probe("tools.browser_tool_lightpanda_fallback", "lightpanda_engine_status", (None, None))
+    used, reason = _probe("tools.browser_lightpanda", "lightpanda_engine_status", (None, None))
     if reason is None:
         return
     if not used:
@@ -397,7 +397,7 @@ def _browser_connect(cli, cdp_url: str) -> None:
         return
     cdp_url, port = normalized
     # Clear any existing browser sessions so the next tool call uses the new backend
-    _probe("tools.browser_tool_lifecycle", "cleanup_all_browsers", None)
+    _probe("tools.browser_session_lifecycle", "cleanup_all_browsers", None)
     print()
     # Already serving CDP? For the default-local URL probe both loopbacks: a squatter
     # on 127.0.0.1:<port> (e.g. an IDE debugger) can push the browser to bind [::1] only.
@@ -416,14 +416,14 @@ def _browser_connect(cli, cdp_url: str) -> None:
         return _say_block(_t("browser.not_connected"))
     os.environ["BROWSER_CDP_URL"] = found
     # Eagerly start the CDP supervisor so pending_dialogs + frame_tree show up in the next snapshot.
-    _probe("tools.browser_tool_cdp", "_ensure_cdp_supervisor", None, "default")
+    _probe("tools.browser_session_cdp", "ensure_cdp_supervisor", None, "default")
     _say_block(_t("browser.connected"), f"   {_t('browser.endpoint', url=found)}")
     # Tell the model the CDP browser was made available on purpose.
     if hasattr(cli, '_pending_input'):
         cli._pending_input.put(
             "[System note: The user invoked /browser connect and connected your browser tools to "
             "a Chromium-family dev/debug browser via Chrome DevTools Protocol. "
-            "Your browser_navigate, browser_snapshot, browser_click, and other browser tools now "
+            "Your browser tools (browser_exec, browser_cdp) now "
             "control that CDP browser. The command itself is a signal that using browser tools for "
             "their current browser-related request is expected; do not wait for separate permission "
             "just because CDP is connected. This is typically a Hermes-managed isolated debug "
@@ -437,9 +437,9 @@ def _browser_disconnect(cli) -> None:
         return _say_block(_t("browser.already_default"))
     os.environ.pop("BROWSER_CDP_URL", None)
     with suppress(Exception):
-        from tools.browser_tool_lifecycle import cleanup_all_browsers
-        from tools.browser_tool_cdp import _stop_cdp_supervisor
-        _stop_cdp_supervisor("default")
+        from tools.browser_session_lifecycle import cleanup_all_browsers
+        from tools.browser_session_cdp import stop_cdp_supervisor
+        stop_cdp_supervisor("default")
         cleanup_all_browsers()
     _say_block(_t("browser.disconnected"), f"   {_t('browser.reverted')}")
     if hasattr(cli, '_pending_input'):
@@ -481,12 +481,12 @@ def _browser_status() -> None:
         except Exception:
             print(f"   {_t('browser.status_unreachable')}")
     else:
-        provider = _probe("tools.browser_tool_cloud", "_get_cloud_provider", None)
+        provider = _probe("tools.browser_session_cloud", "get_cloud_provider", None)
         if provider is not None:
             print(_t("browser.status_cloud", provider=provider.display_name))
             _print_lightpanda_engine_status()
         else:
-            engine = _probe("tools.browser_tool_cloud", "_get_browser_engine", "auto")
+            engine = _probe("tools.browser_session_cloud", "get_browser_engine", "auto")
             _pr(*_local_engine_lines(engine))
             if engine == "lightpanda":
                 _print_lightpanda_engine_status()

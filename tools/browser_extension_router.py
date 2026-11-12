@@ -1,8 +1,9 @@
 """Registry-level browser extension router.
 
-Agent-side half of browser-extension-control: decides, per ``browser_*`` handler
-invocation, whether an attached extension controller (via
-:mod:`gateway.browser_control_broker`) or the legacy backend executes it.
+Agent-side half of browser-extension-control: decides, per ``browser_cdp``
+invocation (the one core browser tool it serves), whether an attached extension
+controller (via :mod:`gateway.browser_control_broker`) or the local CDP path
+executes it.
 
 Routing contract (see ``tests/tools/test_browser_extension_router.py``):
 - Feature off ⇒ legacy, broker never touched, ``fallback()`` called exactly once.
@@ -114,7 +115,7 @@ def routed_browser_handler(
     session_id: Optional[str] = None, principal_id: Optional[str] = None,
     transport_family: Optional[str] = None, tool_call_id: Optional[str] = None,
 ) -> Any:
-    """Lazy registry-handler route wrapper for ``browser_*`` tools.
+    """Lazy registry-handler route wrapper for ``browser_cdp``.
     Feature off (or gateway unimportable) ⇒ the legacy handler runs unchanged."""
     try:
         from gateway.browser_control_broker import browser_control_enabled, get_browser_control_broker
