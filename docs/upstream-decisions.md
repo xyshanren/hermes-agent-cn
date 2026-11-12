@@ -441,3 +441,28 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 | K-44 | **全量 bump 到 v0.23.1** | one-gateway（K-34）v0.22 bump 已带入，v0.23.1 bump = 同步其一年收敛修复，无"不带"选项；不 bump 只 cherry-pick 则 gateway 面 375 vs 276 文件漂移持续涨价。`session_authority.py`/`session_controls.py`/`gateway/run.py` 列入强制同步白名单 | bump 完成后本条即历史 |
 
 **下一步**：起草 bump 执行计划（merge-plan，照 `~/projects/hermes-agent-cn-notes/merge-plan-v*/` 惯例）——阶段划分：前置（K-38 browser 收敛 + K-39 冲突点标记）→ 主体 merge（含 K-44 白名单 + contracts 22 文件 + 平台/技能搬迁）→ CN 重放（K-40 12 条 + 汉化债务 K-70 + SIGUSR2/glyph 等 CN 本地补丁回放）→ verify（0 regression + .env 保护 + tag）。
+
+---
+
+### 2026-11-13 — v0.23.1 bump 执行记录（阶段 0/1/2 完成，merge-plan-v7 落地）
+
+> 执行分支 `sync/upstream-v0.23-2026-11-12`｜回滚锚点 tag `cn-pre-v0.23-bump`｜计划 `merge-plan-v7-upstream-v0.23.1.md`（notes）
+
+**阶段 0（2026-11-12，全部先行做在 cn）**：
+- 0.1 K-38 browser 收敛：**cherry-pick 上游四连**（855f03e3f7 session 层 → a99fa3d249 → 3870e5a597 → 68500d9ff9 删除）+ 8 文件悬空引用手术 + 5 文件整取 + 12 skill 文档，合回 cn（129c36e11f）。前置收敛使主体 merge 的 browser 冲突几乎归零——**验证了"上游同款 commit 先行 cherry-pick"是消化断裂面的最佳路径**。
+- 0.3 K-41 claw 命令层退役（90fb5caf5b）。**范围修正**：ClawHub source 是 `hermes skills` 的 registry adapter 且上游仍维护——保留；桶 C"claw 跟删"原判过宽。
+- 0.2 ours 保留清单 10 条入 merge-plan §0.2；0.4 WSL state.db 备份（162MB）。
+
+**阶段 1 主体 merge（ca9f1186f8，2026-11-12/13）**：
+- 冲突实况：1,287 文件 = **DU 1,207**（desktop/海外平台/relay 等 reject 面被上游又改，全部保持删除）+ **UU 67**（真冲突）+ AA/UD/UA 13。DU 批量化是本次 merge 能压到 ~1 天的关键。
+- 关键融合：approval 上游 findings 流为骨架 + **CN session 形状指纹并入 `_approval_scope`**（形状不匹配 → scope=None → 重弹，09-26 修复语义在新流程下保持）；auxiliary_client 上游 ladder 重构 + CN S12 `_rd_*` 埋点重放；agent_init 上游 `_USAGE_STATE` 表 + CN S12 字段并入；locales 17 语言 union（4,463 键 parity，**上游 71 新键自带 zh 翻译，键级债务≈零**，zh-hant 仅 2 键英文占位）。
+- pyproject：上游依赖升级（CVE 批）全收 + **剥 3.14-only marker**（K-28）+ exclude-newer 注释关闭（CN 国内镜像惯例）+ kittentts 恢复裁剪（merge 把它带回来，K 系裁剪记录在案）；**uv.lock 清华源重锁**（UV_DEFAULT_INDEX）。
+- **意外坑**：① 被取消的子代理实际完成了 hermes_cli 全部冲突解决（抽查合格）——"cancelled before returning"≠没干活；② merge 的自动合并把 yuanbao 插件整目录（9 文件 4,606 行）清掉了（上游删除流对"CN 未改"文件直接生效，**不产生冲突**）——从回滚锚点恢复。**教训：DU 批量 git rm 和自动合并都会吞 CN 资产，merge 后必须对拍板保留面逐一核销。**
+
+**阶段 2（2026-11-13）**：
+- 减法第三次重落实（a4566c8502）：删海外 platform 插件 5 个 + relay/nix/bootstrap-installer/optional-mcps/desktop + catalog 回基线（706）；恢复 optional-skills/{migration,yuanbao}。
+- K-40 重放修正：**"12 条 left-core 修复"逐条核对后 11 条只改迁移向导（CN 无迁移场景，不适用），1 条改 telegram adapter（已裁）**——CN bundled yuanbao 直接受益的只有 68e4c2b31a 的 adapter 段（UA 惰性化），已重放。桶 B 报告在此项上高估。
+- **requires-python 收紧 3.11→3.12**（偏离记录）：上游新依赖树（numpy 2.5.4）不支持 3.11，3.11-3.14 全区间解析 unsatisfiable；上游自身靠 `environments=["3.14+"]` 掩盖此问题（锁只覆盖 3.14）。CN 运行目标 3.13/3.14（PM 栈）不受影响；3.11 本就是安装桥。when-to-delete：若 CN 重新需要 3.11 环境则需回退依赖版本。
+- 版本号 → 0.23.1；CN 回放清单核对通过（SIGUSR2/K-31 安全默认值/.python-version 3.13/CN docs/shell_bypass 等 additive 全部幸存）。
+
+**阶段 3 verify**：见后续补记。
