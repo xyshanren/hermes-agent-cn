@@ -13,6 +13,6 @@ import pytest
 from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.session import SessionSource
 
-_MOVED = ("signal", "weixin", "bluebubbles", "qqbot", "yuanbao", "whatsapp_cloud")
+_MOVED = ("signal", "weixin", "bluebubbles", "qqbot", "whatsapp_cloud")
 
 

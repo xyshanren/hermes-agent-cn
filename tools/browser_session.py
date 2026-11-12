@@ -4,8 +4,15 @@ always carrying a ``cdp_url``.
 Precedence (``BU_CDP_*`` operator env is honoured earlier, by ``browser_exec``):
 CDP override (live ``/browser connect`` > ``BROWSER_CDP_URL`` > ``browser.cdp_url``) > hybrid ``::local``
 sidecar (private URL, never the real profile) > cloud provider (``create_session``; on failure a LOCAL
-session marked ``fallback_from_cloud``) > local: real profile (consented) > Lightpanda
-(``browser.engine: lightpanda``) > the packaged Chromium via ``tools.browser_launcher``.
+session marked ``fallback_from_cloud``) > local.
+
+The local branch is NOT itself a fallback chain. It tries the consented real profile when
+``browser.use_real_profile`` is on, and otherwise (consent off, the profile can't load, or a
+no-profile engine like Lightpanda) runs a browser that does not load the real profile, on the
+configured engine: the packaged Chromium by default, or Lightpanda only when
+``browser.engine: lightpanda`` is set. That browser is fresh unless a persistent profile is
+configured (``browser.user_data_dir``, Bot Desktop), which keeps its own cookies across runs.
+Lightpanda is a configured engine choice, never a rung tried automatically.
 
 State lives here; sibling modules (``browser_session_*``) late-import this module inside functions.
 """
@@ -25,7 +32,6 @@ from utils import env_int
 logger = logging.getLogger(__name__)
 
 LOCAL_SUFFIX = "::local"
-_LOCAL_SUFFIX = LOCAL_SUFFIX
 
 # Inactivity timeout: config.yaml is authoritative; BROWSER_INACTIVITY_TIMEOUT stays a legacy env fallback.
 DEFAULT_SESSION_INACTIVITY_TIMEOUT = int(DEFAULT_CONFIG.get("browser", {}).get("inactivity_timeout", 120))
@@ -124,13 +130,6 @@ def ensure_screen_for_headed_chromium() -> None:
         ensure_started_for_tool()
 
 
-def browser_in_sandbox() -> bool:
-    """The bot's browser runs INSIDE the terminal backend when its screen is PLACED there (policy, not
-    liveness: the host is never touched by a page the model chose, whether or not the screen is up)."""
-    from tools.bot_desktop import placement
-    return placement.resolve().where == placement.TERMINAL
-
-
 # ── Session records ──────────────────────────────────────────────────────────────────────────────────
 
 def _session_record(prefix: str, cdp_url: Optional[str], features: dict[str, Any]) -> dict[str, Any]:
@@ -195,12 +194,19 @@ def _launch_target(cache_key: str) -> tuple[str, dict[str, Any], bool]:
 
 
 def _create_chromium_session(cache_key: str) -> dict[str, Any]:
-    if browser_in_sandbox():
+    from tools.bot_desktop import placement, runtime
+    try:
+        # Policy first: a refused placement raises, a terminal placement starts its sandbox screen; neither
+        # ever falls back to a host browser.
+        where = runtime.tool_placement()
+    except RuntimeError as exc:
+        raise RuntimeError(f"The browser cannot run here: {exc}") from exc
+    if where == placement.TERMINAL:
         from tools.browser_session_sandbox import create_sandbox_session
         return create_sandbox_session(cache_key)
     from tools.browser_launcher import launch_chromium
+    ensure_screen_for_headed_chromium()  # first: an auto-started screen selects the Bot Desktop profile
     launcher_key, kwargs, shared = _launch_target(cache_key)
-    ensure_screen_for_headed_chromium()
     browser, err = launch_chromium(launcher_key, **kwargs)
     if browser is None:
         raise RuntimeError(err or "the local browser could not be started")
@@ -229,13 +235,14 @@ def _create_local_session(cache_key: str, allow_real_profile: bool = True) -> di
     reach an arbitrary internal host the model chose."""
     fallback_note = None
     if allow_real_profile:
-        from tools.browser_session_real_profile import real_profile_cdp, real_profile_fallback_note
+        from tools.browser_session_real_profile import real_profile_cdp, real_profile_fallback_note, real_profile_key
         cdp_url, err = real_profile_cdp()
         if err:
             logger.warning("real-profile unavailable for %s, using a fresh browser: %s", cache_key, err)
             fallback_note = real_profile_fallback_note(err)
         elif cdp_url:
             info = _session_record("rp", cdp_url, {"local": True, "real_profile": True})
+            info.update(launcher_key=real_profile_key(), shared_profile=True)
             logger.info("Created real-profile local session %s for %s", info["session_name"], cache_key)
             return info
     from tools.browser_lightpanda import using_lightpanda_engine
@@ -287,17 +294,23 @@ def _create_session_for_key(cache_key: str, force_local: bool) -> dict[str, Any]
 
 def _backend_dead(session_info: dict[str, Any]) -> bool:
     """True when a local session's process is gone (Chromium crashed or was killed, ``lightpanda serve``
-    exited): the next call builds a fresh one instead of handing out a dead endpoint."""
+    exited): the next call builds a fresh one instead of handing out a dead endpoint.
+
+    A launcher key is shared by every cache key on one persistent profile, so a live browser on the key is
+    not enough: when another key relaunched it after a crash, this record still names the dead endpoint."""
     features = session_info.get("features") or {}
     if features.get("lightpanda"):
         from tools.browser_lightpanda import get_server
         server = get_server(session_info.get("session_name", ""))
         return server is None or not server.is_alive()
-    launcher_key = session_info.get("launcher_key") or (
-        "hermes-real-profile" if features.get("real_profile") else None)
+    if features.get("sandbox"):
+        from tools.browser_session_sandbox import sandbox_browser_alive
+        return not sandbox_browser_alive(session_info)
+    launcher_key = session_info.get("launcher_key")
     if launcher_key:
         from tools.browser_launcher import get_browser
-        return get_browser(launcher_key) is None
+        browser = get_browser(launcher_key)
+        return browser is None or browser.cdp_url != session_info.get("cdp_url")
     return False
 
 

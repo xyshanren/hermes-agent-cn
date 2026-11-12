@@ -32,13 +32,19 @@ _cached_providers: dict[tuple[str, Any], Optional[BrowserProvider]] = {}
 _provider_lock = threading.RLock()
 
 
+def browser_section() -> dict:
+    """The active profile's ``browser:`` section as every runtime reader sees it: the user file, the managed
+    overlay winning, ``${VAR}`` expanded, no defaults (``load_user_config_effective``); ``{}`` when absent."""
+    from hermes_cli.config_effective import load_user_config_effective
+    section = load_user_config_effective().get("browser")
+    return section if isinstance(section, dict) else {}
+
+
 def browser_cfg(key: str, default, parse: Callable[[Any], Any] = lambda v: v):
-    """``parse(browser.<key>)`` from the RAW profile config (loader warnings must not leak into tool JSON);
-    ``default`` when absent, not a mapping, or unparseable."""
+    """``parse(browser.<key>)`` from :func:`browser_section`; ``default`` when absent or unparseable."""
     try:
-        from hermes_cli.config import read_raw_config
-        section = read_raw_config().get("browser", {})
-        if isinstance(section, dict) and key in section:
+        section = browser_section()
+        if key in section:
             return parse(section[key])
     except (OSError, ValueError, TypeError) as exc:
         logger.debug("Could not read browser.%s: %s", key, exc)
@@ -211,9 +217,8 @@ def _resolve_provider_uncached() -> tuple[Optional[BrowserProvider], bool]:
     cached; a transient None (unreadable config, missing credentials) is not, so it self-heals."""
     provider_key = None
     try:
-        from hermes_cli.config import read_raw_config
-        section = read_raw_config().get("browser", {})
-        if isinstance(section, dict) and "cloud_provider" in section:
+        section = browser_section()
+        if "cloud_provider" in section:
             provider_key = normalize_browser_cloud_provider(section.get("cloud_provider"))
     except (OSError, ValueError, TypeError) as exc:
         logger.debug("Could not read cloud_provider from config: %s", exc)
@@ -248,12 +253,6 @@ def get_cloud_provider() -> Optional[BrowserProvider]:
             return resolved
 
 
-def is_local_mode() -> bool:
-    """True when sessions run on a local browser (no CDP override, no cloud provider)."""
-    from tools.browser_session_cdp import get_cdp_override_raw
-    return not get_cdp_override_raw() and get_cloud_provider() is None
-
-
 def is_local_backend() -> bool:
     """True when the browser runs locally AND the terminal is local too.
 
@@ -268,12 +267,17 @@ def is_local_backend() -> bool:
     return terminal_env("TERMINAL_ENV", "local").strip().lower() in ("local", "")
 
 
-def browser_backend_name() -> str:
+def browser_backend_name(local_engine: Optional[str] = None) -> str:
     """Shared-metrics label for the active profile's backend in session-creation precedence
-    (CDP override > cloud provider > local engine). Config reads only, no network I/O."""
+    (CDP override > cloud provider > local engine). ``local_engine``: the call ran on a LOCAL browser (the
+    hybrid ``::local`` sidecar, a cloud failure's local fallback, the real profile) of that engine (``local``
+    or ``lightpanda``, as its session was created), so neither a configured provider nor ``browser.engine``
+    names it. Config reads only, no network I/O."""
     from tools.browser_session_cdp import get_cdp_override_raw
     if get_cdp_override_raw():
         return "cdp"
+    if local_engine:
+        return local_engine
     provider = get_cloud_provider()
     if provider is not None:
         return str(getattr(provider, "name", "") or "other")

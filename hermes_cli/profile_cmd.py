@@ -235,20 +235,6 @@ def _profile_create(args):
         if sync_imports:
             print(t("profile.clone_imports", name=name))
         _print_channel_clone_notice(name, source_label, clone_channels, "--clone-all" if clone_all else "--clone")
-        # Auto-clone Honcho config for the new profile (only with clone operations)
-        try:
-            from plugins.memory import import_provider_module
-            honcho_cli = import_provider_module("honcho", "cli")
-        except Exception:
-            honcho_cli = None  # Honcho plugin not installed
-        if honcho_cli is not None:
-            try:
-                if honcho_cli.clone_honcho_for_profile(name):
-                    print(t("profile.honcho_cloned", peer=name))
-            except honcho_cli.ConfigWriteRefused as e:
-                print(t("profile.honcho_not_cloned", error=e))
-            except Exception:
-                pass  # Honcho not configured
     else:
         # Fresh profiles only: clones already carry the source's (user-curated) skills.
         from agent.i18n import t

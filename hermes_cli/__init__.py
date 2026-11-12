@@ -22,7 +22,7 @@ def _old_updater_version() -> str:
     try:
         from pm.paths import repo_root
     except ModuleNotFoundError as exc:
-        if exc.name != "pm" and not (exc.name or "").startswith("pm."):
+        if exc.name != "pm.paths" and not "pm.paths".startswith(f"{exc.name}."):
             raise
         # The old editable finder may not know the new pm package yet.
         import json

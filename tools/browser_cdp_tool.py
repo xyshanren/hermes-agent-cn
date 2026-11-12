@@ -11,19 +11,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from tools.registry import registry, tool_error
-from tools.browser_extension_router import routed_browser_handler
 
 logger = logging.getLogger(__name__)
 
 CDP_DOCS_URL = "https://chromedevtools.github.io/devtools-protocol/"
 
-# Browser/target inspection that never reads page body/cookies/DOM/storage — stays
-# usable so the model can list tabs or navigate away from a blocked page.
+# Browser/target inspection and tab management that never reads page body/cookies/DOM/storage — stays
+# usable so the model can list, open, switch and close tabs or navigate away from a blocked page. Methods
+# that take a url (Page.navigate, Target.createTarget) are still held to _METHOD_PARAM_GUARDS.
 _CDP_PRIVATE_PAGE_ALLOWED_METHODS = {
     "Browser.getVersion", "Target.getTargets", "Target.attachToTarget", "Target.detachFromTarget",
+    "Target.createTarget", "Target.activateTarget", "Target.closeTarget",
     "Page.navigate", "Page.reload", "Page.stopLoading",
 }
 
@@ -133,43 +134,100 @@ def _blocked(message: str, method: str) -> str:
     return tool_error(message, method=method, cdp_docs=CDP_DOCS_URL)
 
 
-def _expression_private_target(params: dict[str, Any]) -> Optional[str]:
+def _expression_private_target(params: dict[str, Any], blocked: Callable[[str], bool]) -> Optional[str]:
     from tools.browser_url_policy import expression_targets_private_url
-    return expression_targets_private_url(str(params.get("expression") or ""))
+    return expression_targets_private_url(str(params.get("expression") or ""), blocked=blocked)
 
 
-def _navigate_private_target(params: dict[str, Any]) -> Optional[str]:
+def _navigate_private_target(params: dict[str, Any], blocked: Callable[[str], bool]) -> Optional[str]:
     """Blocked URL literal for ``Page.navigate`` params, else ``None``."""
-    from tools.browser_url_policy import url_blocked
     target_url = str(params.get("url") or "").strip()
-    return target_url if target_url and url_blocked(target_url) else None
+    return target_url if target_url and blocked(target_url) else None
 
 
-# method → (probe(params) -> blocked literal | None, error template)
+def _new_tab_private_target(params: dict[str, Any], blocked: Callable[[str], bool]) -> Optional[str]:
+    """``Target.createTarget``: a blank tab (``about:blank``, Chrome's default for no url) reaches nothing, so
+    it opens before scripts are installed or a page is chosen; any other url is held to ``Page.navigate``'s
+    rule (``url_blocked`` refuses every other non-http scheme)."""
+    if str(params.get("url") or "").strip().lower() == "about:blank":
+        return None
+    return _navigate_private_target(params, blocked)
+
+
+# method → (probe(params, blocked) -> blocked literal | None, error template)
 _METHOD_PARAM_GUARDS = {
     "Page.navigate": (_navigate_private_target,
                       "Blocked: CDP Page.navigate target is a private or internal address ({})."),
+    "Target.createTarget": (_new_tab_private_target,
+                            "Blocked: CDP Target.createTarget url is a private or internal address ({})."),
     "Runtime.evaluate": (_expression_private_target,
                          "Blocked: CDP Runtime.evaluate expression targets a private or internal address ({})."),
 }
 
 
+# _current_page_private_url's verdict when the target list cannot be read: refuse, never assume public.
+_PAGE_URL_UNVERIFIED = "<unverified>"
+# Browser-internal pages carry no web origin a worker or browser-level call could borrow, so an open new tab
+# must not lock every target-less call (url_blocked rejects their schemes as unsupported).
+_ORIGINLESS_PAGE_PREFIXES = ("about:", "chrome:", "chrome-untrusted:", "chrome-search:", "devtools:", "edge:", "brave:")
+
+
 def _current_page_private_url(endpoint: str, target_id: Optional[str]) -> Optional[str]:
-    """URL of the page this call acts on (``target_id``'s, else the first page target) when it targets a
-    private/internal address, else None. Read from ``Target.getTargets`` on the same endpoint; fail-open on
-    probe failure, like the other page guards."""
+    """The private/internal URL a non-allow-listed call would reach (or ``_PAGE_URL_UNVERIFIED``), else None.
+
+    Fail-closed, read from ``Target.getTargets`` on the same endpoint. Only a ``page`` target whose own URL
+    is known passes on that URL alone. A browser-level call (no target) or a worker / iframe / unknown
+    target runs with some page's origin (a SharedWorker's ``fetch('/')`` reads its private page;
+    ``Storage.*`` spans every origin), so it is refused while ANY page target is private."""
     from tools.browser_url_policy import url_blocked
     if not endpoint or not _WS_AVAILABLE:
-        return None
+        return _PAGE_URL_UNVERIFIED
     try:
         infos = _run_async(_cdp_call(endpoint, "Target.getTargets", {}, None, 5.0)).get("targetInfos") or []
-    except (TimeoutError, RuntimeError, OSError, WebSocketException) as exc:
+    except (TimeoutError, RuntimeError, OSError, ValueError, WebSocketException) as exc:
         logger.debug("browser_cdp: page-URL probe failed: %s", exc)
+        return _PAGE_URL_UNVERIFIED
+    acted = next((t for t in infos if t.get("targetId") == target_id), None) if target_id else None
+    url = str((acted or {}).get("url") or "")
+    if url and url_blocked(url):
+        return url
+    if url and acted.get("type") == "page":
         return None
-    pages = [t for t in infos if t.get("type") == "page"]
-    page = next((t for t in pages if t.get("targetId") == target_id), None) if target_id else (pages[:1] or [None])[0]
-    url = str((page or {}).get("url") or "")
-    return url if url and url_blocked(url) else None
+    page_urls = (str(t.get("url") or "") for t in infos if t.get("type") == "page")
+    return next((u for u in page_urls if u and not u.startswith(_ORIGINLESS_PAGE_PREFIXES) and url_blocked(u)), None)
+
+
+# Input.* only types text or dispatches key/mouse events; a URL in its text is never fetched by the call.
+_TEXT_INPUT_METHOD_PREFIX = "Input."
+# Nor are these methods' URL params: blocklist / interception match patterns (wildcard hosts, often
+# naming the very hosts being blocked), dialog answer text, cookie scope URLs.
+_CDP_NON_FETCHING_METHODS = frozenset({
+    "Network.setBlockedURLs", "Network.setRequestInterception", "Fetch.enable",
+    "Page.handleJavaScriptDialog",
+    "Network.setCookie", "Network.setCookies", "Network.deleteCookies", "Storage.setCookies",
+})
+
+
+def _param_url_literals(value: Any, key: str = "") -> list[str]:
+    """Every URL a CDP call's params name: each ``url`` value whole, plus the ``http(s)://`` and
+    protocol-relative ``//host`` literals in every string at any depth (``Network.loadNetworkResource``,
+    ``Runtime.callFunctionOn`` bodies, ``Page.addScriptToEvaluateOnNewDocument`` sources, injected HTML)."""
+    from tools.browser_url_policy import url_literals
+    if isinstance(value, str):
+        return ([value.strip()] if key == "url" and value.strip() else []) + url_literals(value, protocol_relative=True)
+    if isinstance(value, dict):
+        return [u for k, v in value.items() for u in _param_url_literals(v, str(k))]
+    if isinstance(value, (list, tuple)):
+        return [u for v in value for u in _param_url_literals(v, key)]
+    return []
+
+
+def _fetched_param_urls(method: str, params: dict[str, Any]) -> list[str]:
+    """The distinct URLs a call's params could make the browser fetch (none for text input or the
+    non-fetching methods above)."""
+    if method.startswith(_TEXT_INPUT_METHOD_PREFIX) or method in _CDP_NON_FETCHING_METHODS:
+        return []
+    return list(dict.fromkeys(_param_url_literals(params)))
 
 
 def _browser_cdp_private_guard(*, method: str, params: dict[str, Any], endpoint: str = "",
@@ -177,19 +235,36 @@ def _browser_cdp_private_guard(*, method: str, params: dict[str, Any], endpoint:
     """Apply the browser SSRF/private-page guard to raw CDP calls.
 
     Raw CDP shares the cloud/private-network boundary of ``browser_exec``'s URL policy and must not become
-    its bypass. Probes are best-effort; a probe failure never breaks local/custom CDP workflows.
+    its bypass, so a page whose URL cannot be verified as public refuses page-reading methods.
     """
-    from tools.browser_url_policy import eval_ssrf_guard_active
-    if not eval_ssrf_guard_active():
-        return None
+    from tools.browser_url_policy import eval_ssrf_guard_active, literal_targets_metadata, url_blocked
+    guard_active = eval_ssrf_guard_active()
     guard = _METHOD_PARAM_GUARDS.get(method)
-    if guard is not None:
+    if guard_active and guard is not None:
         probe, template = guard
-        literal = probe(params or {})
+        literal = probe(params or {}, url_blocked)
         if literal:
             return _blocked(template.format(literal), method)
+    # The cloud-metadata floor applies with the private guard on or off, sidecar and local Chromium included,
+    # as in browser_exec's _url_policy_error (#16234), to every URL the call could fetch.
+    literals = _fetched_param_urls(method, params or {})
+    metadata = next((u for u in literals if literal_targets_metadata(u)), None)
+    if metadata:
+        return _blocked(f"Blocked: CDP {method} targets a cloud metadata endpoint ({metadata}).", method)
+    if not guard_active:
+        return None
+    if guard is None:
+        # A public page does not make an unlisted method's own URL params safe: Network.loadNetworkResource
+        # fetches its ``url`` from the browser's network position whatever page is open.
+        literal = next((u for u in literals if u.lower().startswith(("http://", "https://")) and url_blocked(u)), None)
+        if literal:
+            return _blocked(f"Blocked: CDP {method} params target a private or internal address ({literal}).",
+                            method)
     if method not in _CDP_PRIVATE_PAGE_ALLOWED_METHODS:
         blocked_url = _current_page_private_url(endpoint, target_id)
+        if blocked_url == _PAGE_URL_UNVERIFIED:
+            return _blocked(f"Blocked: could not read the browser's targets to verify that raw CDP method "
+                            f"{method!r} cannot reach a private or internal page.", method)
         if blocked_url:
             return _blocked(f"Blocked: page URL targets a private or internal address ({blocked_url}). "
                             f"Raw CDP method {method!r} could expose private page content or state.", method)
@@ -298,7 +373,8 @@ def browser_cdp(method: str, params: Optional[dict[str, Any]] = None, target_id:
     effective_task_id = task_id or "default"
 
     if frame_id:
-        blocked = _browser_cdp_private_guard(method=method, params=params or {},
+        # An OOPIF's frame id is its iframe target id, so the guard judges that frame (or fails closed).
+        blocked = _browser_cdp_private_guard(method=method, params=params or {}, target_id=frame_id,
                                              endpoint=_resolve_cdp_endpoint() if _WS_AVAILABLE else "")
         if blocked:
             return blocked
@@ -313,8 +389,7 @@ def browser_cdp(method: str, params: Optional[dict[str, Any]] = None, target_id:
     endpoint = _resolve_cdp_endpoint()
     if not endpoint:
         return tool_error("No CDP endpoint is available. Run '/browser connect' to attach to a running Chrome, "
-                          "Brave, Chromium, or Edge browser, or set 'browser.cdp_url' in config.yaml. The Camofox "
-                          "backend is REST-only and does not expose CDP.", cdp_docs=CDP_DOCS_URL)
+                          "Brave, Chromium, or Edge browser, or set 'browser.cdp_url' in config.yaml.", cdp_docs=CDP_DOCS_URL)
     if not endpoint.startswith(("ws://", "wss://")):
         return tool_error(f"CDP endpoint is not a WebSocket URL: {endpoint!r}. Expected ws://... or wss://... — "
                           "the /browser connect resolver should have rewritten this. Check that a Chromium-family "
@@ -361,8 +436,8 @@ BROWSER_CDP_SCHEMA: dict[str, Any] = {
         "**Requires a reachable CDP endpoint.** Available when the user has run '/browser connect' to attach "
         "to a running Chrome, Brave, Chromium, or Edge browser, or when 'browser.cdp_url' is set in "
         "config.yaml. Not currently wired up for cloud backends (Browserbase, Browser Use, Firecrawl) — "
-        "those expose CDP per session but live-session routing is a follow-up. Camofox is REST-only and "
-        "will never support CDP. If the tool is in your toolset at all, a CDP endpoint is already reachable.\n\n"
+        "those expose CDP per session but live-session routing is a follow-up. If the tool is in your toolset "
+        "at all, a CDP endpoint is already reachable.\n\n"
         f"**CDP method reference:** {CDP_DOCS_URL} — use an available documentation lookup or extraction "
         "tool on a method's URL (e.g. '/tot/Page/#method-handleJavaScriptDialog') to look up parameters and "
         "return shape.\n\n"
@@ -425,13 +500,9 @@ registry.register(
     name="browser_cdp",
     toolset="browser-cdp",
     schema=BROWSER_CDP_SCHEMA,
-    handler=lambda args, **kw: routed_browser_handler(
-        "browser_cdp", args,
-        fallback=lambda: browser_cdp(
-            method=args.get("method", ""), params=args.get("params"), target_id=args.get("target_id"),
-            frame_id=args.get("frame_id"), timeout=args.get("timeout", 30.0), task_id=kw.get("task_id"),
-        ),
-        task_id=kw.get("task_id"), session_id=kw.get("session_id"),
+    handler=lambda args, **kw: browser_cdp(
+        method=args.get("method", ""), params=args.get("params"), target_id=args.get("target_id"),
+        frame_id=args.get("frame_id"), timeout=args.get("timeout", 30.0), task_id=kw.get("task_id"),
     ),
     check_fn=_browser_cdp_check,
     emoji="🧪",

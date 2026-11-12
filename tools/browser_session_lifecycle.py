@@ -3,8 +3,9 @@ points and the atexit sweep.
 
 Teardown per session kind (CDP supervisor stopped first, so our WebSocket closes before the endpoint):
 cloud → ``provider.close_session``; Lightpanda → ``stop_lightpanda``; launcher Chromium → ``stop_browser``
-(a shared persistent profile only once no other session uses it); sandbox → SIGTERM inside the sandbox;
-real profile → shared, terminated at exit / consent-off; CDP override → nothing (the user's browser).
+(a shared persistent profile only once no other session uses it); sandbox → SIGTERM inside the sandbox
+once no other session uses it;
+real profile → shared per profile home, terminated at exit / on that profile's consent-off; CDP override → nothing (the user's browser).
 """
 
 from __future__ import annotations
@@ -132,11 +133,13 @@ def release_session_backend(cache_key: str, session_info: dict[str, Any]) -> Non
     if features.get("lightpanda"):
         from tools.browser_lightpanda import stop_lightpanda
         stop_lightpanda(session_info.get("session_name", ""))
+    launcher_key = session_info.get("launcher_key")
+    if not launcher_key or _launcher_key_in_use(launcher_key, session_info):
+        return  # nothing launched for it, or a shared browser another live session still uses
     if features.get("sandbox"):
         from tools.browser_session_sandbox import stop_sandbox_browser
         stop_sandbox_browser(session_info)
-    launcher_key = session_info.get("launcher_key")
-    if launcher_key and not _launcher_key_in_use(launcher_key, session_info):
+    elif not features.get("real_profile"):  # outlives its sessions: stopped at exit / on consent-off
         from tools.browser_launcher import stop_browser
         stop_browser(launcher_key)
 
@@ -193,13 +196,20 @@ def cleanup_profile_browsers(home_key: str) -> None:
     reset_caches(home_key)
 
 
+def _cleanup_in_owner_scope(cache_key: str) -> None:
+    with _session_owner_scope(cache_key):
+        cleanup_single_session(cache_key)
+
+
 def cleanup_all_browsers() -> None:
-    """Close every session (gateway shutdown), stop every browser this process launched, reset caches."""
+    """Close every session (gateway shutdown), stop every browser this process launched, reset caches. Each
+    session is closed under its owning profile, as the janitor does: a cloud session belongs to that profile's
+    provider and credentials."""
     bs = _bs()
     with bs._cleanup_lock:
         keys = list(bs._active_sessions)
     for key in keys:
-        _best_effort(f"browser cleanup for {key}", lambda key=key: cleanup_single_session(key))
+        _best_effort(f"browser cleanup for {key}", lambda key=key: _cleanup_in_owner_scope(key))
 
     def _stop_supervisors():
         from tools.browser_supervisor import SUPERVISOR_REGISTRY
@@ -243,15 +253,20 @@ def emergency_cleanup_all_sessions() -> None:
 
 
 def reap_orphaned_browser_sessions() -> int:
-    """Stop Chromium / ``lightpanda serve`` processes whose owning Hermes process is gone."""
+    """Stop Chromium / ``lightpanda serve`` processes whose owning Hermes process is gone (Chromium: in every
+    profile this process serves, incl. each live session's owning home)."""
     from tools.browser_launcher import reap_orphaned_browsers
     from tools.browser_lightpanda import reap_orphaned_lightpanda
+    bs = _bs()
+    with bs._cleanup_lock:
+        session_homes = list(bs._session_owner_homes.values())
     reaped = 0
-    for reap in (reap_orphaned_lightpanda, reap_orphaned_browsers):
+    for name, reap in (("lightpanda", reap_orphaned_lightpanda),
+                       ("chromium", lambda: reap_orphaned_browsers(session_homes))):
         try:
             reaped += reap()
         except OSError as exc:
-            logger.debug("orphan reap (%s) failed: %s", reap.__name__, exc)
+            logger.debug("orphan reap (%s) failed: %s", name, exc)
     if reaped:
         logger.info("Reaped %d orphaned browser process(es) from previous run(s)", reaped)
     return reaped
@@ -272,7 +287,8 @@ def _force_reap(cache_key: str) -> None:
     stop_cdp_supervisor(cache_key)
     bs = _bs()
     with bs._cleanup_lock:
-        session_info = bs._active_sessions.pop(cache_key, None)
+        session_info = bs._active_sessions.get(cache_key)
+    _forget_session_tracking(cache_key, session=True)  # untracked even if the release below fails
     if session_info:
         release_session_backend(cache_key, session_info)
 
@@ -336,6 +352,7 @@ def start_cleanup_thread() -> None:
     with bs._cleanup_lock:
         if bs._cleanup_thread is None or not bs._cleanup_thread.is_alive():
             bs._cleanup_running = True
+            # health: allow HX012 -- process-wide janitor: each teardown binds its own session owner scope
             bs._cleanup_thread = threading.Thread(target=_janitor, daemon=True, name="browser-cleanup")
             bs._cleanup_thread.start()
             logger.info("Started browser inactivity janitor (timeout: %ss)", bs.BROWSER_SESSION_INACTIVITY_TIMEOUT)

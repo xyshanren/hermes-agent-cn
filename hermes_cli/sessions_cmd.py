@@ -38,12 +38,36 @@ def _size_delta_label(saved_mb: float) -> str:
     return f"reclaimed {saved_mb:.1f} MB" if saved_mb >= 0 else f"grew by {-saved_mb:.1f} MB"
 
 
-def _confirm_prompt(prompt: str) -> bool:
-    """Prompt for y/N confirmation, safe against non-TTY environments."""
+def _confirm_prompt(prompt: str) -> bool | None:
+    """Prompt for y/N confirmation. ``None`` when stdin is not a terminal and hits EOF (/dev/null, an empty
+    pipe: cron, a wrapper), which is not the same as the user saying no; Ctrl-D at a terminal is a no.
+    Ctrl-C propagates: an interrupt is neither a no nor a success."""
     try:
         return input(prompt).strip().lower() in {"y", "yes"}
-    except (EOFError, KeyboardInterrupt):
-        return False
+    except EOFError:
+        print()
+        # isatty() alone is True for Windows NUL; the console check keeps `< NUL` unattended (#113977).
+        from hermes_cli.gateway_windows import _stdin_console_mode_ok, _stdin_is_interactive
+        return False if _stdin_is_interactive(isatty=sys.stdin.isatty(), console_mode_ok=_stdin_console_mode_ok()) else None
+
+
+def _confirm_or_exit_code(prompt: str, *, declined: str = "Cancelled.", unattended: str | None = "--yes") -> int | None:
+    """``None`` to proceed, else the exit code after saying why not. A decline exits 0; a run nobody could
+    answer exits 1, so a cron job or wrapper that forgot *unattended* does not read "nothing happened" as
+    success."""
+    try:
+        answer = _confirm_prompt(prompt)
+    except KeyboardInterrupt:
+        print("\nInterrupted; nothing was changed.")
+        return 130
+    if answer:
+        return None
+    if answer is None:
+        hint = f" Pass {unattended} to run it unattended." if unattended else " Run it from an interactive terminal."
+        print(f"No answer on a non-interactive stdin; nothing was changed.{hint}")
+        return 1
+    print(declined)
+    return 0
 
 
 def _not_found(session_id) -> int:
@@ -104,7 +128,7 @@ def _write_output(output, text, summary) -> None:
 
 def _cmd_repair(args):
     from hermes_state import DEFAULT_DB_PATH as db_path, SessionDB
-    from hermes_state_repair import _db_opens_cleanly, repair_state_db_schema
+    from hermes_state_repair import HealthCheckUnavailable, _db_opens_cleanly, repair_state_db_schema
     if not db_path.exists():
         from agent.i18n import t
 
@@ -114,6 +138,9 @@ def _cmd_repair(args):
     # A missing canonical sessions table is not additive upgrade drift: creating
     # an empty one could hide lost history. Preserve corruption/recovery routing.
     reason = _db_opens_cleanly(db_path)
+    if isinstance(reason, HealthCheckUnavailable):
+        print(f"✗ Could not check {db_path}: {reason}")
+        return 1
     # Opens cleanly but lags SCHEMA_SQL: additive drift (snapshot reconcile), not corruption surgery.
     drift_only = reason is None
     if drift_only:
@@ -178,6 +205,7 @@ def _cmd_repair(args):
     print(
         t("sessions.recover_keep_hint", source=source_hint)
     )
+    return 1
 
 
 def _cmd_recover(args):
@@ -299,12 +327,18 @@ def _default_exclude(args):
     return None if getattr(args, "source", None) else ["tool"]
 
 
+def _surface_reader(db):
+    """``--source cli`` also matches a gateway row stored as ``local`` with that created surface."""
+    from hermes_cli.gateway_session_store import SurfaceLabelReader
+    return SurfaceLabelReader(db)
+
+
 def _cmd_list(db, args):
     from hermes_state_sessions import workspace_key as _ws_key
     # LIMIT lives in the query, so probe one row past the cap: it is the only way to know the
     # page was cut without a second COUNT query (``--limit 0`` is ``LIMIT 0``: no rows, no probe).
     limit = args.limit
-    sessions = db.list_sessions_rich(
+    sessions = _surface_reader(db).list_sessions_rich(
         source=args.source, exclude_sources=_default_exclude(args), limit=limit + 1 if limit > 0 else limit,
     )
     truncated = limit > 0 and len(sessions) > limit
@@ -366,7 +400,7 @@ def _cmd_export(db, args):
             filters = build_prune_filters(args)
         except ValueError as e:
             print(f"Error: {e}")
-            return
+            return 1
         # A backup includes protected rows; prune's keep rules must not omit them.
         filters["archived"] = None
         filters["include_pinned"] = True
@@ -404,29 +438,30 @@ def _cmd_export(db, args):
         return False
 
     def _collect_sessions():
-        """--session-id / filters / bare export -> redacted session dicts, or None after printing an error."""
+        """--session-id / filters / bare export -> redacted session dicts, None after a dry-run preview,
+        or an exit code after printing an error."""
         def _one(session_id):
             return _redact(db.export_session(session_id, **projection))
         if args.session_id:
             resolved = db.resolve_session_id(args.session_id)
             if resolved and _too_large([resolved]):
-                return None
+                return 1
             data = _one(resolved) if resolved else None
             if not data:
-                _not_found(args.session_id)
-                return None
+                return _not_found(args.session_id)
             return [data]
         if filters:
             candidates = db.list_prune_candidates(**filters)
             if args.dry_run:
                 return _print_dry_run_preview(candidates, filters)
             if _too_large([row["id"] for row in candidates]):
-                return None
+                return 1
             return [s for s in (_one(row["id"]) for row in candidates) if s]
         if args.dry_run:
-            return print("--dry-run requires at least one filter.")
+            print("--dry-run requires at least one filter.")
+            return 1
         if _too_large():
-            return None
+            return 1
         return [_redact(s) for s in db.export_all(source=None, **projection)]
     if getattr(args, "only", None):
         return _export_flat("only", args, _collect_sessions)
@@ -473,8 +508,10 @@ def _export_flat(kind, args, collect):
     unusable, message, render = _FLAT_EXPORTERS[kind]
     if unusable(args):
         print(message)
-        return
+        return 1
     sessions = collect()
+    if isinstance(sessions, int):
+        return sessions
     if sessions is not None:
         from hermes_cli.session_export import default_save_filename
         name = (default_save_filename(sessions[0].get("id", ""), args.format) if len(sessions) == 1
@@ -494,13 +531,13 @@ def _export_trace(db, args, filters):
             from agent.i18n import t
 
             print(t("sessions.export_none_found"))
-            return
+            return 1
     from agent.trace_upload import TraceRedactionError, build_trace_jsonl, upload_session_trace
     redact_trace = not getattr(args, "no_redact", False)
     if getattr(args, "upload", False):
         if not session_id:
             print("--upload exports one session: pass --session-id (or drop filters to use the most recent).")
-            return
+            return 1
         resolved = db.resolve_session_id(session_id)
         db.close()
         print(upload_session_trace(resolved, cwd="", redact=redact_trace, private=not getattr(args, "public", False)))
@@ -526,7 +563,7 @@ def _export_trace(db, args, filters):
                 from agent.i18n import t
 
                 print(t("sessions.export_no_transcript", session_id=ids[0]))
-                return
+                return 1
             args.output = _output_file_in_dir(args.output, f"{ids[0]}.trace.jsonl")
             from agent.i18n import t
 
@@ -547,6 +584,7 @@ def _export_trace(db, args, filters):
         from agent.i18n import t
 
         print(t("sessions.export_redaction_failed"))
+        return 1
 
 
 def _export_markdown(db, args, filters, redact):
@@ -556,7 +594,7 @@ def _export_markdown(db, args, filters, redact):
         from agent.i18n import t
 
         print(t("sessions.export_stdout_unsupported"))
-        return
+        return 1
     output_dir = _export_dir(args.output)
 
     def _export_one(session_id: str, *, include_lineage: bool = False):
@@ -578,12 +616,12 @@ def _export_markdown(db, args, filters, redact):
         from agent.i18n import t
 
         print(t("sessions.usage_error", message="--delete-after-verified requires --yes."))
-        return
+        return 1
     if args.delete_after_verified and not args.session_id:
         from agent.i18n import t
 
         print(t("sessions.usage_error", message="--delete-after-verified is only supported with --session-id."))
-        return
+        return 1
     lineage_is_logical = getattr(args, "lineage", "single") == "logical"
     if args.session_id:
         return _export_markdown_single(db, args, _export_one, output_dir, lineage_is_logical)
@@ -591,7 +629,7 @@ def _export_markdown(db, args, filters, redact):
         from agent.i18n import t
 
         print(t("sessions.export_bulk_refuse"))
-        return
+        return 1
     candidates = db.list_prune_candidates(**filters)
     if args.dry_run:
         return _print_dry_run_preview(candidates, filters)
@@ -628,12 +666,12 @@ def _export_markdown_single(db, args, export_one, output_dir, lineage_is_logical
             from agent.i18n import t
 
             print(t("sessions.export_exists", error=e))
-            return
+            return 1
         if not data or not exported_path:
             from agent.i18n import t
 
             print(t("sessions.export_disappeared", session_id=target_id))
-            return
+            return 1
         exported_items.append((data, exported_path, snapshots))
     message_count = sum(len(data.get("messages") or []) for data, _path, _ in exported_items)
     n = len(exported_items)
@@ -652,7 +690,7 @@ def _export_markdown_single(db, args, export_one, output_dir, lineage_is_logical
             from agent.i18n import t
 
             print(t("sessions.export_verify_failed", session_id=data.get('id'), reason=reason))
-            return
+            return 1
         expected_messages.update(snapshots)
     try:
         if not db.delete_session(
@@ -662,12 +700,12 @@ def _export_markdown_single(db, args, export_one, output_dir, lineage_is_logical
             from agent.i18n import t
 
             print(t("sessions.export_not_deleted_changed", session_id=resolved_session_id))
-            return
+            return 1
     except SessionActiveWriteGuardError as exc:
         from agent.i18n import t
 
         print(t("sessions.export_not_deleted_error", error=exc))
-        return
+        return 1
     delegates = len(delete_target_ids) - 1
     delegate_suffix = f" and {delegates} delegate session{'' if delegates == 1 else 's'}" if delegates else ""
     from agent.i18n import t
@@ -686,11 +724,10 @@ def _cmd_delete(db, args):
     if not args.yes:
         from agent.i18n import t
 
-        if not _confirm_prompt(t("sessions.delete_confirm", session_id=resolved_session_id, pinned=_pinned_note)):
-            from agent.i18n import t
-
-            print(t("sessions.cancelled"))
-            return
+        refused = _confirm_or_exit_code(t("sessions.delete_confirm", session_id=resolved_session_id, pinned=_pinned_note),
+                                        declined=t("sessions.cancelled"))
+        if refused is not None:
+            return refused
     elif _pinned_note:
         from agent.i18n import t
 
@@ -741,7 +778,7 @@ def _prune_never_active_keyed(db, args):
             from agent.i18n import t
 
             print(t("sessions.older_than_invalid", value=older_than))
-            return
+            return 1
         days = seconds / 86400.0
     candidates = db.list_never_active_keyed_sessions(older_than_days=days)
     if not candidates:
@@ -763,11 +800,9 @@ def _prune_never_active_keyed(db, args):
 
         print(t("sessions.dry_run_nothing_deleted"))
         return
-    if not args.yes and not _confirm_prompt(t("sessions.never_active_confirm", count=len(candidates))):
-        from agent.i18n import t
-
-        print(t("sessions.aborted"))
-        return
+    if not args.yes and (refused := _confirm_or_exit_code(t("sessions.never_active_confirm", count=len(candidates)),
+                                                          declined=t("sessions.aborted"))) is not None:
+        return refused
     owner = getattr(args, "owner_endpoint", None)
     if owner is not None:
         from hermes_cli.gateway_client import GatewayClientError
@@ -825,7 +860,7 @@ def _cmd_prune_or_archive(db, args, action):
         return 1
     if not prune and not any(v for k, v in filters.items() if k != "older_than_days"):
         print(t("sessions.archive_refuse_all"))
-        return
+        return 1
 
     # Prune skips archived rows unless --include-archived; archive only targets not-yet-archived rows.
     filters["archived"] = None if prune and getattr(args, "include_archived", False) else False
@@ -871,9 +906,10 @@ def _cmd_prune_or_archive(db, args, action):
             print(t("sessions.dry_run_archived" if not prune else "sessions.dry_run_nothing_deleted"))
             return
     verb = t("sessions.verb_delete") if prune else t("sessions.verb_archive")
-    if not args.yes and not _confirm_prompt(t("sessions.prune_confirm", verb=verb, count=len(candidates), span=_span)):
-        print(t("sessions.cancelled"))
-        return
+    if not args.yes and (refused := _confirm_or_exit_code(
+            t("sessions.prune_confirm", verb=verb, count=len(candidates), span=_span),
+            declined=t("sessions.cancelled"))) is not None:
+        return refused
     if prune and getattr(args, "owner_endpoint", None) is not None:
         # The live gateway owns the store: it deletes, through the housekeeping retirement path.
         from hermes_cli.gateway_client import GatewayClientError
@@ -999,7 +1035,7 @@ def _cmd_retitle_skills(db, args):
 
 def _cmd_browse(db, args):
     limit = getattr(args, "limit", 500) or 500
-    sessions = db.list_sessions_rich(
+    sessions = _surface_reader(db).list_sessions_rich(
         source=getattr(args, "source", None), exclude_sources=_default_exclude(args), limit=limit
     )
     if not sessions:
@@ -1045,7 +1081,7 @@ def _cmd_optimize(db, args):
         n = db.vacuum()  # merges FTS5 segments then VACUUMs; returns indexes merged
     except Exception as e:
         print(t("sessions.optimize_failed", error=e))
-        return
+        return 1
     print(t("sessions.optimized_fts", count=n))
     _print_size_change(db, before_mb)
 
@@ -1063,6 +1099,59 @@ def _cmd_clean_markers(db, args):
         if report["backup_path"]:
             print(t("sessions.repair_backup", path=report['backup_path']))
         print(t("sessions.clean_done", count=report['rows_affected']))
+
+
+_BACKFILL_LABELS = {"backfill": "Rebuilding index"}
+_COUNTED_PHASES = frozenset({*_BACKFILL_LABELS, "teardown"})
+
+
+def _optimize_progress_line(info) -> str:
+    phase, pct = info.get("phase"), f"{info.get('percent', 0):3d}%"
+    counts = f"({info.get('indexed', 0):,}/{info.get('total', 0):,}"
+    paced = " — paced: another process is using the database" if info.get("paced") else ""
+    if phase in _BACKFILL_LABELS:
+        return f"  {_BACKFILL_LABELS[phase]}: {pct} {counts} messages){paced}"
+    if phase == "teardown":
+        table = str(info.get("table", "")).removeprefix("fts_v22_trash_")
+        return (f"  Reclaiming old index: table {info.get('table_index', 0)}/{info.get('table_count', 0)} "
+                f"({table}) {pct} {counts} rows){paced}")
+    elapsed = int(info.get("elapsed", 0))
+    return (f"  Compacting database (VACUUM): {elapsed // 60}m {elapsed % 60:02d}s elapsed, "
+            f"{info.get('size_bytes', 0) / 2**20:,.1f} MB → ~{info.get('estimated_bytes', 0) / 2**20:,.1f} MB")
+
+
+class _OptimizeProgress:
+    """``optimize_fts_storage`` progress: one self-overwriting line per phase (and per old-index
+    table), space-padded over the previous text (``ESC[K`` leaks under prompt_toolkit)."""
+
+    def __init__(self):
+        self._key, self._last, self._line = None, None, ""
+
+    def __call__(self, info) -> None:
+        phase = info.get("phase")
+        key = (phase, info.get("table"))
+        if key != self._key:
+            # The phase or table moved on, so the previous one ran to completion.
+            self.close(completed=True)
+            self._key = key
+        if phase == "done" or (phase in _COUNTED_PHASES and not info.get("total") and not info.get("table")):
+            return
+        self._last = info
+        self._draw(_optimize_progress_line(info))
+
+    def _draw(self, line: str) -> None:
+        if line == self._line:  # a table's final chunk, its DROP and the switch all report 100%
+            return
+        print(f"\r{line}{' ' * max(0, len(self._line) - len(line))}", end="", flush=True)
+        self._line = line
+
+    def close(self, completed: bool = False) -> None:
+        last = self._last
+        if completed and last and last.get("phase") in _COUNTED_PHASES:
+            self._draw(_optimize_progress_line({**last, "percent": 100, "indexed": last.get("total", 0)}))
+        if self._line:
+            print(flush=True)
+        self._last, self._line = None, ""
 
 
 def _cmd_optimize_storage(db, args):
@@ -1090,46 +1179,35 @@ def _cmd_optimize_storage(db, args):
                 need=f"{need_bytes / (1024*1024):.0f}", vacuum=' incl. VACUUM' if do_vacuum else ''))
         if free_bytes < need_bytes:
             print(t("sessions.free_disk_low"))
-            return
+            return 1
     if before_mb > 500:
         print(t("sessions.optimize_foreground_note"))
-    if not getattr(args, "yes", False):
-        try:
-            resp = input("Proceed? [y/N] ").strip().lower()
-        except EOFError:
-            resp = ""
-        if resp not in ("y", "yes"):
-            from agent.i18n import t
-
-            print(t("sessions.cancelled"))
-            return
-    _last = {"phase": None}
-    labels = {"teardown": "Reclaiming old index", "vacuum": "Compacting database (VACUUM)", "done": "Done"}
-
-    def _progress(info):
-        phase = info.get("phase")
-        if phase == "backfill":
-            print(f"\r  Rebuilding index: {info.get('percent', 0):3d}% "
-                  f"({info.get('indexed',0):,}/{info.get('total',0):,})", end="", flush=True)
-        elif phase != _last["phase"]:
-            print(f"\n  {labels.get(phase, phase)}…", flush=True)
-        _last["phase"] = phase
-    from agent.i18n import t
-
+    if not getattr(args, "yes", False) and (refused := _confirm_or_exit_code("Proceed? [y/N] ")) is not None:
+        return refused
+    # optimize_fts_storage re-scans for holders itself (--force past one, or a writer that opens the
+    # store mid-run) and paces while one is there; the progress line says so.
+    progress = _OptimizeProgress()
     print(t("sessions.optimizing_storage"))
     try:
-        result = db.optimize_fts_storage(progress_cb=_progress, vacuum=do_vacuum)
+        result = db.optimize_fts_storage(progress_cb=progress, vacuum=do_vacuum)
+    except KeyboardInterrupt:
+        progress.close()
+        print("Interrupted — no data was lost; re-run to resume.")
+        return 130
     except Exception as e:
-        from agent.i18n import t
-
+        progress.close()
         print(t("sessions.optimize_resume_failed", error=e))
-        return
+        return 1
+    progress.close()
     if not result.get("ok"):
         print(t("sessions.optimize_not_ok", reason=result.get('reason', 'unknown')))
-        return
+        return 1
     print(t("sessions.optimize_done"))
     _print_size_change(db, before_mb, prefix="  ")
-    if result.get("vacuumed") is False:
+    if result.get("vacuum_skipped") == "in_use":
+        print("  (VACUUM skipped: another process is using the database. Re-run `hermes sessions optimize` "
+              "with it closed to reclaim freed space.)")
+    elif result.get("vacuumed") is False:
         print(t("sessions.vacuum_skipped"))
 
 
@@ -1153,12 +1231,13 @@ def _cmd_repair_routing(db, args):
         print(t("sessions.adopt_none_adoptable", count=len(records)))
         return
     if not getattr(args, "apply", False):
-        print(t("sessions.adopt_reRun_apply", adoptable=len(adoptable), total=len(records)))
+        print(t("sessions.adopt_rerun_apply", adoptable=len(adoptable), total=len(records)))
         return
     print(t("sessions.adopt_stop_gateway"))
-    if not _confirm_prompt(t("sessions.adopt_confirm", count=len(adoptable))):
-        print(t("sessions.aborted_em"))
-        return
+    refused = _confirm_or_exit_code(t("sessions.adopt_confirm", count=len(adoptable)),
+                                    declined=t("sessions.aborted_em"), unattended=None)
+    if refused is not None:
+        return refused
     repaired = 0
     for record in adoptable:
         if db.adopt_orphaned_gateway_session(record["orphan_id"], record["donor_id"]):
@@ -1199,11 +1278,13 @@ def _repair_prompts_pin_names(row) -> list[str] | None:
 
 
 def _repair_prompts_lacks_skill_safety(row) -> bool:
-    # Only the Skill Safety guidance is a reliable marker: <available_skills> is legitimately
-    # absent when no skills are installed, but the guidance is emitted whenever skill_manage is.
-    from agent.prompt_builder import SKILL_SAFETY_HEADING
+    # Only the skill_manage guidance is a reliable marker: <available_skills> is legitimately absent when no
+    # skills are installed, but the guidance is emitted whenever skill_manage is. A prompt stored before the
+    # Skill Safety Rule moved to compaction carries that heading, under whichever opening line it was built with.
+    from agent.context_compressor_tail import SKILL_SAFETY_HEADING
+    from agent.prompt_builder import SKILLS_GUIDANCE
     prompt = (row.get("system_prompt") or "").strip()
-    return bool(prompt and SKILL_SAFETY_HEADING not in prompt)
+    return bool(prompt and SKILLS_GUIDANCE not in prompt and SKILL_SAFETY_HEADING not in prompt)
 
 
 def _cmd_repair_prompts(db, args):
@@ -1252,7 +1333,7 @@ def _cmd_repair_prompts(db, args):
                 if "skill_manage" in (pin or ()):
                     findings.append({
                         **entry,
-                        "reason": "Skill Safety guidance missing while the tools[] pin carries skill_manage",
+                        "reason": "skill_manage guidance missing while the tools[] pin carries skill_manage",
                     })
                 elif pin is None:
                     unverifiable.append({
@@ -1303,9 +1384,10 @@ def _cmd_repair_prompts(db, args):
         return 0
 
     # JSON mode is the non-interactive automation surface; --apply is the explicit mutation opt-in.
-    if not as_json and not _confirm_prompt(t("sessions.prompts_clear_confirm", count=len(findings))):
-        print(t("sessions.aborted"))
-        return 0
+    if not as_json and (refused := _confirm_or_exit_code(
+            t("sessions.prompts_clear_confirm", count=len(findings)), declined=t("sessions.aborted"),
+            unattended="--json")) is not None:
+        return refused
 
     cleared = []
     for finding in findings:
@@ -1320,12 +1402,44 @@ def _cmd_repair_prompts(db, args):
     return 0
 
 
+def _cmd_refresh_prompts(db, args):
+    """Ask continuing sessions to rebuild their stored system prompt once, on their next turn.
+
+    For operators who update SOUL.md, skills or context files under a running profile: the
+    request is a refresh epoch in this profile's state.db, so it works with the gateway running
+    and survives a restart. History and session ids are untouched.
+    """
+    target = getattr(args, "session", None)
+    session_id = None
+    if target:
+        session_id = db.resolve_session_id(target)
+        if not session_id:
+            print(f"No session matches {target!r}.")
+            return 1
+        # A compressed conversation continues on its tip; a request keyed on the ended root never fires.
+        session_id = db.get_compression_tip(session_id) or session_id
+        row = db.get_session(session_id) or {}
+        count = 1 if row.get("system_prompt") else 0
+    else:
+        count = db.count_sessions_with_stored_prompt()
+    epoch = db.request_prompt_refresh(session_id)
+    if getattr(args, "json", False):
+        print(json.dumps({"epoch": epoch, "session_id": session_id, "sessions": count}))
+        return 0
+    scope = session_id or "every session in this profile"
+    print(f"Requested a system prompt refresh for {scope} ({count} session(s) with a stored prompt).")
+    print("Each rebuilds its prompt from the current SOUL.md, skills and context files on its next turn "
+          "(one prompt-cache miss per session); conversation history is kept.")
+    return 0
+
+
 def _cmd_stats(db, args):
     from agent.i18n import t
 
+    reader = _surface_reader(db)
     print(t("sessions.totals", sessions=db.session_count(), messages=db.message_count()))
     for src in ("cli", "telegram", "discord", "whatsapp", "slack"):
-        if (c := db.session_count(source=src)) > 0:
+        if (c := reader.session_count(source=src)) > 0:
             print(t("sessions.stats_source", src=src, count=c))
     if db.db_path.exists():
         print(t("sessions.db_size", size=f"{_size_mb(db.db_path):.1f}"))
@@ -1348,11 +1462,17 @@ def _cmd_discard(args):
     return cmd_discard(args)
 
 
+def _cmd_adopt(args):
+    from hermes_cli.sessions_adopt import cmd_adopt
+    return cmd_adopt(args)
+
+
 _PRE_DB_HANDLERS = {
     "repair": _cmd_repair, "recover": _cmd_recover, "import": _cmd_import,
     "repair-profiles": _cmd_repair_profiles,  # opens every profile's store itself
     "set-journal-mode": _cmd_set_journal_mode,  # offline: must not open the store it converts
     "discard": _cmd_discard,  # a gateway control (prompt.resolve_unknown), never a direct store write
+    "adopt": _cmd_adopt,  # native resumes on the owner; reads its own store read-only
 }
 _OBSERVATIONAL_DB_ACTIONS = frozenset({"list", "stats", "pinned"})
 _DB_HANDLERS = {
@@ -1362,6 +1482,7 @@ _DB_HANDLERS = {
     "retitle-skills": _cmd_retitle_skills, "browse": _cmd_browse, "optimize": _cmd_optimize,
     "clean-markers": _cmd_clean_markers, "optimize-storage": _cmd_optimize_storage,
     "repair-routing": _cmd_repair_routing, "repair-prompts": _cmd_repair_prompts, "stats": _cmd_stats,
+    "refresh-prompts": _cmd_refresh_prompts,
 }
 
 

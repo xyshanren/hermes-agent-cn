@@ -132,15 +132,14 @@ def _print_fts_optimize_available_notice() -> None:
     if size_gb < 0.5:
         return
     db = None
-    needs_upgrade = False
+    legacy_inline = False
+    drift: list[str] = []
     try:
         db = SessionDB(db_path=db_path, read_only=True)
         # read_only opens skip schema init; probe the stored layout directly.
-        row = db._conn.execute(
-            "SELECT sql FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'messages_fts'"
-        ).fetchone()
-        needs_upgrade = bool(row) and db._db_needs_fts_storage_upgrade(db._conn)
+        from hermes_state_fts import fts_layout_drift
+        drift = fts_layout_drift(db._conn)
+        legacy_inline = db._db_has_legacy_inline_fts(db._conn)
         # Interrupted optimize-storage: v23 table shape but backfill markers / trash
         # tables remain. Re-running resumes it, so offer the command again.
         interrupted = bool(
@@ -152,10 +151,6 @@ def _print_fts_optimize_available_notice() -> None:
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' "
                 "AND name LIKE 'fts\\_v22\\_trash\\_%' ESCAPE '\\' LIMIT 1"
             ).fetchone()
-            or db._conn.execute(
-                "SELECT 1 FROM state_meta WHERE key IN "
-                "('fts_cjk_rebuild_high_water', 'fts_cjk_stale') LIMIT 1"
-            ).fetchone()
         )
     except Exception:
         return
@@ -163,7 +158,7 @@ def _print_fts_optimize_available_notice() -> None:
         if db is not None:
             with suppress(Exception):
                 db.close()
-    if not needs_upgrade and not interrupted:
+    if not drift and not interrupted:
         return  # current layout already present (fresh/optimized)
 
     if interrupted:
@@ -175,18 +170,40 @@ def _print_fts_optimize_available_notice() -> None:
         print("    hermes sessions optimize-storage")
         return
 
-    est_reclaim = size_gb * 0.6
-    from agent.i18n import t
-
     print()
-    if mode == "require":
-        print(t("maint.fts_upgrade_required"))
-        print(t("maint.fts_upgrade_required_detail", reclaim=f"{est_reclaim:.1f}", size=f"{size_gb:.1f}"))
+    if legacy_inline:
+        # The ~60% figure was measured for this transition only (inline copies of every message dropped).
+        est_reclaim = size_gb * 0.6
+        if mode == "require":
+            print("◆ Session database upgrade required")
+            print(
+                f"  Your search index uses the OLD storage layout and should be "
+                f"upgraded. The new layout typically frees ~60% of state.db "
+                f"(≈{est_reclaim:.1f} GB of your current {size_gb:.1f} GB) and is "
+                f"required for continued optimal operation."
+            )
+        else:
+            print("◆ Reclaim ~60% of your session database disk")
+            print(
+                f"  Your search index uses the old storage layout. Upgrading it "
+                f"typically frees ~60% of state.db — about {est_reclaim:.1f} GB "
+                f"of your current {size_gb:.1f} GB."
+            )
     else:
-        print(t("maint.fts_reclaim"))
-        print(t("maint.fts_reclaim_detail", reclaim=f"{est_reclaim:.1f}", size=f"{size_gb:.1f}"))
-    print(t("maint.fts_run_hint"))
-    print(t("maint.fts_safety_note"))
+        if mode == "require":
+            print("◆ Search index rebuild required by your notice policy")
+        else:
+            print("◆ Search index update available")
+        print(
+            "  Your search index is on the compact layout from an earlier "
+            "optimization, but a later release changed it. Running the "
+            "command again rebuilds it in the current layout."
+        )
+    print("  Run when convenient:  hermes sessions optimize-storage")
+    print(
+        "  It runs in the foreground with a progress bar, is safe to "
+        "interrupt/re-run, and never changes your conversations."
+    )
 
 
 def _print_curator_recent_run_notice() -> None:
@@ -489,6 +506,14 @@ def _invalidate_live_plugin_catalog_caches() -> None:
         from hermes_cli.backup import _sibling_profile_homes
         for _name, profile_home in _sibling_profile_homes(home):
             invalidate_live_cache_for_home(profile_home)
+
+
+def _report_catalog_plugin_updates() -> None:
+    from hermes_cli.backup import _sibling_profile_homes
+    from hermes_cli.plugins_auto_update import report_catalog_updates_after_hermes_update
+    from hermes_cli.update_cmd import get_hermes_home
+    home = get_hermes_home()
+    report_catalog_updates_after_hermes_update(home, _sibling_profile_homes(home))
 
 
 def _print_bundled_skills_sync_report() -> None:
@@ -806,15 +831,20 @@ def _sweep_bytecode_after_update(branch: str) -> None:
     Never fails the committed update: a failed sweep is a ``bytecode_sweep`` follow-up and the
     fingerprint stays un-stamped, so the launch-time sweep (fingerprint mismatch) retries it.
     """
+    from hermes_cli.main_web_build import _prune_dropped_directories, _recorded_bytecode_fingerprint
     from hermes_cli.update_cmd import _m
     from hermes_cli.update_receipt import record_followup
     # Timestamp-based .pyc validation can accept old bytecode after the source swap.
     try:
-        removed = _m()._clear_bytecode_cache(_m().PROJECT_ROOT)
+        root = _m().PROJECT_ROOT
+        recorded = _recorded_bytecode_fingerprint(root)
+        removed = _m()._clear_bytecode_cache(root)
         if removed:
             from agent.i18n import t
 
             print(t("maint.pycache_cleared", count=removed))
+        if pruned := _prune_dropped_directories(root, recorded):
+            print(f"  ✓ Removed {pruned} director{'y' if pruned == 1 else 'ies'} the new version no longer has")
         _m()._record_bytecode_fingerprint()
     except Exception as exc:  # health: allow BLE001 -- owed to the next launch's fingerprint sweep
         record_followup("bytecode_sweep", str(exc) or type(exc).__name__)
@@ -839,7 +869,7 @@ def _profile_skill_sync_status(r) -> str:
 
 
 def _sync_profiles_after_update() -> None:
-    """Best-effort per-profile syncs: bundled skills, ``.env`` backfill, Honcho profiles."""
+    """Best-effort per-profile syncs: bundled skills, ``.env`` backfill."""
     # All profiles incl. the active one: seed_profile_skills() subprocesses with an explicit
     # HERMES_HOME, so sync_skills()'s module-level HERMES_HOME cache can't skew it.
     with suppress(Exception):
@@ -856,8 +886,7 @@ def _sync_profiles_after_update() -> None:
                 except Exception as pe:
                     print(f"  {p.name}: error ({pe})")
 
-    # Backfill .env for profiles created before .env seeding (copy the default's) so they
-    # keep the credentials they were effectively using.
+    # Seed the placeholder .env into any named profile lacking one (never a copy of the default's).
     with suppress(Exception):
         # See #44792.
         from hermes_cli.profiles import backfill_profile_envs
@@ -867,14 +896,6 @@ def _sync_profiles_after_update() -> None:
 
             print()
             print(t("maint.env_seeded", count=len(backfilled), names=', '.join(backfilled)))
-
-    with suppress(Exception):
-        from plugins.memory import import_provider_module
-        synced = import_provider_module("honcho", "cli").sync_honcho_profiles_quiet()
-        if synced:
-            from agent.i18n import t
-
-            print(t("maint.honcho_synced", count=synced))
 
 
 def _refresh_cua_driver_after_update() -> None:
@@ -908,8 +929,8 @@ def _refresh_cua_driver_after_update() -> None:
 
 
 def _install_default_tools_after_update() -> None:
-    """Give the install its optional default tools: the PM defaults (agent-browser +
-    Chromium, cua-driver). The Browser Use CLI engine (browser-harness) is a venv dependency.
+    """Give the install its optional default tools: the PM defaults (Chromium,
+    cua-driver). browser_exec's engine (browser-harness) is a venv dependency.
 
     Runs at the end of both the installers (via the source completion) and
     ``hermes update``: a source update re-syncs only the venv, so a tool that became
@@ -1052,6 +1073,10 @@ def _run_post_update_maintenance(
         from agent.i18n import t
 
         print(t("maint.release_history_failed", detail=detail[0]))
+    # Keeps every later version lookup off a full history walk; detached, so it never delays this run.
+    with _best_effort('Commit-graph refresh failed to start: %s'):
+        from hermes_cli.git_commit_graph import spawn_commit_graph_refresh
+        spawn_commit_graph_refresh(Path(_m().PROJECT_ROOT))
 
     # Seed the model-catalog cache from the checkout instead of a bot-gated, flaky fetch.
     with _best_effort('Model catalog seed during update failed: %s'):
@@ -1066,6 +1091,10 @@ def _run_post_update_maintenance(
     # rest of the cache TTL (#119340).
     with _best_effort('Live plugin catalog cache invalidation failed: %s'):
         _invalidate_live_plugin_catalog_caches()
+    # New catalog pins are not applied by this update: name them per profile and re-arm each
+    # profile's plugin check so an opted-in (plugins.auto_apply) gateway applies them next tick.
+    with _best_effort('Plugin catalog update notice failed: %s'):
+        _report_catalog_plugin_updates()
 
     with _best_effort('Skills sync during update failed: %s'):
         from agent.i18n import t
