@@ -465,4 +465,12 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 - **requires-python 收紧 3.11→3.12**（偏离记录）：上游新依赖树（numpy 2.5.4）不支持 3.11，3.11-3.14 全区间解析 unsatisfiable；上游自身靠 `environments=["3.14+"]` 掩盖此问题（锁只覆盖 3.14）。CN 运行目标 3.13/3.14（PM 栈）不受影响；3.11 本就是安装桥。when-to-delete：若 CN 重新需要 3.11 环境则需回退依赖版本。
 - 版本号 → 0.23.1；CN 回放清单核对通过（SIGUSR2/K-31 安全默认值/.python-version 3.13/CN docs/shell_bypass 等 additive 全部幸存）。
 
-**阶段 3 verify**：见后续补记。
+**阶段 3 verify（2026-11-13 完成）**：
+- **scripts/check**：8 项失败全部与 `cn-pre-v0.23-bump` 基线逐一核对——footguns 21→20、ruff 47→47、shebangs/no-tmp/agents-md/blob-size 既有，**bump 零新增 lint 债**。
+- **health ratchet**：cn-pre 8,028 blocking → merge 后 **7,843（净改善 185）**——上游本轮大量还债，CN 白拿。
+- **测试归因（基线对照法）**：全量 50,419 用例先跑，129 个 tools/cron 失败文件逐一在 cn-pre 基线重跑——96 既有失败 + 33 个"基线绿/merge 挂"候选，逐个定因后**全部为上游测试的 Windows 平台缺陷**（`patch.dict clear=True` 后 Windows expanduser 无 USERPROFILE；上游 CI 只跑 Linux 不暴露）或既有。**真逻辑回归 2 处已修**：`Platform.YUANBAO` 枚举成员 + `_YUANBAO_TOOLS` 定义（e1f7b59ec2 删除流对"CN 未改"文件直接生效不产生冲突——**自动合并会静默吞掉 CN 保留面，保留面必须测试核销**）。修复后 gateway 簇 8,251 passed 验证。
+- **测试树清理**：约 140 个上游新增、以被裁平台为载具的测试移除（telegram/discord/slack 载具链 + relay/msgraph/image_gen/docker/conformance）；`tests/e2e/conftest.py` 恢复并把海外 adapter import 段条件化。collection 挂置收敛到 95 个 = POSIX-only（pwd/fcntl/termios，上游 Linux CI 语义）+ keyring/reddit 缺依赖（K-43 defer/海外组）——既有/环境性。
+- **已知挂账**：① `_Thread` 测试隔离噪声（11 处 stub 缺 is_alive，全量顺序跑时泄漏污染 runtime_ownership——上游 stub 缺陷，单跑不复现）；② hermes_cli 簇未单独重跑（全量已覆盖）；③ 汉化债务（zh-hant 2 键 + 上游新 CLI 文案，K-70 批次）。
+- **WSL 部署冒烟全绿**：hermes 启动 ✓ / sessions list ✓ / gateway（systemd linger）✓ / **中文 FTS 实测命中**（"测试"175 条、多词 73 条——K-39 reject 上游删除的决策被真机验证）。WSL 树已在 sync-v023 分支，正式同步待 push 后走 hermes-update.sh。
+
+**收口**：cn ff 至 `78708a99d0`，tag **`v0.23.1+cn.1`**。push 照惯例由 user 批量决定。
