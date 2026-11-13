@@ -203,17 +203,24 @@ class Charge:
             yield
 
     def cost_sentence(self) -> str:
+        from agent.i18n import t
         unit, cost = self.policy.unit, self.cost
-        text = (f"Costs about {_qty(cost.high, unit)}" if cost.low == cost.high
-                else f"Costs {_fmt(cost.low)}-{_qty(cost.high, unit)}")
-        return f"{text} ({cost.note})." if cost.note else f"{text}."
+        if cost.low == cost.high:
+            if cost.note:
+                return t("approval.mcp.cost_flat_note", cost=_qty(cost.high, unit), note=cost.note)
+            return t("approval.mcp.cost_flat", cost=_qty(cost.high, unit))
+        if cost.note:
+            return t("approval.mcp.cost_range_note", low=_fmt(cost.low), high=_qty(cost.high, unit), note=cost.note)
+        return t("approval.mcp.cost_range", low=_fmt(cost.low), high=_qty(cost.high, unit))
 
     def spend_sentence(self, spent: float) -> str:
+        from agent.i18n import t
         unit, limit = self.policy.unit, self.policy.limit
         if spent > 0:
-            cap = f" (limit {_fmt(limit)})" if limit > 0 else ""
-            return f"This chat has used about {_qty(spent, unit)} on '{self.server}'{cap}."
-        return f"Spend limit for this chat on '{self.server}': {_qty(limit, unit)}." if limit > 0 else ""
+            if limit > 0:
+                return t("approval.mcp.spend_used", spent=_qty(spent, unit), server=self.server, limit=_fmt(limit))
+            return t("approval.mcp.spend_used_nolimit", spent=_qty(spent, unit), server=self.server)
+        return t("approval.mcp.spend_limit_line", server=self.server, limit=_qty(limit, unit)) if limit > 0 else ""
 
     def lines(self, spent: float) -> list[str]:
         return [s for s in (self.cost_sentence(), self.spend_sentence(spent)) if s]

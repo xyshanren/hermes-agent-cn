@@ -74,24 +74,37 @@ def refusal_lines(verb: str, homes: list[Path], *, flag_hint: str = f"hermes gat
     for home in homes:
         work = live_work(home, profile)
         if work is not None:
-            return _work_lines(verb, home, work, flag_hint)
+            return work_lines(verb, home, work, flag_hint)[1]
     return []
 
 
-def _work_lines(verb: str, home: Path, work: dict[str, Any], flag_hint: str) -> list[str]:
+def _verb_labels(verb: str) -> dict[str, str]:
+    """Translated verb forms for the headers ({verb} present/progressive, {verb_past} in the
+    cancelled line); the flag-hint command line keeps the raw verb for copy-paste."""
+    from agent.i18n import t
+
+    return {"verb": t(f"gateway.admin.verb_{verb}"), "verb_past": t(f"gateway.admin.verb_past_{verb}")}
+
+
+def work_lines(verb: str, home: Path, work: dict[str, Any], flag_hint: str) -> tuple[int, list[str]]:
+    """``(count, lines)`` for one gateway's live work; ``count`` 0 means nothing live. The count
+    travels separately so the caller can re-render the header for the ``--yes`` and ask variants
+    (a translated header is text, so the old prefix-``replace`` trick cannot serve)."""
     from hermes_cli.update_cmd_drain_report import describe_active_work_unit
+    from agent.i18n import t
 
     units = [u for u in work.get("active_work") or [] if isinstance(u, dict)]
     count = max(len(units), int(work.get("active_agents") or 0))
     if not count:
-        return []
-    lines = [f"Refusing to {verb} the gateway: {count} live session(s) would be interrupted."]
+        return 0, []
+    labels = _verb_labels(verb)
+    lines = [t("gateway.admin.live_refuse_header", count=count, **labels)]
     lines += [f"  • {describe_active_work_unit(u, home)}" for u in units]
     if not units:
-        lines.append(f"  • {count} active agent run(s) (this gateway does not name them)")
-    lines += ["  Let them finish, or interrupt them deliberately:",
-              f"    {flag_hint.format(verb=verb)}   # interrupts {count} live session(s)"]
-    return lines
+        lines.append(t("gateway.admin.live_unnamed_agents", count=count))
+    lines += [t("gateway.admin.live_let_finish"),
+              f"    {flag_hint.format(verb=verb)}   {t('gateway.admin.live_interrupts_comment', count=count)}"]
+    return count, lines
 
 
 def refuse_while_sessions_live(verb: str, args, *, host_home: Optional[Path] = None, profile: Optional[str] = None) -> None:
@@ -101,27 +114,33 @@ def refuse_while_sessions_live(verb: str, args, *, host_home: Optional[Path] = N
     if profile:
         hint = f"hermes -p {profile} gateway {{verb}} {INTERRUPT_FLAG}"
         # No answer (control socket down) proceeds: the park marker path exists for exactly that host.
-        lines = refusal_lines(verb, [Path(host_home)], profile=profile, flag_hint=hint)
+        count, lines = next(((work_lines(verb, Path(home), work, hint))
+                             for home in [Path(host_home)]
+                             if (work := live_work(home, profile)) is not None), (0, []))
     else:
-        lines = refusal_lines(verb, _candidate_homes(getattr(args, "system", False)))
-    if not lines:
+        count, lines = next(((work_lines(verb, home, work, f"hermes gateway {{verb}} {INTERRUPT_FLAG}"))
+                             for home in _candidate_homes(getattr(args, "system", False))
+                             if (work := live_work(home)) is not None), (0, []))
+    if not count:
         return
+    from agent.i18n import t
     from hermes_cli.gateway import print_error, print_warning
 
+    labels = _verb_labels(verb)
     if getattr(args, "interrupt", False):
-        print_warning(lines[0].replace(f"Refusing to {verb} the gateway", f"--yes: {verb} proceeds"))
+        print_warning(t("gateway.admin.live_yes_header", count=count, **labels))
         for line in lines[1:-2]:
             print(line)
         return
     if sys.stdin.isatty() and sys.stdout.isatty():
         from hermes_cli.cli_output import prompt_yes_no
 
-        print_warning(lines[0].replace(f"Refusing to {verb} the gateway", f"{verb.capitalize()} the gateway"))
+        print_warning(t("gateway.admin.live_ask_header", count=count, **labels))
         for line in lines[1:-2]:
             print(line)
-        if prompt_yes_no(f"Interrupt them and {verb} the gateway?", default=False):
+        if prompt_yes_no(t("gateway.admin.live_interrupt_prompt", **labels), default=False):
             return
-        print(f"  Cancelled: the gateway was not {'stopped' if verb == 'stop' else 'restarted'}.")
+        print(t("gateway.admin.live_interrupt_cancelled", **labels))
         sys.exit(1)
     print_error(lines[0])
     for line in lines[1:]:

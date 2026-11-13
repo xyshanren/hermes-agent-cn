@@ -201,8 +201,7 @@ class CLILoopsMixin:
         title = _new_args.strip() or None
         if self._confirm_destructive_slash(
             "new",
-            "This starts a fresh session.\n"
-            "The current conversation history will be discarded.",
+            t("cli.modal.detail_new"),
             cmd_original=cmd_original,
         ) is None:
             return True  # confirmation cancelled — command handled, keep REPL alive

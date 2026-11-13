@@ -33,9 +33,10 @@ def _quoted(row, fallback):
     return f'    "{preview}"' if preview else f"    ({fallback} {row['admission_id']})"
 
 
-_UNKNOWN_OUTCOME = ("Hermes couldn't confirm how this turn ended (usually because it restarted mid-turn). "
-                    "Resume this session and use the /discard <id> command it shows to drop the turn. "
-                    "Don't send the same message again until you've checked.")
+def _unknown_outcome():
+    """The completion text a lost turn settles with (the caller's own restart cut the outcome)."""
+    from agent.i18n import t
+    return t("cli.paused.unknown_outcome")
 
 _BLOCKING_CONTROL_EVENTS = frozenset({
     "approval.request", "approval.settled", "clarify.request", "clarify.settled",
@@ -48,43 +49,45 @@ def pending_lines(pending, *, interactive=True):
     A lost turn is never replayed, so the person must be told what it was and the exact command
     that drops it; a queued prompt is not in the transcript yet, so it is quoted too. A one-shot
     (``interactive=False``) cannot take ``/discard``, so its caller names the remedy instead."""
+    from agent.i18n import t
     lost = [row for row in pending if row["status"] == "unknown"]
     queued = [row for row in pending if row["status"] == "queued"]
+    lost_label = t("cli.paused.lost_turn_label")
     lines = []
     if len(lost) == 1:
-        lines.append("⏸ This chat is paused. Hermes couldn't confirm how the last turn ended "
-                     "(usually because it restarted mid-turn):")
+        lines.append(t("cli.paused.lost_single"))
         if _pending_preview(lost[0].get("text")):
-            lines.append(_quoted(lost[0], "lost turn"))
-        lines.append("  Hermes won't re-run it by itself, since it may already have done part of the work.")
+            lines.append(_quoted(lost[0], lost_label))
+        lines.append(t("cli.paused.no_rerun_single"))
         if interactive:
-            lines += ["  To drop it and continue, type:", f"/discard {lost[0]['admission_id']}"]
+            lines += [t("cli.paused.drop_one_instruction"), f"/discard {lost[0]['admission_id']}"]
     elif lost:
-        lines.append(f"⏸ This chat is paused. Hermes couldn't confirm how {len(lost)} turns ended "
-                     "(usually because it restarted mid-turn):")
-        lines.append("  Hermes won't re-run them by itself, since they may already have done part of the work.")
+        lines.append(t("cli.paused.lost_multi", count=len(lost)))
+        lines.append(t("cli.paused.no_rerun_multi"))
         if interactive:
-            lines.append("  To continue, drop each one with the /discard line under it:")
+            lines.append(t("cli.paused.drop_each_instruction"))
         for row in lost:
-            lines.append(_quoted(row, "lost turn"))
+            lines.append(_quoted(row, lost_label))
             if interactive:
                 lines.append(f"/discard {row['admission_id']}")
     if queued:
-        count = "1 message is" if len(queued) == 1 else f"{len(queued)} messages are"
-        after = {0: "to run", 1: "and will run once that turn is dropped"}.get(
-            len(lost), "and will run once those turns are dropped")
-        lines.append(f"  {count} waiting {after}:")
-        lines.extend(_quoted(row, "queued message") for row in queued)
+        count = t("cli.paused.queued_one") if len(queued) == 1 else t("cli.paused.queued_many", count=len(queued))
+        after = {0: t("cli.paused.queued_after_run"),
+                 1: t("cli.paused.queued_after_one")}.get(
+            len(lost), t("cli.paused.queued_after_many"))
+        lines.append(t("cli.paused.queued_waiting", count=count, after=after))
+        lines.extend(_quoted(row, t("cli.paused.queued_label")) for row in queued)
     return lines
 
 
 def lost_admission(snapshot, admission_id):
     """``/discard``'s row: the resume snapshot is the only source of the generation the authority
     stamped on a turn lost across an owner restart."""
+    from agent.i18n import t
     lost = next((row for row in snapshot.get("pending", [])
                  if row["admission_id"] == admission_id and row["status"] == "unknown"), None)
     if lost is None:
-        raise GatewayClientError("No unknown (lost) admission with that id; resume to refresh")
+        raise GatewayClientError(t("cli.paused.no_such_lost"))
     return lost
 
 
@@ -132,11 +135,12 @@ class GatewayChatView:
             print(line, file=sys.stderr)
 
     def show_prompt(self, prompt):
-        print(f"\n{prompt.get('description') or prompt.get('question') or 'Approval required'}", file=sys.stderr)
+        from agent.i18n import t
+        print(f"\n{prompt.get('description') or prompt.get('question') or t('cli.paused.approval_required')}", file=sys.stderr)
         if prompt.get("command"):
             print(prompt["command"], file=sys.stderr)
         command = "/approve" if prompt["kind"] == "approval" else "/answer"
-        print(f"{command} {prompt['prompt_id']} <{'|'.join(prompt.get('choices', [])) or 'answer'}>", file=sys.stderr)
+        print(f"{command} {prompt['prompt_id']} <{'|'.join(prompt.get('choices', [])) or t('cli.paused.answer_placeholder')}>", file=sys.stderr)
 
     async def render(self):
         while True:
@@ -207,7 +211,7 @@ class GatewayChatView:
         from hermes_cli.gateway_replay_gap import pending_status, settled
         status = pending_status(self.pending, admission)
         if status == "unknown" and admission in self.mine:
-            self._complete(admission, {"outcome": "unknown", "text": _UNKNOWN_OUTCOME})
+            self._complete(admission, {"outcome": "unknown", "text": _unknown_outcome()})
             self.changed.set()
         if not admission or status in ("queued", "unknown") or admission in self.completions:
             return
@@ -372,11 +376,12 @@ class GatewayChatView:
                                   execution_generation=self.generation)
             return True
         if command in {"/approve", "/answer"}:
+            from agent.i18n import t
             prompt_id, _, answer = rest.partition(" ")
             prompt = self.prompts.get(prompt_id)
             expected = "approval" if command == "/approve" else "clarify"
             if not prompt or prompt["kind"] != expected:
-                raise GatewayClientError("No matching pending control; resume to refresh")
+                raise GatewayClientError(t("cli.paused.no_matching_control"))
             await self.client.rpc(expected + ".respond", session_id=self.session_id,
                 execution_generation=prompt["execution_generation"], prompt_id=prompt_id,
                 **({"choice": answer} if expected == "approval" else {"answer": answer}))
@@ -476,14 +481,14 @@ class GatewayChatView:
         only a still-queued input behind someone else's unknown turn is retained and detached."""
         own = next((row["status"] for row in self.pending if row["admission_id"] == admission), None)
         if own == "unknown":
-            self.completions[admission] = {"outcome": "unknown", "text": _UNKNOWN_OUTCOME}
+            self.completions[admission] = {"outcome": "unknown", "text": _unknown_outcome()}
             return None
         if own == "queued" and self.unknown_admissions():
-            return ("This chat is paused behind a turn whose ending Hermes couldn't confirm. "
-                    "Your message is saved and will run once you resume this session and /discard "
-                    "that turn; don't send it again.")
+            from agent.i18n import t
+            return t("cli.paused.blocked_behind")
         if self.prompts and (own or not self.gaps):  # a control blocks only a turn still pending
-            return "Input required; detached without cancelling. Resume this session interactively."
+            from agent.i18n import t
+            return t("cli.paused.input_required")
         return None
 
     async def _settled_result(self, admission):
@@ -542,9 +547,8 @@ class GatewayChatView:
         if oneshot and self.unknown_admissions():
             # A new admission would queue behind the unknown row and never run; refuse BEFORE
             # submitting so nothing is left queued for the next interactive resume to find.
-            return self._detach(f"Your message was not sent. To continue, run `hermes sessions discard "
-                                f"{self.session_id} --yes`, or resume this session in an interactive chat "
-                                "and /discard the paused turn there; then send it again.")
+            from agent.i18n import t
+            return self._detach(t("cli.paused.oneshot_refused", session_id=self.session_id))
         renderer = asyncio.create_task(self.render())
         try:
             receipt = await self.submit(query) if query else None

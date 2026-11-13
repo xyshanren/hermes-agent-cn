@@ -530,11 +530,11 @@ class CLIChatTurnMixin:
         from hermes_cli.gateway_side import connection_for
         admission_id = cmd_original.partition(" ")[2].strip()
         if not admission_id:
-            _cprint("  Usage: /discard <admission_id>")
+            _cprint(t("cli.discard.usage"))
             return
         connection = connection_for(self)
         if connection is None:
-            _cprint("  /discard: no gateway session is open")
+            _cprint(t("cli.discard.no_session"))
             return
         try:
             lost = lost_admission(connection.reattach(self.session_id), admission_id)
@@ -543,12 +543,12 @@ class CLIChatTurnMixin:
             # The cached pending list the next prompt checks: any other lost turn still refuses it.
             snapshot = connection.reattach(self.session_id)
         except GatewayClientError as exc:
-            _cprint(f"  /discard: {exc}")
+            _cprint(t("cli.discard.failed", error=exc))
             return
         left = sum(row["status"] == "unknown" for row in snapshot.get("pending", []))
-        _cprint(f"  Discarded {lost['admission_id']}; it was not re-run. "
-                + (f"{left} more paused turn{'s' if left > 1 else ''} to /discard first." if left
-                   else "You can send messages again."))
+        _cprint("  " + t("cli.discard.done", admission_id=lost['admission_id'])
+                + (" " + t("cli.discard.remaining", count=left) if left
+                   else " " + t("cli.discard.resume_ok")))
 
     def _chat_render_turn(self, turn, agent_thread, interrupt_msg):
         """Post-turn display: errors, interrupt marker, reasoning/response panels, bell, re-queues.
