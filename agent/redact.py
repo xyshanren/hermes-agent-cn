@@ -877,15 +877,6 @@ _ZHIPU_API_KEY_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])([0-9a-f]{32}\.[A-Za-z0-9]{16,})(?![A-Za-z0-9_.-])"
 )
 
-# Zhipu API keys use an unprefixed ``id.secret`` form. Keep this deliberately
-# provider-shaped instead of applying a generic high-entropy dotted-token rule:
-# the ID is exactly 32 lowercase hex chars and the credential suffix is a run of
-# at least 16 alphanumerics, so content-hash filenames (``<sha>.bundle``,
-# ``<md5>.sqlite3``) never match.
-_ZHIPU_API_KEY_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])([0-9a-f]{32}\.[A-Za-z0-9]{16,})(?![A-Za-z0-9_.-])"
-)
-
 
 def _mask_control_split_tokens(text: str, mask_fn) -> str:
     """Mask tokens whose body is split by control/zero-width characters.
@@ -1564,7 +1555,8 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
         _zhipu_sub = _mask_token_nonreusable if file_read else _mask_token
         text = _ZHIPU_API_KEY_RE.sub(lambda m: _zhipu_sub(m.group(1)), text)
 
-    # ENV assignments: OPENAI_API_KEY=***  (skip for code files — false positives)    if not code_file:
+    # ENV assignments: OPENAI_API_KEY=***  (skip for code files — false positives)
+    if not code_file:
         text = _redact_assignments(text, mask_nonreusable=file_read)
 
     # Flags and connection-string keys carry a credential in command text, so they are not
