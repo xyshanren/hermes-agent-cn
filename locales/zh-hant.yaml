@@ -372,8 +372,8 @@ gateway:
     denied_reason_plural: "❌ 指令已拒絕（{count} 條指令）。 已將原因轉達給代理: \"{reason}\""
 
   usage_limit:
-    picker_title: "Keep going on another model:"
-    switch_choice: "Switch to {model} ({note})"
+    picker_title: "換個模型繼續："
+    switch_choice: "切換到 {model}（{note}）"
   fast:
     not_supported: "⚡ /fast 僅適用於支援 Priority Processing 的 OpenAI 模型。"
     status: "⚡ Priority Processing\n\n目前模式：`{mode}`\n\n_用法：_ `/fast <normal|fast|status>`"
