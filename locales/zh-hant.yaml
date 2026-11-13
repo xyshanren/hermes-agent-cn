@@ -1676,7 +1676,7 @@ platform:
     prompt_expired: ⌛ 該提示已不再等待回答。請以一般訊息傳送您的回覆。
 slash:
   rewind:
-    description: "回溯至先前的提示以編輯並重新傳送,或從該處分支 (Esc Esc)"
+    description: "回溯至先前的提示以編輯並重新傳送，或從該處分支（Esc Esc）"
   approve:
     description: "批准待處理的危險指令"
   bg:
@@ -1910,14 +1910,14 @@ cli:
     prime_hint: "再按一次 esc 以編輯上一則訊息"
     no_previous: "沒有可編輯的上一則訊息。"
     editing_hint: "↺ 正在編輯提示 {number} — Enter 回溯至此並傳送 · Esc Esc 取消"
-    edit_cancelled: "↺ 已取消回溯;未移除任何內容。"
-    rewound: "↺ 已回溯至提示 {number}(已封存 {count} 則訊息);正在傳送編輯內容。"
-    forked: "⑂ 已在提示 {number} 之前建立分支;原始工作階段 {parent} 未變更。請編輯下方提示,然後按 Enter 傳送。"
+    edit_cancelled: "↺ 已取消回溯；未移除任何內容。"
+    rewound: "↺ 已回溯至提示 {number}（已封存 {count} 則訊息）；正在傳送編輯內容。"
+    forked: "⑂ 已在提示 {number} 之前建立分支；原始工作階段 {parent} 未變更。請編輯下方提示，然後按 Enter 傳送。"
     nothing: "(._.) 沒有可回溯的先前提示。"
-    target_changed: "(x_x) 自你選擇提示 {number} 後工作階段已變更;未移除任何內容。你的編輯已放回輸入框。"
+    target_changed: "(x_x) 自你選擇提示 {number} 後工作階段已變更；未移除任何內容。你的編輯已放回輸入框。"
     invalid: "(._.) 沒有提示 {value} — 請選擇 1 至 {total}。"
-    usage: "用法:/rewind [N | fork N]"
-    rewind_failed: "(x_x) 回溯失敗;歷史記錄未變更:{error}"
+    usage: "用法：/rewind [N | fork N]"
+    rewind_failed: "(x_x) 回溯失敗；歷史記錄未變更：{error}"
   setup:
     env_var_saved: "  ✓ 已儲存"
     env_var_skipped: "  已跳過（以後用 'hermes setup' 設定）"
@@ -4224,7 +4224,7 @@ tips:
 # Window plans (Nous subscription with included usage): picker words, limit lines, Large-model notice.
 plan_usage:
   level_free: "免費"
-  level_top_tier: "大"
+  level_top_tier: "大型"
   resets_in: "{duration}後重設"
   resets_soon: "即將重設"
   limit_reached: "已達{name}上限 · {resets}"
