@@ -1904,6 +1904,43 @@ slash:
   quit:
     description: "退出 CLI（加 --delete 可同时删除会话历史）"
 cli:
+  clipboard:
+    help: "读取本机剪贴板（仅限本机）"
+    description: "使用与 CLI 和 TUI 相同的提取器读取本机剪贴板。仅限本机：不经过网关，不访问会话存储。"
+    image_help: "将剪贴板图片以 PNG 格式写入文件"
+    image_description: "将剪贴板图片写入 --out（覆盖已有文件）。退出码：0=已写入；1=无图片；3=未安装剪贴板工具；4=--out 不可写（任何失败情况下都会保留已有的 --out 文件）。"
+    out_help: "要写入的文件"
+    json_help: "在 stdout 输出一个 JSON 对象"
+  cron:
+    cancel_help: "停止某个任务的进行中运行（其调度计划不受影响）"
+    cancel_job_id_help: "要停止进行中运行的任务 ID"
+    cancel_reason_help: "可选备注，随该次取消记录一起保存"
+    timezone_help: "此任务调度使用的 IANA 时区（如 Asia/Hong_Kong），使 cron 表达式按该时区的本地时钟解读，无论 profile 的时区是什么。省略则继承 profile 的时区。"
+    grace_minutes_help: "cron 调度的追补窗口覆盖值（分钟，0-1440）。默认：周期的一半，限制在 2-120 分钟。0 = 从不追补（错过的执行直接跳过，不补跑）。"
+  main:
+    cpu_profile_help: "用 cProfile 对本进程做性能分析，退出时写入 PATH（pstats 格式）和 PATH.txt（耗时最高的函数）。相对 PATH 落在该 profile 的 logs/profiles/ 下。进程运行期间始终有额外开销；在 --tui 下分析的是启动器，而非 agent 后端。"
+  migrate:
+    import_source_help: "agent 的配置所在位置（Grok Bot 则为其导出文件）"
+    import_activate_routines_help: "让导入的 cron 任务创建后直接处于运行状态，而不是暂停"
+    import_bot_help: "仅导入此 Bot 或 agent，按名称（可重复）"
+  pm:
+    lock_help: "依据 pyproject.toml 重新锁定 uv.lock（或用 --bump 固定 pm/lock.json 中的工具版本）"
+    lock_description: "不带参数：依据 pyproject.toml 重新解析 uv.lock；不改动任何环境，锁仍是最新的就什么都不写。带 --bump NAME VERSION：把某个 pm 工具的产物固定到 pm/lock.json；uv.lock 不受影响。"
+    lock_bump_help: "把工具 NAME 固定到 pm/lock.json 中的 VERSION，而不是重新锁定 uv.lock"
+    lock_version_help: "工具版本号（仅配合 --bump 使用）"
+    install_help: "安装软件包（默认：全部必需包 + 可选默认包）"
+    install_without_help: "让某个可选默认包（chromium、cua-driver）或已记录的 extra（matrix 等）在本次及之后的所有默认安装与更新中都不进入 [all]；`hermes pm install NAME` / `--extra NAME` 可重新加入（可重复）"
+    environment_help: "把命名的旁路环境设为当前环境并输出其 python"
+    environment_description: "构建或复用 HERMES_HOME/environments/NAME——一个绝不触碰 Hermes 自身环境的隔离 venv：--extra 安装某个已声明 extra 的固定版本，--requirement 安装临时的有界依赖（两者均可重复）。stdout 只输出解释器路径。"
+  sessions:
+    refresh_prompts_help: "让继续中的会话在下一轮对话时重建其系统提示词"
+    refresh_prompts_description: "在本 profile 中更新 SOUL.md、技能或上下文文件后，让每个继续中的会话（或用 --session 指定的某个会话）在下一轮对话时，从当前源文件重建一次其存储的系统提示词。对话历史与会话 ID 保持不变；每个被刷新的会话需付出一次提示词缓存未命中。网关运行中可用，重启后依然有效。用 -p/--profile 指定其他 profile。"
+    refresh_prompts_session_help: "仅刷新此会话（ID 或唯一前缀）"
+    refresh_prompts_json_help: "输出机器可读格式"
+  vault:
+    key_help: "查看本地保险库密钥的存储位置（vault.key 文件或系统钥匙串）"
+    key_migrate_help: "把保险库密钥移入系统钥匙串，或移回 vault.key（旧副本删除前先做验证）"
+    key_migrate_to_help: "密钥的目标位置"
   backtrack:
     title: "↺ 对话记录 — 选择要编辑的提示"
     keys_hint: "浏览对话记录 · ↑↓/jk 滚动 · ←→/hl 提示 · ↵ 编辑 · f 分叉 · esc 返回"
@@ -3486,6 +3523,13 @@ cli:
     agent_init_failed: "Hermes 无法建立模型连接：{error}。你的消息未发送。运行 `hermes doctor` 检查配置，或用 /model 选择其他提供方。"
   gateway:
     starting: "正在启动 Hermes 网关（消息平台）..."
+    attach_help: "供本地客户端接入：返回网关的 WebSocket URL 与一次性会话票据"
+    attach_description: "输出为当前 profile 提供服务的网关的 WebSocket URL，以及一张供其使用的一次性会话票据，供自行连接 /api/ws 的本地客户端使用。票据即凭证：只打印给调用方进程，绝不记入日志，签发 30 秒后过期。"
+    attach_epilog: "退出码：0=已接入；2=调用无效；其余情况下，退出码与 `hermes gateway ensure` 对同一判定给出的退出码一致。"
+    attach_json_help: "输出一个 JSON 结果（默认）"
+    attach_start_help: "当没有网关服务本 profile 时启动网关"
+    attach_recover_help: "先探测；仅在网关未就绪时才启动（或替换旧版 Hermes 的网关）"
+    attach_timeout_help: "--start/--recover 的启动截止时间（秒，默认：60）"
   gateway_status:
     header: "(✿◠‿◠) 网关状态"
     platform_config_header: "消息平台配置："

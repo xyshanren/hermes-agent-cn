@@ -1904,6 +1904,43 @@ slash:
   quit:
     description: "Выйти из CLI (с --delete также удаляется история сеанса)"
 cli:
+  clipboard:
+    help: "Read this machine's clipboard (device-local)"
+    description: "Read this machine's clipboard with the extractor the CLI and TUI use. Device-local: no gateway, no session store."
+    image_help: "Write the clipboard image to a file as PNG"
+    image_description: "Write the clipboard image to --out (overwritten). Exit 0: written; 1: no image; 3: no clipboard tool installed; 4: --out not writable (an existing --out is kept on any failure)."
+    out_help: "File to write"
+    json_help: "Print one JSON object on stdout"
+  cron:
+    cancel_help: "Stop a job's live run (its schedule is untouched)"
+    cancel_job_id_help: "Job ID whose in-flight run to stop"
+    cancel_reason_help: "Optional note recorded with the cancelled run"
+    timezone_help: "IANA zone for this job's schedule (e.g. Asia/Hong_Kong), so the cron expression is read as THAT zone's wall clock whatever the profile's timezone is. Omit to inherit the profile timezone."
+    grace_minutes_help: "Catch-up window override in minutes (0-1440) for a cron schedule. Default: half the period, clamped to 2-120 minutes. 0 = never catch up (a missed occurrence is skipped, not run late)."
+  main:
+    cpu_profile_help: "Profile this process with cProfile and write PATH (pstats) plus PATH.txt (top functions) on exit. A relative PATH goes under the profile's logs/profiles/. Adds overhead for as long as the process runs; under --tui it profiles the launcher, not the agent backend."
+  migrate:
+    import_source_help: "Where the agent's setup (or, for Grok Bot, its export file) is"
+    import_activate_routines_help: "Create the imported cron jobs running instead of paused"
+    import_bot_help: "Only this Bot or agent, by name (repeatable)"
+  pm:
+    lock_help: "relock uv.lock from pyproject.toml (or --bump a tool pin in pm/lock.json)"
+    lock_description: "With no arguments: re-resolve uv.lock from pyproject.toml; changes no environment and writes nothing when the lock is current. With --bump NAME VERSION: pin a pm tool's artifacts in pm/lock.json; uv.lock is untouched."
+    lock_bump_help: "pin tool NAME at VERSION in pm/lock.json instead of relocking uv.lock"
+    lock_version_help: "the tool version (only with --bump)"
+    install_help: "install packages (default: all required + optional defaults)"
+    install_without_help: "leave an optional default package (chromium, cua-driver) or a recorded extra outside [all] (matrix, ...) out of this and every later default install and update; `hermes pm install NAME` / `--extra NAME` opts back in (repeatable)"
+    environment_help: "make a named side environment current and print its python"
+    environment_description: "Build or reuse HERMES_HOME/environments/NAME, an isolated venv that never touches Hermes's own: --extra installs the pins of a declared extra, --requirement an ad hoc bounded requirement (both repeatable). Prints only the interpreter path on stdout."
+  sessions:
+    refresh_prompts_help: "Make continuing sessions rebuild their system prompt on their next turn"
+    refresh_prompts_description: "After updating SOUL.md, skills or context files in this profile, ask every continuing session (or one with --session) to rebuild its stored system prompt once, on its next turn, from the current sources. Conversation history and session ids are kept; each refreshed session pays one prompt-cache miss. Works while the gateway runs and across restarts. Use -p/--profile to target another profile."
+    refresh_prompts_session_help: "Refresh only this session (id or unique prefix)"
+    refresh_prompts_json_help: "Machine-readable output"
+  vault:
+    key_help: "Show where the local vault key is stored (vault.key file or OS keychain)"
+    key_migrate_help: "Move the vault key to the OS keychain or back to vault.key (verified before the old copy is removed)"
+    key_migrate_to_help: "Destination for the key"
   backtrack:
     title: "↺ Стенограмма — выберите запрос для правки"
     keys_hint: "Просмотр стенограммы · ↑↓/jk прокрутка · ←→/hl запросы · ↵ изменить · f ответвить · esc назад"
@@ -3486,6 +3523,13 @@ cli:
     agent_init_failed: "Hermes не удалось установить соединение с моделью: {error}. Ваше сообщение не отправлено. Выполните `hermes doctor` для проверки настройки или /model, чтобы выбрать другого провайдера."
   gateway:
     starting: "Запуск шлюза Hermes (платформы обмена сообщениями)..."
+    attach_help: "Attach a local client: the gateway's WebSocket URL and a single-use session ticket"
+    attach_description: "Print the WebSocket URL of the gateway serving this profile and one single-use session ticket for it, for a local client that dials /api/ws itself. The ticket is a credential: it is printed for the calling process only, never logged, and expires 30 seconds after it is minted."
+    attach_epilog: "Exit codes: 0 attached; 2 invalid invocation; otherwise the exit code `hermes gateway ensure` gives the same verdict."
+    attach_json_help: "Emit one JSON result (default)"
+    attach_start_help: "Start the gateway when none serves this profile"
+    attach_recover_help: "Discover first; start (or replace an older Hermes's) gateway only when it is not ready"
+    attach_timeout_help: "Start deadline in seconds for --start/--recover (default: 60)"
   gateway_status:
     header: "(✿◠‿◠) Состояние шлюза"
     platform_config_header: "Конфигурация платформ обмена сообщениями:"

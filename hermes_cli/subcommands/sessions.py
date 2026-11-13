@@ -31,16 +31,14 @@ def _add_rename_and_discard(sessions_subparsers) -> None:
 
 
 def _add_refresh_prompts(sessions_subparsers) -> None:
+    from agent.i18n import t
+
     refresh = sessions_subparsers.add_parser(
-        "refresh-prompts", help="Make continuing sessions rebuild their system prompt on their next turn",
-        description="After updating SOUL.md, skills or context files in this profile, ask every "
-            "continuing session (or one with --session) to rebuild its stored system prompt once, "
-            "on its next turn, from the current sources. Conversation history and session ids are "
-            "kept; each refreshed session pays one prompt-cache miss. Works while the gateway runs "
-            "and across restarts. Use -p/--profile to target another profile.")
+        "refresh-prompts", help=t("cli.sessions.refresh_prompts_help"),
+        description=t("cli.sessions.refresh_prompts_description"))
     refresh.add_argument("--session", default=None, metavar="SESSION_ID",
-        help="Refresh only this session (id or unique prefix)")
-    _flag(refresh, "--json", help="Machine-readable output")
+        help=t("cli.sessions.refresh_prompts_session_help"))
+    _flag(refresh, "--json", help=t("cli.sessions.refresh_prompts_json_help"))
 
 
 def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:

@@ -47,6 +47,7 @@ def build_migrate_parser(subparsers) -> None:
 def _add_agent_import_parsers(migrate_subparsers) -> None:
     """``hermes migrate <agent>``: one per importer setup offers; runs the agent-importers plugin's
     ``hermes import-agent <agent>`` (installing the plugin first when it is missing)."""
+    from agent.i18n import t as _t
     from hermes_cli.migrate import cmd_migrate_agent
     from hermes_cli.setup_agent_import import IMPORT_SOURCES
 
@@ -56,7 +57,7 @@ def _add_agent_import_parsers(migrate_subparsers) -> None:
             description=f"Import your {source.label} setup into the active profile through the "
                 "agent-importers plugin (installed from the plugin catalog when missing). Always "
                 "previews first and asks before changing anything.")
-        sub.add_argument("--source", help="Where the agent's setup (or, for Grok Bot, its export file) is")
+        sub.add_argument("--source", help=_t("cli.migrate.import_source_help"))
         sub.add_argument("--dry-run", action="store_true", help="Preview only")
         sub.add_argument("--overwrite", action="store_true", help="Replace existing items on name conflicts")
         sub.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt")
@@ -65,9 +66,9 @@ def _add_agent_import_parsers(migrate_subparsers) -> None:
                              help="Also import OpenClaw's allowlisted API keys and bot tokens")
         if source.name in ("grok-bot", "openbot"):
             sub.add_argument("--activate-routines", action="store_true",
-                             help="Create the imported cron jobs running instead of paused")
+                             help=_t("cli.migrate.import_activate_routines_help"))
             sub.add_argument("--bot", action="append", metavar="NAME",
-                             help="Only this Bot or agent, by name (repeatable)")
+                             help=_t("cli.migrate.import_bot_help"))
         sub.set_defaults(func=cmd_migrate_agent, migrate_agent=source.name)
 
 

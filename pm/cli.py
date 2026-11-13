@@ -959,24 +959,22 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="hermes pm")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    from agent.i18n import t as _t
+
     lock_parser = p = sub.add_parser(
-        "lock", help="relock uv.lock from pyproject.toml (or --bump a tool pin in pm/lock.json)",
-        description="With no arguments: re-resolve uv.lock from pyproject.toml; changes no "
-                    "environment and writes nothing when the lock is current. With --bump NAME "
-                    "VERSION: pin a pm tool's artifacts in pm/lock.json; uv.lock is untouched.")
+        "lock", help=_t("cli.pm.lock_help"),
+        description=_t("cli.pm.lock_description"))
     p.add_argument("--bump", dest="name", metavar="NAME",
-                   help="pin tool NAME at VERSION in pm/lock.json instead of relocking uv.lock")
-    p.add_argument("version", nargs="?", metavar="VERSION", help="the tool version (only with --bump)")
+                   help=_t("cli.pm.lock_bump_help"))
+    p.add_argument("version", nargs="?", metavar="VERSION", help=_t("cli.pm.lock_version_help"))
     p.set_defaults(func=cmd_lock)
 
-    p = sub.add_parser("install", help="install packages (default: all required + optional defaults)")
+    p = sub.add_parser("install", help=_t("cli.pm.install_help"))
     p.add_argument("names", nargs="*")
     p.add_argument("--extra", action="append", default=[], metavar="NAME",
                    help="enable a declared dependency extra in the venv (repeatable)")
     p.add_argument("--without", action="append", default=[], metavar="NAME",
-                   help="leave an optional default package (chromium, cua-driver) or a recorded extra outside "
-                        "[all] (matrix, ...) out of this and every later default install and update; "
-                        "`hermes pm install NAME` / `--extra NAME` opts back in (repeatable)")
+                   help=_t("cli.pm.install_without_help"))
     p.add_argument("--tools-only", action="store_true",
                    help="install the tool closure, put it on PATH, and stop before the venv sync")
     p.add_argument("--trust-recorded", action="store_true",
@@ -1005,11 +1003,8 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_repair)
 
     p = sub.add_parser(
-        "environment", help="make a named side environment current and print its python",
-        description="Build or reuse HERMES_HOME/environments/NAME, an isolated venv that never "
-                    "touches Hermes's own: --extra installs the pins of a declared extra, "
-                    "--requirement an ad hoc bounded requirement (both repeatable). "
-                    "Prints only the interpreter path on stdout.")
+        "environment", help=_t("cli.pm.environment_help"),
+        description=_t("cli.pm.environment_description"))
     p.add_argument("name")
     p.add_argument("--extra", action="append", default=[], metavar="EXTRA")
     p.add_argument("--requirement", action="append", default=[], metavar="REQ")

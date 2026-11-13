@@ -28,6 +28,8 @@ def _add_catch_up(parser) -> None:
 
 def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
     """Attach the ``cron`` subcommand (and its sub-actions) to ``subparsers``."""
+    from agent.i18n import t as _t
+
     cron_parser = subparsers.add_parser(
         "cron", help="Cron job management", description="Manage scheduled tasks")
     cron_subparsers = cron_parser.add_subparsers(dest="cron_command")
@@ -99,13 +101,9 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
             "for a .py --script / --monitor-script, so it can import packages Hermes does not "
             "ship. .sh/.bash still run under bash. Omit to use Hermes' Python.")
     cron_create.add_argument("--timezone",
-        help="IANA zone for this job's schedule (e.g. Asia/Hong_Kong), so the cron "
-            "expression is read as THAT zone's wall clock whatever the profile's timezone "
-            "is. Omit to inherit the profile timezone.")
+        help=_t("cli.cron.timezone_help"))
     cron_create.add_argument("--grace-minutes", dest="grace_minutes",
-        help="Catch-up window override in minutes (0-1440) for a cron schedule. "
-            "Default: half the period, clamped to 2-120 minutes. 0 = never catch up "
-            "(a missed occurrence is skipped, not run late).")
+        help=_t("cli.cron.grace_minutes_help"))
     cron_create.add_argument(
         "--continuity", dest="continuity", action="store_const", const=True, default=None,
         help="Each run wakes up with the job's own previous output injected "
@@ -198,10 +196,10 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
     add_accept_hooks_flag(cron_run)
 
     cron_cancel = cron_subparsers.add_parser(
-        "cancel", help="Stop a job's live run (its schedule is untouched)")
-    cron_cancel.add_argument("job_id", help="Job ID whose in-flight run to stop")
+        "cancel", help=_t("cli.cron.cancel_help"))
+    cron_cancel.add_argument("job_id", help=_t("cli.cron.cancel_job_id_help"))
     cron_cancel.add_argument(
-        "--reason", help="Optional note recorded with the cancelled run")
+        "--reason", help=_t("cli.cron.cancel_reason_help"))
 
     cron_remove = cron_subparsers.add_parser(
         "remove", aliases=["rm", "delete"], help="Remove a scheduled job")

@@ -119,6 +119,7 @@ def build_gateway_parser(
     add_accept_hooks_flag(gateway_parser)
 
     from hermes_cli.gateway_runtime_cli import cmd_gateway_attach, cmd_gateway_ensure
+    from agent.i18n import t as _t
     gateway_ensure = gateway_subparsers.add_parser(
         "ensure", json_verb="ensure",
         help="Ensure a local runtime without installing or replacing a service",
@@ -132,20 +133,15 @@ def build_gateway_parser(
 
     gateway_attach = gateway_subparsers.add_parser(
         "attach", json_verb="attach",
-        help="Attach a local client: the gateway's WebSocket URL and a single-use session ticket",
-        description="Print the WebSocket URL of the gateway serving this profile and one single-use "
-                    "session ticket for it, for a local client that dials /api/ws itself. The ticket "
-                    "is a credential: it is printed for the calling process only, never logged, and "
-                    "expires 30 seconds after it is minted.",
-        epilog="Exit codes: 0 attached; 2 invalid invocation; otherwise the exit code "
-               "`hermes gateway ensure` gives the same verdict.")
-    _flag(gateway_attach, "--json", help="Emit one JSON result (default)")
+        help=_t("cli.gateway.attach_help"),
+        description=_t("cli.gateway.attach_description"),
+        epilog=_t("cli.gateway.attach_epilog"))
+    _flag(gateway_attach, "--json", help=_t("cli.gateway.attach_json_help"))
     attach_mode = gateway_attach.add_mutually_exclusive_group()
-    _flag(attach_mode, "--start", help="Start the gateway when none serves this profile")
-    _flag(attach_mode, "--recover",
-        help="Discover first; start (or replace an older Hermes's) gateway only when it is not ready")
+    _flag(attach_mode, "--start", help=_t("cli.gateway.attach_start_help"))
+    _flag(attach_mode, "--recover", help=_t("cli.gateway.attach_recover_help"))
     gateway_attach.add_argument("--timeout", default="60",
-                                help="Start deadline in seconds for --start/--recover (default: 60)")
+                                help=_t("cli.gateway.attach_timeout_help"))
     gateway_attach.set_defaults(func=cmd_gateway_attach)
 
     gateway_start = gateway_subparsers.add_parser(

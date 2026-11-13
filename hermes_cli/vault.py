@@ -248,6 +248,8 @@ def _set_key_storage(value: str) -> None:
 
 def register_cli(subparser) -> None:
     """Build the ``hermes vault`` argparse tree (called from main.py)."""
+    from agent.i18n import t as _t
+
     subs = subparser.add_subparsers(dest="vault_action")
 
     p_add = subs.add_parser(
@@ -273,12 +275,13 @@ def register_cli(subparser) -> None:
     group.add_argument("--enable", metavar="NAME", help="Undo --disable")
     p_src.set_defaults(_vault_handler=_cmd_sources)
 
-    p_key = subs.add_parser("key", help="Show where the local vault key is stored (vault.key file or OS keychain)")
+    p_key = subs.add_parser("key", help=_t("cli.vault.key_help"))
     p_key.set_defaults(_vault_handler=_cmd_key, to=None)
     key_subs = p_key.add_subparsers(dest="vault_key_action")
     p_migrate = key_subs.add_parser(
-        "migrate", help="Move the vault key to the OS keychain or back to vault.key (verified before the old copy is removed)")
-    p_migrate.add_argument("--to", choices=["keychain", "file"], required=True, help="Destination for the key")
+        "migrate", help=_t("cli.vault.key_migrate_help"))
+    p_migrate.add_argument("--to", choices=["keychain", "file"], required=True,
+                           help=_t("cli.vault.key_migrate_to_help"))
     p_migrate.set_defaults(_vault_handler=_cmd_key)
 
 

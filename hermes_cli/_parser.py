@@ -143,6 +143,8 @@ For more help on a command:
 
 def _add_top_level_flags(parser: argparse.ArgumentParser) -> None:
     """Top-level (pre-subcommand) flags; ``-m/--provider`` pair with ``-z`` without ``chat``."""
+    from agent.i18n import t as _t
+
     add, inherited = parser.add_argument, _inherited_flag
     add("--version", "-V", action="store_true", help="Show version and exit")
     add("-z", "--oneshot", metavar="PROMPT", default=None, help=(
@@ -156,10 +158,7 @@ def _add_top_level_flags(parser: argparse.ArgumentParser) -> None:
         "(estimated cost, token counts, model, api_calls) to PATH. "
         "The report is written even when the run fails, so pipelines "
         "can always account for spend. No effect outside -z/--oneshot."))
-    add("--cpu-profile", metavar="PATH", default=None, help=(
-        "Profile this process with cProfile and write PATH (pstats) plus PATH.txt (top functions) "
-        "on exit. A relative PATH goes under the profile's logs/profiles/. Adds overhead for as "
-        "long as the process runs; under --tui it profiles the launcher, not the agent backend."))
+    add("--cpu-profile", metavar="PATH", default=None, help=_t("cli.main.cpu_profile_help"))
     # --model / --provider are accepted at the top level so they can pair with -z without the
     # `chat` subcommand; if neither -z nor a subcommand consumes them, they fall through as None.
     inherited(parser, "-m", "--model", default=None, help=(
