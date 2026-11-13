@@ -238,6 +238,9 @@ class Platform(Enum):
     WEIXIN = "weixin"
     BLUEBUBBLES = "bluebubbles"
     QQBOT = "qqbot"
+    # CN (K-40): yuanbao stays a bundled CN platform — upstream removed the member
+    # when it moved Yuanbao to an external plugin; CN keeps it self-maintained.
+    YUANBAO = "yuanbao"
     RELAY = "relay"  # generic relay adapter fronted by the connector (EXPERIMENTAL)
 
     @classmethod
