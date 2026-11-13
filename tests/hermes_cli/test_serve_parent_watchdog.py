@@ -150,6 +150,12 @@ def test_parent_watchdog_treats_empty_marker_env_as_absent(monkeypatch):
             except SystemExit:
                 pass
 
+        def is_alive(self):
+            return False  # run inline: already finished
+
+        def join(self, timeout=None):
+            pass
+
     monkeypatch.setattr(web_server_lifecycle.threading, "Thread", _Thread)
     web_server_lifecycle._start_parent_death_watchdog()
     assert seen["args"] == (4242, None)

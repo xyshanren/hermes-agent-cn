@@ -18,6 +18,9 @@ class _Thread:
     def start(self):
         self.started = True
 
+    def is_alive(self):
+        return False  # joined inline on start
+
     def join(self):
         self.target()
 

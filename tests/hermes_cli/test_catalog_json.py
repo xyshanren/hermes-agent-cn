@@ -139,6 +139,12 @@ def test_first_refresh_is_due_shortly_after_boot(monkeypatch):
         def start(self):
             started.append(self._target)
 
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
     monkeypatch.setattr(cat, "threading", SimpleNamespace(Thread=_Thread))
     cat.refresh_catalog_soon()
     assert started == [cat.refresh_catalog]

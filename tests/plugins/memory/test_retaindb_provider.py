@@ -54,6 +54,12 @@ def test_prefetch_does_not_spawn_when_previous_batch_is_alive(monkeypatch):
         def start(self):
             pass
 
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
     monkeypatch.setattr(retaindb.threading, "Thread", _Thread)
     provider.queue_prefetch("query")
     assert provider._prefetch_threads == [previous]

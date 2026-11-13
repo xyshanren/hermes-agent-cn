@@ -31,6 +31,12 @@ def test_prompt_toolkit_model_picker_defers_confirmation_off_key_handler(monkeyp
         def start(self):
             captured["started"] = True
 
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
     monkeypatch.setattr(cli_mod.threading, "Thread", _Thread)
 
     self_ = SimpleNamespace(

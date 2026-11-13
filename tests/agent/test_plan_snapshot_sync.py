@@ -57,6 +57,12 @@ def wired(monkeypatch):
         def start(self):
             self.target(*self.args)
 
+        def is_alive(self):
+            return False  # run inline: already finished
+
+        def join(self, timeout=None):
+            pass
+
     monkeypatch.setattr(sync.threading, "Thread", _Thread)
     return calls, box
 
