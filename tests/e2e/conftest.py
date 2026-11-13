@@ -135,13 +135,24 @@ _ensure_telegram_mock()
 _ensure_discord_mock()
 _ensure_slack_mock()
 
-import discord
-from plugins.platforms.telegram.adapter import TelegramAdapter
-from plugins.platforms.discord.adapter import DiscordAdapter
-
-import plugins.platforms.slack.adapter as _slack_mod
-_slack_mod.SLACK_AVAILABLE = True
-from plugins.platforms.slack.adapter import SlackAdapter
+# CN (subtraction): the overseas platform plugins are cut, so the adapter imports
+# degrade to None — the platform-generic factories below stay importable, and
+# make_adapter/make_*_adapter raise a clear error only if a test actually
+# instantiates a cut platform's adapter.
+try:
+    from plugins.platforms.telegram.adapter import TelegramAdapter
+except ImportError:  # CN subtraction
+    TelegramAdapter = None
+try:
+    from plugins.platforms.discord.adapter import DiscordAdapter
+except ImportError:  # CN subtraction
+    DiscordAdapter = None
+try:
+    import plugins.platforms.slack.adapter as _slack_mod
+    _slack_mod.SLACK_AVAILABLE = True
+    from plugins.platforms.slack.adapter import SlackAdapter
+except ImportError:  # CN subtraction
+    SlackAdapter = None
 
 
 # Platform-generic factories
