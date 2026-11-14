@@ -265,6 +265,11 @@ from hermes_cli.subcommands.profile import build_profile_parser
 from hermes_cli.subcommands.routing import build_routing_parser
 from hermes_cli.subcommands.model import build_model_parser
 from hermes_cli.subcommands.setup import build_setup_parser
+# CN: re-registered 2026-11-14 — the v0.23.1 base bump replaced main.py with
+# upstream's and dropped both (same regression class as a08bfd8463). See
+# docs/upstream-decisions.md K-71.
+from hermes_cli.subcommands.quickstart import build_quickstart_parser
+from hermes_cli.subcommands.local_models import build_local_models_parser
 
 from hermes_cli.subcommands.whatsapp import build_whatsapp_parser, build_whatsapp_cloud_parser
 from hermes_cli.subcommands.login import build_login_parser
@@ -714,6 +719,108 @@ from hermes_cli.model_setup_flows import (
 )
 from hermes_cli.model_setup_flows_local import _model_flow_local
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# CN CAND-085: AIMC startup gate.
+#
+# Iron law 4 is "startup is fail-fast": when the operator routes the main model
+# through AIMC (``model.default`` is a ``tier:``/``scene:`` group), the group
+# catalog must refresh successfully before the process serves any turn. Skipped
+# silently when:
+#   - config has no ``aimc`` block (default)
+#   - ``aimc.enabled`` is not truthy
+#   - ``model.default`` doesn't start with ``tier:`` or ``scene:``
+#
+# Restored 2026-11-14 from c24dc42648 — the v0.22 base bump's main.py rewrite
+# dropped both this function and its module-level call while the tests kept
+# importing it (K-71 P3d).
+# -----------------------------------------------------------------------------
+def _initialize_aimc_client_or_fail() -> None:
+    """Synchronously refresh AIMC group catalog at startup (CAND-085).
+
+    Skipped silently when AIMC is not enabled. Raises RuntimeError on
+    any refresh failure — the caller's process should exit with that
+    message so the operator notices the problem instead of running
+    on a stale / empty group cache.
+    """
+    try:
+        from hermes_cli.config import load_config as _load_config_for_aimc
+        cfg = _load_config_for_aimc()
+    except Exception:
+        # Config load already raised if the file is broken; this catches
+        # the "no config file yet" case (first-run, doctor, etc.) where
+        # AIMC is obviously not configured.
+        return
+
+    aimc_block = cfg.get("aimc") or {}
+    if not isinstance(aimc_block, dict) or not aimc_block.get("enabled"):
+        return
+
+    # Only block startup if the main model is actually an AIMC group.
+    # Otherwise the user is just running a normal hermes command and
+    # AIMC is irrelevant.
+    # `model` is a dict ({default, provider}) in every config the
+    # quickstart / setup wizard / auth writer produces — read
+    # model.default, same as main.py's own wizard-detection code does.
+    main_model_cfg = cfg.get("model")
+    if isinstance(main_model_cfg, dict):
+        main_model = str(main_model_cfg.get("default") or "").strip()
+    elif isinstance(main_model_cfg, str):
+        main_model = main_model_cfg.strip()
+    else:
+        main_model = ""
+    if not (main_model.startswith("tier:") or main_model.startswith("scene:")):
+        return
+
+    providers = cfg.get("providers") or {}
+    aimc_provider = providers.get("aimc") if isinstance(providers, dict) else None
+    if not isinstance(aimc_provider, dict):
+        logger.warning(
+            "CAND-085: aimc.enabled is true and model=%r is an AIMC group, "
+            "but providers.aimc is missing — add providers.aimc.{base_url,api_key} "
+            "to config.yaml. Skipping refresh (startup continues, AIMC calls "
+            "will fail at request time).",
+            main_model,
+        )
+        return
+
+    base_url = str(aimc_provider.get("base_url") or "").strip()
+    api_key = str(aimc_provider.get("api_key") or "").strip()
+    if not base_url:
+        logger.warning(
+            "CAND-085: providers.aimc.base_url is empty — skipping refresh."
+        )
+        return
+
+    # Iron law 1+4: synchronous refresh; raise on any HTTP error.
+    try:
+        import asyncio
+
+        from aimc_client import AIMCClient
+        client = AIMCClient(base_url=base_url, api_key=api_key, timeout=30.0)
+        try:
+            asyncio.run(client.refresh())
+        finally:
+            asyncio.run(client.aclose())
+    except Exception as exc:
+        raise RuntimeError(
+            f"CAND-085: AIMC refresh failed at startup ({type(exc).__name__}: {exc}). "
+            f"Refusing to start with an empty/stale AIMC group cache. Fix the "
+            f"gateway (or set aimc.enabled: false in config.yaml) and retry."
+        ) from exc
+
+    logger.info("CAND-085: AIMC group catalog refreshed at startup (base_url=%s)", base_url)
+
+
+try:
+    _initialize_aimc_client_or_fail()
+except RuntimeError:
+    # Re-raise — fail-fast is the explicit contract here. We do NOT wrap
+    # in `except: pass` the way logging setup does.
+    raise
+
+
 from hermes_cli.main_agent_cmds import (
     cmd_acp,
     cmd_insights,
@@ -1794,6 +1901,10 @@ def _forward_command(name: str, module: str, attr: str, *, forward_return: bool 
 
 
 cmd_setup = _forward_command("cmd_setup", "hermes_cli.setup", "run_setup_wizard", doc='Interactive setup wizard.')
+cmd_quickstart = _forward_command(
+    "cmd_quickstart", "hermes_cli.quickstart", "cmd_quickstart",
+    forward_return=True, doc='CN one-shot quickstart: detect resources and configure layered routing.',
+)
 cmd_login = _forward_command("cmd_login", "hermes_cli.auth", "login_command", doc='Authenticate Hermes CLI with a provider.')
 cmd_logout = _forward_command("cmd_logout", "hermes_cli.auth", "logout_command", doc='Clear provider authentication.')
 cmd_auth = _forward_command("cmd_auth", "hermes_cli.auth_commands", "auth_command", doc='Manage pooled credentials.')
@@ -3291,6 +3402,10 @@ def _build_cli_parser():
         logger.debug("LSP CLI registration failed: %s", _lsp_err)
 
     build_setup_parser(subparsers, cmd_setup=cmd_setup)
+    # CN: quickstart (layered-routing wizard) + local-models (offline model
+    # management). Both dropped by the v0.23.1 base bump; see K-71.
+    build_quickstart_parser(subparsers, cmd_quickstart=cmd_quickstart)
+    build_local_models_parser(subparsers)
     build_whatsapp_parser(subparsers, cmd_whatsapp=cmd_whatsapp)
     build_whatsapp_cloud_parser(subparsers, cmd_whatsapp_cloud=cmd_whatsapp_cloud)
 
