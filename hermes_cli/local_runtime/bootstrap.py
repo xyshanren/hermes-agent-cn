@@ -55,11 +55,46 @@ def _detect_gpu_vendor() -> str | None:
 
 
 def models_dir() -> Path:
-    """Machine-scoped, deliberately NOT profile-scoped: a 20 GB GGUF is a machine asset, and every
-    profile shares the one managed server that serves it (same rule as runtimes_root())."""
+    """Servable GGUF directory — ``local_runtime.models_dir`` or ``<hermes home>/models``.
+
+    Machine-scoped, deliberately NOT profile-scoped: a 20 GB GGUF is a machine asset, and every
+    profile shares the one managed server that serves it (same rule as runtimes_root()). The config
+    key exists so an existing library (including a WSL / Windows share) can be reused in place;
+    ``HERMES_MODELS_DIR`` stays as the headless/container fallback and loses to the config key."""
+    configured = _configured_models_dir()
+    if configured is not None:
+        return configured
     from hermes_constants import get_default_hermes_root
 
     return get_default_hermes_root() / "models"
+
+
+def _configured_models_dir() -> Path | None:
+    """Absolute ``local_runtime.models_dir`` (else ``HERMES_MODELS_DIR``); None means default.
+
+    Relative or unresolvable values fall through to the default instead of breaking every model
+    listing — a typo in config must not make the runtime unstartable."""
+    from hermes_cli.config import load_config_readonly
+
+    try:
+        section = load_config_readonly().get("local_runtime") or {}
+    except Exception:
+        # Config loading is a boundary: a broken/missing config must not make
+        # models_dir() raise for every caller.
+        logger.debug("local_runtime models_dir probe failed", exc_info=True)
+        section = {}
+    raw = str((section or {}).get("models_dir") or "").strip()
+    if not raw:
+        import os
+
+        raw = os.environ.get("HERMES_MODELS_DIR", "").strip()
+    if not raw:
+        return None
+    try:
+        path = Path(raw).expanduser()
+    except (OSError, RuntimeError):
+        return None
+    return path if path.is_absolute() else None
 
 
 def assets_dir() -> Path:

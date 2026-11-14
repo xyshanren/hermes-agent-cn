@@ -298,14 +298,8 @@ def test_aimc_primary_reasoning_rule_uses_reasoning_model():
     from hermes_cli import quickstart
 
     rules = quickstart._generate_routing_rules(
-        api_providers=[],
-        local_backends=[],
         primary_provider="aimc",
         primary_model="tier:balanced",
-        ollama_info={
-            "classified_models": [{"name": "qwen3-vl:2b", "type": "vision"}],
-            "vision_model": "qwen3-vl:2b",
-        },
         reasoning_model="tier:strong",
     )
 
@@ -327,8 +321,6 @@ def test_aimc_primary_without_reasoning_model_falls_back_to_primary():
     from hermes_cli import quickstart
 
     rules = quickstart._generate_routing_rules(
-        api_providers=[],
-        local_backends=[],
         primary_provider="aimc",
         primary_model="tier:balanced",
     )
@@ -336,21 +328,16 @@ def test_aimc_primary_without_reasoning_model_falls_back_to_primary():
     assert reasoning["model"] == "tier:balanced"
 
 
-def test_non_aimc_primary_still_emits_ollama_vision_rule():
+def test_local_runtime_primary_does_not_emit_vision_rule():
     from hermes_cli import quickstart
 
     rules = quickstart._generate_routing_rules(
-        api_providers=[],
-        local_backends=[],
-        primary_provider="ollama",
-        primary_model="minicpm5:2b",
-        ollama_info={
-            "classified_models": [{"name": "qwen3-vl:2b", "type": "vision"}],
-            "vision_model": "qwen3-vl:2b",
-        },
+        primary_provider="llamacpp",
+        primary_model="Qwen3-8B-Q4_K_M",
+        vision_model="deepseek-vl",
+        vision_provider="deepseek",
     )
-    vision = next((r for r in rules if r["name"] == "vision"), None)
-    assert vision is not None and vision["model"] == "qwen3-vl:2b"
+    assert "vision" not in [r["name"] for r in rules]
 
 
 # ---------------------------------------------------------------------------
@@ -367,13 +354,20 @@ def test_write_smart_routing_aimc_writes_strong_rule_and_no_dangling_warning(
         "tier:balanced",
         fallback_chain=[
             {
-                "provider": "ollama",
-                "model": "minicpm5:2b",
-                "base_url": "http://172.28.64.1:11434/v1",
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
             }
         ],
-        api_providers=[],
-        ollama_info={"models": ["minicpm5:2b"], "classified_models": []},
+        api_providers=[
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "env_var": "DEEPSEEK_API_KEY",
+                "default_model": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+            }
+        ],
         aimc_info={"available": True, "base_url": "http://127.0.0.1:8080", "groups": set()},
     )
     assert ok
@@ -387,27 +381,7 @@ def test_write_smart_routing_aimc_writes_strong_rule_and_no_dangling_warning(
     assert rules["reasoning"]["model"] == "tier:strong"
     assert rules["default"]["model"] == "tier:balanced"
     assert cfg["model_routing"]["reasoning"]["model"] == "tier:strong"  # legacy 键同步
-    assert cfg["fallback_model"][0]["provider"] == "ollama"
-    assert cfg["fallback_model"][0]["base_url"] == "http://172.28.64.1:11434/v1"
-
-
-def test_write_smart_routing_embedded_fallback_not_flagged_dangling(
-    hermes_home, capsys
-):
-    from hermes_cli import quickstart
-
-    ok = quickstart._write_smart_routing(
-        "aimc",
-        "tier:balanced",
-        fallback_chain=[{"provider": "embedded", "model": "minicpm5-1b"}],
-        api_providers=[],
-        aimc_info={"available": True, "base_url": "http://127.0.0.1:8080", "groups": set()},
-    )
-    assert ok
-
-    out = capsys.readouterr().out
-    # embedded 是内置离线层，无需 providers 段 — 不算悬挂
-    assert "未定义的" not in out
+    assert cfg["fallback_model"][0]["provider"] == "deepseek"
 
 
 def test_write_smart_routing_still_warns_on_genuinely_dangling_entry(
@@ -432,62 +406,49 @@ def test_write_smart_routing_still_warns_on_genuinely_dangling_entry(
 # A7 — _build_fallback_chain
 # ---------------------------------------------------------------------------
 
-def test_fallback_chain_prefers_chat_model_and_skips_embedded_when_ollama(
-    monkeypatch,
-):
+def test_fallback_chain_keeps_non_primary_cloud_provider(monkeypatch):
     from hermes_cli import quickstart
 
-    monkeypatch.setattr(
-        quickstart, "_get_ollama_base_url",
-        lambda: "http://172.28.64.1:11434/v1",
-    )
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
 
     chain = quickstart._build_fallback_chain(
-        api_providers=[],
-        ollama_info={
-            "models": ["bge-m3", "paddleocr-vl:1.6", "glm-ocr", "qwen3-vl:2b", "minicpm5:2b"],
-        },
-        has_embedded=True,
+        api_providers=[
+            {"id": "aimc", "default_model": "tier:balanced"},
+            {"id": "deepseek", "default_model": "deepseek-v4-flash"},
+        ],
         primary_provider_id="aimc",
     )
 
-    providers = [e["provider"] for e in chain]
-    assert providers == ["ollama"], f"embedded 必须让位给 Ollama 兜底, got {providers!r}"
-    entry = chain[0]
-    # OCR / embedding / vision 都不选，minicpm5:2b 是唯一通用对话模型
-    assert entry["model"] == "minicpm5:2b"
-    assert entry["base_url"] == "http://172.28.64.1:11434/v1"
+    assert chain == [{"provider": "deepseek", "model": "deepseek-v4-flash"}]
 
 
-def test_fallback_chain_keeps_embedded_when_no_ollama(monkeypatch):
+def test_fallback_chain_local_primary_keeps_cloud_providers(monkeypatch):
     from hermes_cli import quickstart
 
-    monkeypatch.setattr(
-        "hermes_cli.model_manager.get_available_embedded_model",
-        lambda: "minicpm5-1b",
-    )
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
 
     chain = quickstart._build_fallback_chain(
-        api_providers=[],
-        ollama_info=None,
-        has_embedded=True,
+        api_providers=[{"id": "deepseek", "default_model": "deepseek-v4-flash"}],
+        primary_provider_id="llamacpp",
+    )
+
+    assert chain == [{"provider": "deepseek", "model": "deepseek-v4-flash"}]
+
+
+def test_fallback_chain_skips_vision_only_models(monkeypatch):
+    from hermes_cli import quickstart
+
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
+
+    chain = quickstart._build_fallback_chain(
+        api_providers=[
+            {"id": "deepseek", "default_model": "deepseek-v4-flash"},
+            {"id": "zai", "default_model": "qwen2.5-vl-7b"},
+        ],
         primary_provider_id="aimc",
     )
 
-    assert chain == [{"provider": "embedded", "model": "minicpm5-1b"}]
-
-
-def test_fallback_chain_aimc_as_cloud_fallback_when_not_primary():
-    from hermes_cli import quickstart
-
-    chain = quickstart._build_fallback_chain(
-        api_providers=[{"id": "aimc", "default_model": "tier:balanced"}],
-        ollama_info=None,
-        has_embedded=False,
-        primary_provider_id="ollama",
-    )
-
-    assert chain == [{"provider": "aimc", "model": "tier:balanced"}]
+    assert chain == [{"provider": "deepseek", "model": "deepseek-v4-flash"}]
 
 
 # ---------------------------------------------------------------------------

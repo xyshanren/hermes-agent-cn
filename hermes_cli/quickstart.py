@@ -1,13 +1,14 @@
 """
 Hermes-Agent-CN 快捷启动 — 智能路由配置。
 
-快速检测所有可用资源（API Key + Ollama + 本地离线模型），
-自动配置三层智能路由：
-  1. Ollama（本地主力推理）
-  2. 云端 API（降级 / 复杂任务）
-  3. 嵌入式本地模型（断网兜底）
+快速检测可用资源（国产云 API Key + AIMC 网关 + local_runtime 托管模型），
+自动配置主力模型与路由规则：
+  1. AIMC 网关（tier 路由组）
+  2. 云端 API（主力 / 降级）
+  3. local_runtime 托管本地模型（唯一本地档）
 
-如果三样都没有，引导安装本地离线模型。
+其它本地模型服务（Ollama / LM Studio / vLLM 等）不再由 quickstart
+探测，需要时用 `hermes model` 的自定义 provider 流程。
 """
 
 from __future__ import annotations
@@ -18,6 +19,13 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+from hermes_cli.quickstart_local_runtime import (
+    _configure_local_runtime,
+    _count_available_resources,
+    _detect_local_runtime_models,
+    _report_and_maybe_configure_local_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -617,20 +625,6 @@ def _detect_aimc() -> Optional[dict]:
     return None
 
 
-def _has_embedded_models() -> bool:
-    """检查是否已安装本地离线模型。"""
-    try:
-        from hermes_cli.model_manager import is_installed
-
-        return (
-            is_installed("qwen-0.5b")
-            or is_installed("qwen-coder-1.5b")
-            or is_installed("minicpm5-1b")
-        )
-    except Exception:
-        return False
-
-
 # ── 本地 OpenAI 兼容服务器检测（LM Studio / llama.cpp / FastLLM / vLLM / LocalAI 等）──
 #
 # 新后端接入模板:
@@ -1076,56 +1070,6 @@ def _configure_provider(provider: dict) -> bool:
         return False
 
 
-def _configure_ollama(ollama_info: dict) -> bool:
-    """将 Ollama 配置写入 config.yaml。"""
-    default_model = ollama_info.get("default_model", "llama3.2")
-    try:
-        from hermes_cli.auth import _update_config_for_provider
-
-        _update_config_for_provider(
-            "ollama",
-            _get_ollama_base_url(),
-            default_model=default_model,
-        )
-        from hermes_cli.config import load_config, save_config
-
-        cfg = load_config()
-        model = cfg.get("model", {})
-        if isinstance(model, dict):
-            model["default"] = default_model
-            cfg["model"] = model
-            save_config(cfg)
-        return True
-    except Exception as e:
-        logger.warning("配置 Ollama 失败: %s", e)
-        return False
-
-
-def _configure_embedded() -> bool:
-    """将嵌入式推理配置写入 config.yaml。"""
-    try:
-        from hermes_cli.auth import _update_config_for_provider
-
-        _update_config_for_provider(
-            "embedded",
-            "",
-            default_model="qwen-0.5b",
-        )
-        from hermes_cli.config import load_config, save_config
-
-        cfg = load_config()
-        model = cfg.get("model", {})
-        if isinstance(model, dict):
-            model["default"] = "qwen-0.5b"
-            model["provider"] = "embedded"
-            cfg["model"] = model
-            save_config(cfg)
-        return True
-    except Exception as e:
-        logger.warning("配置嵌入式推理失败: %s", e)
-        return False
-
-
 def _configure_aimc(aimc_info: dict) -> bool:
     """将 AIMC 网关写入 config.yaml（CAND-085 一等公民化）。
 
@@ -1246,22 +1190,14 @@ def _get_provider_model(cfg: dict, provider_id: str, default_model: str) -> str:
 
 def _build_fallback_chain(
     api_providers: list[dict],
-    ollama_info: Optional[dict],
-    has_embedded: bool,
     primary_provider_id: str,
-    local_server_infos: Optional[list[dict]] = None,
 ) -> list[dict]:
-    """构建 fallback_model 链。
+    """构建 fallback_model 链：云端 / AIMC 非主力 provider。
 
-    规则：
-    - 已作为主力的 provider + 模型不放 fallback
-    - 云端 API 作为第一 fallback
-    - Ollama 非 vision 模型作为 fallback（如果 Ollama 有多个模型且是主力）
-    - LM Studio / llama.cpp 作为本地 fallback
-    - 嵌入式模型始终放最后（断网兜底）
+    本地兜底由 local_runtime 自己的 provider 解析承担，这里不再合成
+    Ollama / LM Studio / llama.cpp / embedded 条目（K-71 简化）。
     """
     chain: list[dict] = []
-    local_server_infos = local_server_infos or []
 
     # 云端 API providers（排除主力），优先用用户已配置的模型
     from hermes_cli.config import load_config
@@ -1280,66 +1216,12 @@ def _build_fallback_chain(
                 "model": provider_model,
             })
 
-    # Ollama（如果不是主力）— 优先选通用对话模型（排除 embedding /
-    # OCR 专用模型，有纯文本模型时不选视觉模型），同池取参数规模最大
-    if ollama_info and primary_provider_id != "ollama":
-        all_models = ollama_info.get("models", [])
-        if all_models:
-            chat_models = [
-                m for m in all_models
-                if not any(kw in m.lower() for kw in ("embed", "ocr"))
-            ]
-            non_vision = [
-                m for m in chat_models
-                if _classify_ollama_model(m) != "vision"
-            ]
-            pool = non_vision or chat_models
-            if pool:
-                best = max(pool, key=_get_param_size)
-                chain.append({
-                    "provider": "ollama",
-                    "model": best,
-                    "base_url": _get_ollama_base_url(),
-                })
-    elif ollama_info and primary_provider_id == "ollama":
-        # Ollama 是主力但有多个模型 — 将非 vision 非主力模型加入 fallback
-        primary_model = ollama_info["default_model"]
-        for m in ollama_info.get("models", []):
-            if "embed" in m.lower():
-                continue
-            m_type = _classify_ollama_model(m)
-            if m != primary_model and m_type not in ("vision", "coding"):
-                chain.append({
-                    "provider": "ollama",
-                    "model": m,
-                    "base_url": _get_ollama_base_url(),
-                })
-                break  # 只加一个 Ollama fallback
-
-    # 嵌入式模型放最后（断网兜底）。Ollama 兜底已就位时不再叠加 ——
-    # 用户要求以 Windows 侧 Ollama 为兜底，embedded 仅在完全无
-    # Ollama 时保留。
-    if has_embedded and not any(e.get("provider") == "ollama" for e in chain):
-        try:
-            from hermes_cli.model_manager import get_available_embedded_model
-
-            embedded_model = get_available_embedded_model() or "qwen-0.5b"
-        except Exception:
-            embedded_model = "qwen-0.5b"
-        chain.append({
-            "provider": "embedded",
-            "model": embedded_model,
-        })
-
     return chain
 
 
 def _generate_routing_rules(
-    api_providers: list[dict],
-    local_backends: list[dict],
     primary_provider: str,
     primary_model: str,
-    ollama_info: Optional[dict] = None,
     vision_model: Optional[str] = None,
     vision_provider: Optional[str] = None,
     reasoning_model: Optional[str] = None,
@@ -1393,25 +1275,16 @@ def _generate_routing_rules(
     ``"name": "default"`` rule (callers depend on this for the
     old-format keys ``model_routing.{default,vision,reasoning}``).
     """
-    is_cloud_primary = primary_provider not in ("ollama", "custom", "embedded", "")
+    is_cloud_primary = primary_provider not in ("llamacpp", "custom", "")
     is_aimc_primary = _is_aimc_group(primary_model)
     rules: list[dict] = []
 
     # --- vision ----------------------------------------------------------
-    # Prefer an Ollama vision model (sits on the local server, can
-    # answer "has_image" prompts without going to the cloud). Fall
-    # back to the cloud provider's vision model if cloud-primary.
-    # AIMC-group primaries skip both branches: an Ollama vision model
-    # under model.provider=aimc is a cross-provider rule (the group id
-    # would be sent to AIMC verbatim and fail), and image analysis is
-    # already owned by auxiliary.vision (tier:vision) in that setup.
-    if ollama_info and ollama_info.get("vision_model") and not is_aimc_primary:
-        rules.append({
-            "name": "vision",
-            "match": {"has_image": True},
-            "model": ollama_info["vision_model"],
-        })
-    elif is_cloud_primary and not is_aimc_primary and vision_provider and vision_model:
+    # Cloud-primary only: the provider's own vision model answers has_image
+    # prompts. AIMC-group primaries skip it — image analysis is already owned
+    # by auxiliary.vision (tier:vision) in that setup, and a cross-provider
+    # rule would send a foreign model id to AIMC verbatim.
+    if is_cloud_primary and not is_aimc_primary and vision_provider and vision_model:
         rules.append({
             "name": "vision",
             "match": {"has_image": True},
@@ -1431,59 +1304,6 @@ def _generate_routing_rules(
         "model": reasoning_model or primary_model,
     })
 
-    # --- coding ----------------------------------------------------------
-    # Only emit when the local backend has a coding-named model AND
-    # the primary is local. Sending a bare local model name to a
-    # cloud provider would 404; the existing is_cloud_primary guard
-    # protects against that.
-    classified = (
-        ollama_info.get("classified_models", []) if ollama_info else []
-    )
-    coding_models = [
-        m for m in classified
-        if any(
-            kw in m.get("name", "").lower()
-            for kw in ("coder", "code-")
-        )
-    ]
-    if coding_models and not is_cloud_primary:
-        rules.append({
-            "name": "coding",
-            "match": {
-                "keywords": [
-                    "写代码", "函数", "class", "debug",
-                    "实现一个", "编程", "refactor", "coding",
-                ],
-                "threshold": 1,
-            },
-            "model": coding_models[0]["name"],
-        })
-
-    # --- short_chat ------------------------------------------------------
-    # Local-only: route short prompts to a small (≤ 8B) local model.
-    # Cloud-primary skips this so the cloud isn't accidentally hit with
-    # a bare local model name (which the engine would fail to resolve).
-    if not is_cloud_primary and ollama_info:
-        text_models = [
-            m for m in classified if m.get("type") != "vision"
-        ]
-        small_models = [
-            m for m in text_models
-            if _get_local_model_param_size(m["name"]) <= 8.0
-            and m["name"] != primary_model
-        ]
-        if small_models:
-            rules.append({
-                "name": "short_chat",
-                "match": {
-                    "max_length": 80,
-                    "exclude_keywords": [
-                        "bug", "报错", "crash", "fix", "error", "分析",
-                    ],
-                },
-                "model": small_models[0]["name"],
-            })
-
     # --- default (always last) -----------------------------------------
     rules.append({
         "name": "default",
@@ -1497,8 +1317,6 @@ def _write_smart_routing(
     primary_model: str,
     fallback_chain: list[dict],
     api_providers: list[dict],
-    ollama_info: Optional[dict] = None,
-    local_server_infos: Optional[list[dict]] = None,
     aimc_info: Optional[dict] = None,
 ) -> bool:
     """将智能路由配置写入 config.yaml。
@@ -1509,14 +1327,6 @@ def _write_smart_routing(
         from hermes_cli.config import load_config, save_config, save_env_value
 
         cfg = load_config()
-        local_server_infos = local_server_infos or []
-
-        # 查找主力对应的本地服务信息（如果主力是 LM Studio / llama.cpp）
-        primary_local_info = None
-        for li in local_server_infos:
-            if li.get("provider_id") == primary_provider_id:
-                primary_local_info = li
-                break
 
         # 写入主力模型
         model_cfg = cfg.get("model", {})
@@ -1524,14 +1334,6 @@ def _write_smart_routing(
             model_cfg = {}
         model_cfg["default"] = primary_model
         model_cfg["provider"] = primary_provider_id
-        # 恢复 Ollama 的 base_url — 云 Provider 配置（如 deepseek）
-        # 会覆写 model.base_url，导致后续 provider=custom 时读取到错误 URL
-        if primary_provider_id == "ollama":
-            model_cfg["base_url"] = _get_ollama_base_url()
-        elif primary_local_info:
-            # LM Studio / llama.cpp 使用 custom provider + base_url
-            model_cfg["provider"] = "custom"
-            model_cfg["base_url"] = primary_local_info.get("base_url", "")
         cfg["model"] = model_cfg
 
         # 写入 fallback 链
@@ -1568,21 +1370,6 @@ def _write_smart_routing(
                         vision_base_url = p.get("base_url", "")
                         break
 
-            if not vision_model and ollama_info:
-                vision_model = ollama_info.get("vision_model")
-                if vision_model:
-                    vision_provider = "ollama"
-                    vision_base_url = _get_ollama_base_url()
-
-        if not vision_model and local_server_infos:
-            for li in local_server_infos:
-                vm = li.get("vision_model")
-                if vm:
-                    vision_model = vm
-                    vision_provider = "custom"
-                    vision_base_url = li.get("base_url", "")
-                    break
-
         if vision_model and vision_provider:
             aux = cfg.setdefault("auxiliary", {})
             if not isinstance(aux, dict):
@@ -1600,35 +1387,9 @@ def _write_smart_routing(
                 }
 
         # Phase 2-3: 自动生成 model_routing 规则
-        # 确定路由来源：Ollama > LM Studio > 无
-        is_cloud_primary = primary_provider_id not in ("ollama", "custom", "embedded", "")
-        routing_source = ollama_info
-        if not routing_source and local_server_infos:
-            routing_source = local_server_infos[0]
-
         routing = cfg.get("model_routing", {})
         if not isinstance(routing, dict):
             routing = {}
-
-        # 从路由来源（Ollama/本地服务）提取分类模型，用于视觉/编码规则
-        vision_models = []
-        text_models = []
-        coding_models = []
-        small_models = []
-        if routing_source:
-            classified = routing_source.get("classified_models", [])
-            vision_models = [m for m in classified if m.get("type") == "vision"]
-            text_models = [m for m in classified if m.get("type") != "vision"]
-            coding_models = [
-                m for m in classified
-                if any(kw in m.get("name", "").lower() for kw in ("coder", "code-"))
-            ]
-            if text_models and not is_cloud_primary:
-                small_models = [
-                    m for m in text_models
-                    if _get_local_model_param_size(m["name"]) <= 8.0
-                    and m["name"] != primary_model
-                ]
 
         reasoning_model = None
         if _is_aimc_group(primary_model):
@@ -1641,11 +1402,8 @@ def _write_smart_routing(
                 reasoning_model = "tier:strong"
 
         rules = _generate_routing_rules(
-            api_providers=api_providers,
-            local_backends=local_server_infos,
             primary_provider=primary_provider_id,
             primary_model=primary_model,
-            ollama_info=ollama_info,
             vision_model=vision_model,
             vision_provider=vision_provider,
             reasoning_model=reasoning_model,
@@ -1660,12 +1418,7 @@ def _write_smart_routing(
             else:
                 routing.pop(name, None)
         cfg["model_routing"] = routing
-        logger.info(
-            "自动生成 model_routing 规则: %d 条 (vision/reasoning%s%s/default)",
-            len(rules),
-            "/coding" if coding_models else "",
-            "/short_chat" if small_models else "",
-        )
+        logger.info("自动生成 model_routing 规则: %d 条 (vision/reasoning/default)", len(rules))
 
         # CAND-083: explicit preservation of `custom_providers` (v11 legacy
         # schema) and `providers` (v12+ dict). quickstart historically did
@@ -1750,78 +1503,6 @@ def _write_smart_routing(
         return True
     except Exception as e:
         logger.warning("写入智能路由配置失败: %s", e)
-        return False
-
-
-def _write_local_backends(
-    ollama_info: Optional[dict] = None,
-    local_server_infos: Optional[list[dict]] = None,
-) -> bool:
-    """将多本地后端配置写入 config.yaml 的 local_backends 段。
-
-    SmartRouter v2 使用 local_backends 统一管理所有本地推理服务:
-      Ollama (port 11434), LM Studio (port 1234), llama.cpp (port 8080), FastLLM (port 8088)
-
-    每个后端条目包含:
-      - name: 后端名称 (ollama / lm-studio / llama-cpp / fastllm)
-      - base_url: API 地址
-      - priority: 路由优先级 (数字越小越优先)
-    """
-    try:
-        from hermes_cli.config import load_config, save_config
-
-        cfg = load_config()
-        backends = []
-        priority = 1
-
-        # Ollama
-        if ollama_info and ollama_info.get("available"):
-            backends.append({
-                "name": "ollama",
-                "base_url": _get_ollama_base_url(),
-                "priority": priority,
-            })
-            priority += 1
-
-        # LM Studio / llama.cpp / FastLLM
-        local_server_infos = local_server_infos or []
-        for li in local_server_infos:
-            if li.get("available") and li.get("base_url"):
-                backends.append({
-                    "name": li.get("name", "").lower().replace(" ", "-"),
-                    "base_url": li.get("base_url", ""),
-                    "priority": priority,
-                })
-                priority += 1
-
-        if backends:
-            # v2.1 合并模式: 保留用户手动添加的自定义后端
-            existing = cfg.get("local_backends", [])
-            if isinstance(existing, list):
-                # 已知后端名称白名单 (quickstart 管理的)
-                known_names = {"ollama", "lm-studio", "llama-cpp", "fastllm", "vllm", "localai"}
-                detected_urls = {b["name"]: b["base_url"] for b in backends}
-                for old_entry in existing:
-                    old_name = old_entry.get("name", "")
-                    # 保留非已知名称的自定义后端
-                    if old_name not in known_names:
-                        if old_entry.get("base_url", "") not in detected_urls.values():
-                            backends.append(old_entry)
-                    # 已知后端如果已离线, 保留旧配置 (不覆盖)
-                    elif old_name in known_names and not any(
-                        b["name"] == old_name and b["base_url"] for b in backends
-                    ):
-                        backends.append(old_entry)
-            cfg["local_backends"] = backends
-        else:
-            # 保留旧 local_backends (如果用户手动配置了)
-            cfg.pop("local_backends", None)
-
-        save_config(cfg)
-        logger.info("local_backends 配置已写入: %d 个后端", len(backends))
-        return True
-    except Exception as e:
-        logger.warning("写入 local_backends 配置失败: %s", e)
         return False
 
 
@@ -1932,48 +1613,6 @@ def _prompt_add_custom_backend() -> Optional[dict]:
 
 # ── 安装本地模型 ──
 
-def _prompt_install_local_model() -> int:
-    """引导用户安装本地离线模型。返回 0 成功，1 失败/跳过。"""
-    from hermes_cli.colors import Colors, color
-
-    print(f"  🔧 自动安装本地离线模型...")
-    print(f"     未检测到任何可用的 AI 资源。")
-    print(f"     将自动安装本地离线模型（约 1.58GB），无需网络即可使用。")
-    print()
-
-    if not _prompt_yes_no("确认安装？", default=True):
-        print(f"  {color('ℹ', Colors.BLUE)} 跳过安装")
-        print()
-        print(f"  您随时可以运行以下命令手动配置:")
-        print(f"    hermes local-models setup     — 安装本地模型")
-        print(f"    hermes setup                  — 配置 API Key")
-        print(f"    hermes quickstart             — 重新自动检测")
-        return 1
-
-    print()
-    print(f"  {color('⏳', Colors.YELLOW)} 正在安装，请稍候...")
-    print()
-
-    try:
-        from hermes_cli.model_manager import cmd_local_models_setup
-
-        setup_args = type("Args", (), {"yes": True, "model": None})()
-        result = cmd_local_models_setup(setup_args)
-
-        if result == 0:
-            print(f"  {color('✅', Colors.GREEN)} 模型安装完成，正在写入配置...")
-            _configure_embedded()
-            return 0
-        else:
-            print(f"  {color('❌', Colors.RED)} 模型安装失败，请检查网络后重试")
-            print(f"     运行: hermes local-models setup")
-            return 1
-    except Exception as e:
-        print(f"  {color('❌', Colors.RED)} 安装出错: {e}")
-        print(f"     运行: hermes local-models setup")
-        return 1
-
-
 # ── 主入口 ──
 
 # ── MemPalace 知识库检测 ──
@@ -2074,25 +1713,9 @@ def cmd_quickstart(args) -> int:
     print(f"  🔍 Step 1/3: 扫描可用资源...")
 
     api_providers = _detect_api_key_providers()
-    ollama_info = _detect_ollama()
     aimc_info = _detect_aimc()
-    has_embedded = _has_embedded_models()
+    local_runtime_info = _detect_local_runtime_models()
     mempalace_info = _detect_mempalace()
-
-    # 检测 LM Studio 和 llama.cpp
-    local_server_infos = []
-    for srv in _LOCAL_SERVER_CONFIGS:
-        info = _detect_local_server(srv)
-        if info:
-            local_server_infos.append(info)
-
-    resource_count = (
-        len(api_providers)
-        + (1 if ollama_info else 0)
-        + (1 if aimc_info else 0)
-        + len(local_server_infos)
-        + (1 if has_embedded else 0)
-    )
 
     # ── 显示检测结果 ──
     if api_providers:
@@ -2110,95 +1733,27 @@ def cmd_quickstart(args) -> int:
     else:
         print(f"  {color('⚠', Colors.YELLOW)} AIMC 网关: 未检测到")
 
-    if ollama_info:
-        models = ollama_info.get("models", [])
-        classified = ollama_info.get("classified_models", [])
-        if models and len(models) == 1:
-            print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中 ({models[0]})")
-        elif models and len(models) > 1:
-            print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中 ({len(models)} 个模型)")
-            primary = ollama_info.get("default_model", "")
-            vision = ollama_info.get("vision_model")
-            for m_info in classified:
-                name = m_info["name"]
-                mtype = m_info["type"]
-                tag = ""
-                if name == primary:
-                    tag = " (主力)"
-                elif name == vision:
-                    tag = " → auxiliary.vision"
-                type_label = {"vision": "视觉", "reasoning": "推理", "text": "文本"}.get(mtype, mtype)
-                print(f"      {type_label:4s}: {name}{tag}")
-        elif not models:
-            print(f"  {color('✓', Colors.GREEN)} Ollama 本地推理: 运行中（暂无模型）")
-    else:
-        print(f"  {color('⚠', Colors.YELLOW)} Ollama 本地推理: 未运行")
-        print(f"     ℹ 无 Ollama 时的离线兜底推荐: hermes local-models install minicpm5-1b (~688MB, ModelScope)")
-
-    # 显示 LM Studio / llama.cpp 检测结果
-    for li in local_server_infos:
-        models = li.get("models", [])
-        if models:
-            display = li.get("display_name", li.get("name", ""))
-            default = li.get("default_model", "")
-            vision = li.get("vision_model")
-            if len(models) == 1:
-                print(f"  {color('✓', Colors.GREEN)} {display}: 运行中 ({default})")
-            else:
-                details = []
-                if default:
-                    details.append(f"主力: {default}")
-                if vision:
-                    details.append(f"视觉: {vision}")
-                extra = f" ({', '.join(details)})" if details else ""
-                print(f"  {color('✓', Colors.GREEN)} {display}: 运行中 ({len(models)} 个模型){extra}")
-        else:
-            display = li.get("display_name", li.get("name", ""))
-            print(f"  {color('✓', Colors.GREEN)} {display}: 运行中（暂无模型）")
-
-    if has_embedded:
-        print(f"  {color('✓', Colors.GREEN)} 离线兜底模型: 已安装")
-    else:
-        print(f"  {color('⚠', Colors.YELLOW)} 离线兜底模型: 未安装")
+    # local_runtime：唯一本地模型兜底（其他本地服务走 hermes model 自定义 provider）
+    local_runtime_info = _report_and_maybe_configure_local_runtime(local_runtime_info)
 
     if mempalace_info and mempalace_info.get("installed"):
         mcp_status = "已配置" if mempalace_info.get("mcp_configured") else "待配置"
         init_status = "已初始化" if mempalace_info.get("initialized") else "未初始化"
         print(f"  {color('✓', Colors.GREEN)} MemPalace 记忆库: {init_status}（MCP {mcp_status}）")
 
-    print()
-    # Phase E: 自定义后端接入
-    custom_backend_count = 0
-    while True:
-        if not _prompt_yes_no("添加自定义本地后端？", default=False):
-            break
-        custom_info = _prompt_add_custom_backend()
-        if custom_info:
-            local_server_infos.append(custom_info)
-            custom_backend_count += 1
-            resource_count += 1
-            if custom_info.get("available") and custom_info.get("models"):
-                display = custom_info.get("display_name", custom_info.get("name", ""))
-                print()
-                print(f"  {color('✓', Colors.GREEN)} {display}: 已添加")
-            else:
-                display = custom_info.get("display_name", custom_info.get("name", ""))
-                print(f"  {color('ℹ', Colors.BLUE)} {display}: 已记录（启动后端后自动生效）")
-        else:
-            break
+    resource_count = _count_available_resources(api_providers, aimc_info, local_runtime_info)
 
 
-    # ── 无资源 → 引导安装 ──
+    # ── 无资源 → 引导三条配置路径 ──
     if resource_count == 0:
-        print(f"  ❌ 未检测到任何可用的 AI 资源")
+        print(f"  {color('❌', Colors.RED)} 未检测到任何可用的 AI 资源")
         print()
-        result = _prompt_install_local_model()
-        if result == 0:
-            print(f"\n{'=' * 60}")
-            print(f"  🎉 全部就绪！直接运行 hermes 即可开始对话")
-            print(f"{'=' * 60}")
-            print()
-        return result
+        print("  三种配置方式：")
+        print("    1. 配置云端 API Key                    → hermes setup")
+        print("    2. 让 local_runtime 推荐并下载本地模型 → hermes model → Local models")
+        print("    3. 添加自定义 OpenAI 兼容 provider     → hermes model")
+        print()
+        return 0
 
     # ── Step 1.5: 配置整理（自动执行）──
     config_changes = _cleanup_config()
@@ -2214,7 +1769,7 @@ def cmd_quickstart(args) -> int:
     print(f"  ⚙ Step 2/3: 配置智能路由...")
 
     has_cloud = bool(api_providers) or bool(aimc_info)
-    has_local = bool(ollama_info) or bool(local_server_infos)
+    has_local = bool(local_runtime_info.get("models"))
     current_label = _get_current_provider_label()
 
     if current_label:
@@ -2226,7 +1781,6 @@ def cmd_quickstart(args) -> int:
     # 根据策略选择主力提供商
     primary_id = ""
     primary_model = ""
-    primary_local_info = None
 
     if primary_strategy == "cloud":
         if aimc_info:
@@ -2242,13 +1796,9 @@ def cmd_quickstart(args) -> int:
         elif api_providers:
             primary_id = api_providers[0]["id"]
             primary_model = api_providers[0]["default_model"]
-    elif ollama_info:
-        primary_id = "ollama"
-        primary_model = ollama_info["default_model"]
-    elif local_server_infos:
-        primary_local_info = local_server_infos[0]
-        primary_id = primary_local_info["provider_id"]
-        primary_model = primary_local_info["default_model"]
+    elif local_runtime_info.get("models"):
+        primary_id = "llamacpp"
+        primary_model = local_runtime_info["models"][0]["id"]
     elif aimc_info:
         primary_id = "aimc"
         try:
@@ -2260,9 +1810,6 @@ def cmd_quickstart(args) -> int:
     elif api_providers:
         primary_id = api_providers[0]["id"]
         primary_model = api_providers[0]["default_model"]
-    elif has_embedded:
-        primary_id = "embedded"
-        primary_model = "qwen-0.5b"
 
     if not primary_id:
         print(f"  {color('❌', Colors.RED)} 无法确定主力提供商")
@@ -2276,20 +1823,13 @@ def cmd_quickstart(args) -> int:
             {"id": "aimc", "default_model": "tier:balanced"}
         )
 
-    fallback_chain = _build_fallback_chain(
-        api_providers_for_routing, ollama_info, has_embedded, primary_id,
-        local_server_infos=local_server_infos,
-    )
+    fallback_chain = _build_fallback_chain(api_providers_for_routing, primary_id)
 
     # 写入配置
     if primary_id == "aimc":
         _configure_aimc(aimc_info)
-    elif primary_id == "ollama":
-        _configure_ollama(ollama_info)
-    elif primary_id == "embedded":
-        _configure_embedded()
-    elif primary_local_info:
-        _configure_local_server(primary_local_info)
+    elif primary_id == "llamacpp":
+        _configure_local_runtime(primary_model)
     else:
         # 找到对应的 cloud provider dict
         for p in api_providers:
@@ -2300,15 +1840,7 @@ def cmd_quickstart(args) -> int:
     # 然后写入完整的智能路由（覆盖上面写入的 model 配置）
     _write_smart_routing(
         primary_id, primary_model, fallback_chain,
-        api_providers_for_routing, ollama_info,
-        local_server_infos=local_server_infos,
-        aimc_info=aimc_info,
-    )
-
-    # v2: 写入多后端配置（local_backends）
-    _write_local_backends(
-        ollama_info=ollama_info,
-        local_server_infos=local_server_infos,
+        api_providers_for_routing, aimc_info=aimc_info,
     )
 
     # MemPalace MCP 自动配置（如果已安装且未配置）
@@ -2329,10 +1861,7 @@ def cmd_quickstart(args) -> int:
     # 主力
     _provider_names = {p["id"]: p["name"] for p in _PROVIDER_CHECKS}
     _provider_names["aimc"] = "AIMC 网关（tier 路由组）"
-    _provider_names["ollama"] = "Ollama（本地）"
-    _provider_names["lm_studio"] = "LM Studio（本地）"
-    _provider_names["llama_cpp"] = "llama.cpp（本地）"
-    _provider_names["embedded"] = "Qwen2.5-0.5B（离线）"
+    _provider_names["llamacpp"] = "local_runtime（本地托管）"
 
     primary_name = _provider_names.get(primary_id, primary_id)
     print(f"  🔵 主力推理: {primary_name} — {primary_model}")
@@ -2357,17 +1886,10 @@ def cmd_quickstart(args) -> int:
             "kimi": "月之暗面 Kimi",
             "zai": "智谱 AI",
             "alibaba": "阿里云通义千问",
-            "ollama": "Ollama（本地）",
             "custom": "本地服务",
-            "embedded": "嵌入式",
         }.get(_vision_provider, _vision_provider)
         print(f"  👁 视觉分析: {_vision_label} — {_vision_model} (auxiliary)")
 
-    # coding 模型显示
-    coding_models = [m for m in (ollama_info or {}).get("classified_models", []) if m.get("type") == "coding"]
-    if coding_models:
-        cname = coding_models[0]["name"]
-        print(f"  💻 代码编程: Ollama（本地） — {cname} (coding)")
     # fallback 链
     if fallback_chain:
         print(f"  📋 回退路由:")

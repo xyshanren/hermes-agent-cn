@@ -529,3 +529,18 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 - `hermes_cli/main.py` 三处恢复：import 区加两个 builder；`cmd_quickstart = _forward_command(...)`（`forward_return=True`，因 `cmd_quickstart` 返回 0/1）；`_build_cli_parser` 中紧接 `build_setup_parser` 注册两个命令。`docs/cn-divergences.md:81` 同步改为"2026-11-14 重新接线"，并修正 local-models 注册历史（`10fa47f0ab` 曾注册，bump 丢失；非"从未注册"）。
 - 验证：`hermes quickstart --help` / `hermes local-models --help` / `hermes --help`（两命令均出现）通过；`tests/hermes_cli/test_local_models.py` 9/9 pass；quickstart 测试集 26 passed + 3 failed。
 - **3 个失败属既有基线，非本次引入**：`test_quickstart_aimc.py` 的 `_initialize_aimc_client_or_fail`（CAND-085 启动门检）实现在 **v0.22 bump 的 main.py 重构中丢失**——bump 前锚点 `cn-pre-v0.23-bump` 的 main.py 同样无此函数而测试一直引用。**P3d 已于同日完成**：从 `c24dc42648` 恢复该函数（含 dict 形态 `model.default` 修复 + 模块级 fail-fast 调用，`asyncio` 改函数内惰性 import），`test_quickstart_aimc.py` **29/29 pass**，相关 5 文件 **64/64 pass**，`hermes --help` 冒烟正常（无 aimc 配置时静默跳过）。
+
+**P1 执行记录（2026-11-14）**：
+- `bootstrap.models_dir()` 读可选键 `local_runtime.models_dir`（**未在 `config_defaults.py` 声明**：该文件 2919 行已超 2000 行 ratchet 只降不升，且 `load_config` 对未知子键无 schema 校验；quickstart 写入时自动创建该键），`HERMES_MODELS_DIR` 作无配置场景兜底、配置键优先；相对路径回落默认。
+- quickstart Step 1 新增单路径扫描（`staged_models()` 裸 glob + `model_id_from_stem`）、显示与路径询问；写路径后提示"重启生效"（supervisor 的 `--models-dir` 是 spawn 时快照）。
+- quickstart.py 本身超 2000 行 ratchet（2332 vs base 2388 已净减），新逻辑 + embedded/Ollama 配置函数拆入新 sibling `quickstart_local_runtime.py`，facade 只保留 import 与调用。
+- 验证：新增 `tests/hermes_cli/test_quickstart_models_dir.py` **7/7 pass**；quickstart 全套 **52/52**；local_runtime 相关 10 文件与基线完全一致（197 passed / 15 既有失败 / 5 skipped）；`python -m scripts.code_health --base HEAD` 改动文件 **0 findings**。
+
+**P3a 执行记录（2026-11-14，随 P1 收口）**：
+- quickstart 本地档只剩 local_runtime：移除 Ollama / LM Studio / vLLM / LocalAI / FastLLM / embedded 的探测、显示、主力选择与配置写入；Phase E 自定义后端入口移除，其他本地服务统一走 `hermes model` 的自定义 provider。
+- 主力优先级：AIMC → 云 provider[0] → local_runtime（`provider=llamacpp` 裸别名，写 `local_runtime.enabled=true`，不写 base_url）。
+- fallback 链只保留云端 / AIMC 非主力；`_generate_routing_rules` 删掉 coding / short_chat / Ollama-vision 分支，只留 vision（云）/ reasoning / default。
+- `quickstart_local_runtime.py` sibling 收敛为：模型目录扫描、路径配置、资源计数、local_runtime 主力配置。
+- facade 净减 572 行（2388 → 1909，已低于 2000 上限）；测试净减 385 行。
+- 验证：quickstart + aimc + local_models 6 文件 **68/68**；local_runtime 10 文件与基线一致（197 / 15 / 5）；health 改动文件 **0 findings**；CLI help 文案同步。
+- **挂账**：quickstart.py 内仍留约 600 行 Ollama / 外部 server 探测死函数（`_detect_ollama`、`_LOCAL_SERVER_CONFIGS`、`_classify_local_model`、`_detect_local_server`、`_prompt_add_custom_backend` 等）与 `_parse_default_gateway` 测试（A1）——行为已不再调用，属纯死代码清扫项，下次清理时连同测试一并删除。
