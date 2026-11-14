@@ -428,6 +428,12 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 
 ---
 
+### 2026-11-14 — 上游检查节奏约定（user 拍板）
+
+**三周一次，user 发起**：下次检查 **2026-11 月末**（user 亲自发起，不设 cron）。触发即照本次已验证的六步流程走：缺口摸底（4 路深扫）→ 拍板会 → 阶段 0 断裂面先行 cherry-pick → 主体 merge 分区解决（DU 批量化）→ **保留面测试核销** → 基线对照 verify。预计届时上游已出 v0.24.0（minor 节奏 ~3 周），连 v0.23.0→v0.23.1 段（618 PR）的 curated notes 一起核。
+
+---
+
 ### 2026-11-12 拍板：bump 前置 K-38~K-44 全部落锤
 
 | ID | 拍板 | what / why | when-to-delete |
