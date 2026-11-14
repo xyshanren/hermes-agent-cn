@@ -401,6 +401,56 @@ def _hf_url(repo: str, path: str, revision: str = "main") -> str:
     return f"https://huggingface.co/{repo}/resolve/{revision}/{path}"
 
 
+def _ms_url(repo: str, path: str, revision: str = "master") -> str:
+    """ModelScope resolve URL — same shape as HF, so the shared resumable
+    downloader (pm.downloader Download/Source) applies unchanged. Hosts are
+    hardcoded public endpoints; repo/path are plain path segments."""
+    return f"https://www.modelscope.cn/models/{repo}/resolve/{revision}/{path}"
+
+
+def _download_source() -> str:
+    """``local_runtime.download_source``: modelscope (CN default) | huggingface | auto.
+
+    HF is not reliably reachable from CN networks, so the mirror is the default;
+    unknown values (a typo in config.yaml) fall back to modelscope instead of
+    silently routing elsewhere. ``auto`` = ModelScope first, HF on any failure.
+    """
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        section = load_config_readonly().get("local_runtime") or {}
+        source = str((section or {}).get("download_source") or "modelscope").strip().lower()
+    except Exception:  # config read is a boundary; default is the safe choice
+        logger.debug("local_runtime.download_source probe failed", exc_info=True)
+        source = "modelscope"
+    return source if source in ("modelscope", "huggingface", "auto") else "modelscope"
+
+
+def _asset_urls(entry, asset, *, fallback_repo: str | None = None) -> tuple[str, tuple[str, ...]]:
+    """(primary, fallbacks) for one catalog asset, honoring ``download_source``.
+
+    The mirror's default branch is rarely the HF commit pinned in the catalog,
+    so the ModelScope URL uses ``entry.modelscope_revision`` (default master)
+    with ``main`` as a second guess; ``auto`` appends the HF resolve URL as the
+    final fallback. ``fallback_repo`` covers companion assets whose repo differs
+    from the entry's own (e.g. a draft published elsewhere).
+    """
+    repo_hf = asset.repo or fallback_repo or entry.repo
+    repo_ms = entry.modelscope_repo or repo_hf
+    rev_ms = entry.modelscope_revision or "master"
+    ms_master = _ms_url(repo_ms, asset.path, rev_ms)
+    ms_main = _ms_url(repo_ms, asset.path, "main") if rev_ms != "main" else ""
+    source = _download_source()
+    if source == "huggingface":
+        return _hf_url(repo_hf, asset.path, asset.revision), ()
+    hf = _hf_url(repo_hf, asset.path, asset.revision)
+    if source == "modelscope":
+        fallbacks = (ms_main,) if ms_main and ms_main != ms_master else ()
+        return ms_master, fallbacks
+    # auto: MS (master → main) first, HF last. Dedup keeps the resume state sane.
+    return ms_master, tuple(dict.fromkeys(u for u in (ms_main, hf) if u and u != ms_master))
+
+
 def _model_id_for(gguf: Path) -> str:
     """Variant model id for a staged file (strips split-part suffixes)."""
     return re.sub(_SPLIT_PART_RE + "$", "", gguf.stem)
@@ -417,10 +467,12 @@ def _variant_files_on_disk(model_id: str) -> list[Path]:
 
 
 def _download_plan(entry, variant) -> list:
-    """Everything a variant needs: split parts + mmproj/draft/MTP head assets, as (url, dest, bytes) tuples."""
-    plan = [(_hf_url(entry.repo, a.path, a.revision), bootstrap.models_dir() / a.local_name, a.size_bytes)
+    """Everything a variant needs: split parts + mmproj/draft/MTP head assets, as
+    (urls, dest, bytes) tuples where urls is (primary, fallbacks) honoring
+    ``local_runtime.download_source``."""
+    plan = [(_asset_urls(entry, a), bootstrap.models_dir() / a.local_name, a.size_bytes)
             for a in variant.files]
-    plan += [(_hf_url(a.repo or entry.repo, a.path, a.revision), bootstrap.assets_dir() / a.local_name, a.size_bytes)
+    plan += [(_asset_urls(entry, a), bootstrap.assets_dir() / a.local_name, a.size_bytes)
              for a in (entry.mmproj, entry.draft, entry.mtp_head) if a is not None]
     return plan
 
@@ -441,7 +493,7 @@ def _missing_drafts(engine_tag: str) -> list:
             continue
         dest = bootstrap.assets_dir() / asset.local_name
         if not dest.is_file():
-            plan.append((_hf_url(asset.repo or entry.repo, asset.path, asset.revision), dest, asset.size_bytes))
+            plan.append((_asset_urls(entry, asset), dest, asset.size_bytes))
     return plan
 
 
@@ -469,9 +521,20 @@ def _download_progress_hook(job: dict[str, Any]):
 
 
 def _download_job(job: dict[str, Any], plan) -> None:
-    """Model bytes use the same resumable transfer as pinned PM archives."""
+    """Model bytes use the same resumable transfer as pinned PM archives.
+
+    A plan row's first element is either a ``(primary, fallbacks)`` pair from
+    ``_asset_urls`` or a plain URL string (callers that build rows by hand,
+    tests, sideload); both shapes are accepted."""
     running = _RUNNING.get(job["job_id"], {})
-    dl = Download([Source(url, dest) for url, dest, _ in plan], pause_event=running.get("pause"))
+    sources = []
+    for row in plan:
+        url, dest = row[0], row[1]
+        if isinstance(url, str):
+            sources.append(Source(url, dest))
+        else:
+            sources.append(Source(url[0], dest, fallbacks=url[1]))
+    dl = Download(sources, pause_event=running.get("pause"))
     dl.run(progress=_download_progress_hook(job))
 
 

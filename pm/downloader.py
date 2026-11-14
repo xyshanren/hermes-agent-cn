@@ -336,10 +336,12 @@ class Download:
         self._check_pause()
         self.partials_dir.mkdir(parents=True, exist_ok=True)
         for source in self.sources:
-            if source.fallbacks and not _pinned(source.sha256):
-                raise ValueError("mirror fallback requires a full lowercase SHA256")
-            # A pinned SHA256 is verified before anything is published, so the user's
-            # http npm registry (Verdaccio, Nexus) cannot change what installs (#150032).
+            # Un-pinned sources (model downloads: sha256="" is catalog policy) may use
+            # https fallbacks too: the per-url https check below is the actual gate, and
+            # a missing digest changes nothing for them since the primary was already
+            # un-verified (a corrupt model surfaces at llama.cpp load time, not here).
+            # Pinned archives keep every existing guarantee — the pinned digest covers
+            # their http npm mirror, where content substitution matters (#150032).
             for url in (source.url, *source.fallbacks):
                 plain = url == source.url and source.plain_http()
                 if not (url.startswith(("https://", *_LOOPBACK)) or plain):

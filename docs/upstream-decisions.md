@@ -544,3 +544,11 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 - facade 净减 572 行（2388 → 1909，已低于 2000 上限）；测试净减 385 行。
 - 验证：quickstart + aimc + local_models 6 文件 **68/68**；local_runtime 10 文件与基线一致（197 / 15 / 5）；health 改动文件 **0 findings**；CLI help 文案同步。
 - **挂账**：quickstart.py 内仍留约 600 行 Ollama / 外部 server 探测死函数（`_detect_ollama`、`_LOCAL_SERVER_CONFIGS`、`_classify_local_model`、`_detect_local_server`、`_prompt_add_custom_backend` 等）与 `_parse_default_gateway` 测试（A1）——行为已不再调用，属纯死代码清扫项，下次清理时连同测试一并删除。
+
+**P2 执行记录（2026-11-14）**：
+- **ModelScope 下载通道**：新增 `local_runtime.download_source`（**modelscope 默认** | `huggingface` | `auto`，未写进 config_defaults——同 models_dir，文件超 ratchet 只降不升；非法值回落 modelscope）。`_ms_url()` 生成与 HF 同构的 ModelScope resolve URL（`https://www.modelscope.cn/models/{repo}/resolve/{rev}/{path}`，**实测 200 + Range 支持**），复用 pm.downloader 的断点续传/并行/进度，不引入 SDK。
+- **catalog**：`CatalogEntry` 加 `modelscope_repo`/`modelscope_revision`（缺省回落 HF repo / master），经 `_SCALAR_FIELDS` 从 JSON 解析；新增字段放 dataclass 末尾（默认区）。
+- **源无关 plan**：`_download_plan`/`_missing_drafts` 产出 `((primary, fallbacks), dest, size)`；`_asset_urls()` 按 source 生成——`auto` = ms(master→main) 失败后落 HF，`modelscope` = 仅 master→main。`_download_job` 兼容 str 与 pair 两种行格式（手写 plan/测试不变）。browsed 下载（HF 浏览）保持 HF。
+- **pm/downloader.py 偏离（记录）**：放开 `run()` 开头的"fallbacks 需 pinned sha256"校验（模型 sha256="" 是本 catalog 政策）——逐 URL 的 https 检查仍是实际闸门；pinned 包的 http-mirror 防篡改语义不变（测试 53/53 无回归）。**when-to-delete**：若上游解除该限制或 CN 放弃双源。
+- 验证：新增 `test_local_download_source.py` **16/16**；pm 下载器 5 文件 **53/53**；local 下载链路 4 文件 47 passed（仅 2 个既有 calibrated 基线失败）；health 改动文件 **0 findings**。
+- **挂账**：catalog_cn.json 12 条国产条目的 ModelScope 可用性（repo id / 默认分支）未逐一 HEAD 验证，待实施时按回落链（master→main→HF）实测后回填 `modelscope_repo`/`modelscope_revision`。

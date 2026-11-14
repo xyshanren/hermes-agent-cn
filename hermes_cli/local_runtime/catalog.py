@@ -128,6 +128,12 @@ class CatalogEntry:
     # False lists the entry for explicit choice only: it is never the automatic recommendation or
     # quickstart's pick on any machine, so it needs no quality ordering.
     recommend: bool = True
+    # ModelScope mirror. CN-hosted repos usually share the HF id but not
+    # always; empty ``modelscope_repo`` falls back to ``repo``. The mirror's
+    # default branch differs from HF's pinned commit (``modelscope_revision``,
+    # empty = "master"; some repos use "main").
+    modelscope_repo: str = ""
+    modelscope_revision: str = ""
 
     @property
     def mtp_capable(self) -> bool:
@@ -330,7 +336,7 @@ _SCALAR_FIELDS = {
     "n_vocab": (int, 0), "sampling": (dict, {}), "min_engine": (str, ""),
     "quality": (int, 0), "decode_fraction": (float, 1.0), "architecture": (str, ""),
     "recommend": (bool, True), "draft_spec_type": (str, "draft-dspark"), "draft_depth": (int, 3),
-    "draft_min_engine": (str, ""),
+    "draft_min_engine": (str, ""), "modelscope_repo": (str, ""), "modelscope_revision": (str, ""),
 }
 
 
