@@ -2,14 +2,14 @@
 智能多模型路由引擎 v2 — 能力感知多后端路由。
 
 Hermes-Agent-CN 核心组件，根据任务需求自动在 本地服务(Ollama/LM Studio/llama.cpp/FastLLM...)
-→ 云端API(DeepSeek/MiniMax/Kimi/Zai) → 嵌入式CPU 之间选择最佳模型。
+→ 云端API(DeepSeek/MiniMax/Kimi/Zai) → local_runtime 本地托管 之间选择最佳模型。
 
 路由策略:
     1. 分析任务需求 (TaskRequirements): 能力分、是否需要视觉、是否需要工具调用
     2. 从所有后端收集可用模型, 按能力分过滤
     3. 本地优先 (满足能力阈值的前提下选最强的本地模型)
     4. 本地不可用/能力不足 → 云端
-    5. 云端不可用 → 嵌入式兜底
+    5. 云端不可用 → local_runtime 托管模型的兜底 (K-71: 替代原嵌入式 CPU 推理)
     6. 熔断机制: 连续失败 2 次的模型临时屏蔽 5 分钟
 
 使用方式:
@@ -48,9 +48,6 @@ CACHE_TTL = 60                        # 路由决策缓存时间 (秒)
 PROBE_COOLDOWN = 60                   # 后端探测冷却 (秒)
 CIRCUIT_BREAKER_THRESHOLD = 2         # 连续失败次数触发熔断
 CIRCUIT_BREAKER_COOLDOWN = 300        # 熔断冷却时间 (秒, =5分钟)
-
-# 嵌入式模型优先级
-EMBEDDED_MODEL_ORDER = ["qwen-coder-1.5b", "qwen-0.5b"]
 
 # 已知后端默认端口映射 (用于 auto-detect 时尝试)
 DEFAULT_BACKEND_PORTS = {
@@ -161,7 +158,7 @@ class ModelTier(Enum):
     """模型层级。"""
     LOCAL = "local"         # Tier 1: 本地模型 (所有后端)
     CLOUD = "cloud"         # Tier 2: 国产云端 API
-    EMBEDDED = "embedded"   # Tier 3: 嵌入式 CPU 推理
+    EMBEDDED = "embedded"   # Tier 3: local_runtime 托管模型兜底 (K-71 改指, 枚举值保留兼容)
     NONE = "none"           # 无可用的模型
 
     # 向后兼容
@@ -1249,17 +1246,18 @@ class SmartRouter:
         return available
 
     def check_embedded(self) -> bool:
-        """检查嵌入式推理是否可用。"""
+        """检查 local_runtime 托管模型是否可用（K-71: Tier 3 从 embedded 改指 local_runtime）。"""
         cached = self._get_cached("embedded_available")
         if cached is not None:
             return cached
 
         try:
-            from hermes_cli.embedded import is_embedded_available
-            available = is_embedded_available()
+            from hermes_cli.local_runtime.bootstrap import staged_model_ids
+            available = bool(staged_model_ids())
             self._set_cache("embedded_available", available)
             return available
-        except ImportError:
+        except Exception:
+            logger.debug("local_runtime staged model probe failed", exc_info=True)
             self._set_cache("embedded_available", False)
             return False
 
@@ -1306,14 +1304,14 @@ class SmartRouter:
         return "deepseek:deepseek-chat"
 
     def _select_embedded_model(self, complexity: TaskComplexity) -> Optional[str]:
-        """选择嵌入式模型。"""
+        """选择 local_runtime 托管的第一个模型作为兜底（K-71）。"""
         try:
-            from hermes_cli.model_manager import get_available_embedded_model
-            result = get_available_embedded_model()
-            if result:
-                return result.get("model_id")
-        except ImportError:
-            pass
+            from hermes_cli.local_runtime.bootstrap import staged_model_ids
+            ids = staged_model_ids()
+            if ids:
+                return ids[0]
+        except Exception:
+            logger.debug("local_runtime staged model probe failed", exc_info=True)
         return None
 
     # -- 主路由 v2 -----------------------------------------------------------
@@ -1359,19 +1357,19 @@ class SmartRouter:
                     req.min_capability, req.needs_vision, req.needs_tools,
                     req.min_context)
 
-        # 强制嵌入式
+        # 强制 local_runtime 托管档
         if force_tier == ModelTier.EMBEDDED or self.routing_mode == "embedded-only":
             complexity = analyze_complexity(user_message)
             model_id = self._select_embedded_model(complexity)
             if model_id:
                 result = RouteResult(
-                    provider="embedded", model=model_id,
+                    provider="llamacpp", model=model_id,
                     tier=ModelTier.EMBEDDED,
-                    reason=f"嵌入式模式 (需求 cap={req.min_capability})",
+                    reason=f"本地托管模式 (需求 cap={req.min_capability})",
                 )
             else:
                 result = RouteResult(provider="", model="", tier=ModelTier.NONE,
-                              reason="嵌入式模型未安装")
+                              reason="local_runtime 无可用模型")
             self._log_route(result, req)
             return result
 
@@ -1433,14 +1431,14 @@ class SmartRouter:
             self._log_route(result, req)
             return result
 
-        # Tier 3: 嵌入式兜底
+        # Tier 3: local_runtime 托管兜底
         complexity = analyze_complexity(user_message)
         model_id = self._select_embedded_model(complexity)
         if model_id:
             result = RouteResult(
-                provider="embedded", model=model_id,
+                provider="llamacpp", model=model_id,
                 tier=ModelTier.EMBEDDED,
-                reason="本地离线且云端不可用, 启用嵌入式 CPU 推理",
+                reason="本地离线且云端不可用, 启用 local_runtime 本地模型",
             )
             self._log_route(result, req)
             return result
@@ -1687,11 +1685,11 @@ class SmartRouter:
         """带用户配置的路由决策。"""
         if provider_model_config and provider_model_config != "auto":
             provider, _, model = provider_model_config.partition(":")
-            if provider == "embedded":
+            if provider in ("embedded", "llamacpp"):
                 return RouteResult(
-                    provider="embedded", model=model,
+                    provider="llamacpp", model=model,
                     tier=ModelTier.EMBEDDED,
-                    reason="用户指定嵌入式模型",
+                    reason="用户指定本地托管模型",
                 )
             return RouteResult(
                 provider=provider or "deepseek",
@@ -1860,7 +1858,7 @@ class SmartRouter:
             mode_labels = {"balanced": "均衡 (满足需求最便宜)", "strict": "最便宜优先",
                            "quality": "复杂任务能力优先", "off": "按优先级"}
             lines.append(f"  💰 成本模式: {mode_labels.get(cost_mode, cost_mode)}")
-        lines.append(f"▸ 嵌入式模型: {'✅ 可用' if status['embedded']['available'] else '❌ 未安装'}")
+        lines.append(f"▸ local_runtime 模型: {'✅ 可兜底' if status['embedded']['available'] else '❌ 无托管模型'}")
 
         # Health
         health = status["health"]

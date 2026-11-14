@@ -266,10 +266,9 @@ from hermes_cli.subcommands.routing import build_routing_parser
 from hermes_cli.subcommands.model import build_model_parser
 from hermes_cli.subcommands.setup import build_setup_parser
 # CN: re-registered 2026-11-14 — the v0.23.1 base bump replaced main.py with
-# upstream's and dropped both (same regression class as a08bfd8463). See
+# upstream's and dropped it (same regression class as a08bfd8463). See
 # docs/upstream-decisions.md K-71.
 from hermes_cli.subcommands.quickstart import build_quickstart_parser
-from hermes_cli.subcommands.local_models import build_local_models_parser
 
 from hermes_cli.subcommands.whatsapp import build_whatsapp_parser, build_whatsapp_cloud_parser
 from hermes_cli.subcommands.login import build_login_parser
@@ -3402,10 +3401,9 @@ def _build_cli_parser():
         logger.debug("LSP CLI registration failed: %s", _lsp_err)
 
     build_setup_parser(subparsers, cmd_setup=cmd_setup)
-    # CN: quickstart (layered-routing wizard) + local-models (offline model
-    # management). Both dropped by the v0.23.1 base bump; see K-71.
+    # CN: quickstart (layered-routing wizard). Dropped by the v0.23.1 base
+    # bump; see K-71.
     build_quickstart_parser(subparsers, cmd_quickstart=cmd_quickstart)
-    build_local_models_parser(subparsers)
     build_whatsapp_parser(subparsers, cmd_whatsapp=cmd_whatsapp)
     build_whatsapp_cloud_parser(subparsers, cmd_whatsapp_cloud=cmd_whatsapp_cloud)
 

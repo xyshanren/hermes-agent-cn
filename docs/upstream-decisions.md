@@ -551,4 +551,10 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 - **源无关 plan**：`_download_plan`/`_missing_drafts` 产出 `((primary, fallbacks), dest, size)`；`_asset_urls()` 按 source 生成——`auto` = ms(master→main) 失败后落 HF，`modelscope` = 仅 master→main。`_download_job` 兼容 str 与 pair 两种行格式（手写 plan/测试不变）。browsed 下载（HF 浏览）保持 HF。
 - **pm/downloader.py 偏离（记录）**：放开 `run()` 开头的"fallbacks 需 pinned sha256"校验（模型 sha256="" 是本 catalog 政策）——逐 URL 的 https 检查仍是实际闸门；pinned 包的 http-mirror 防篡改语义不变（测试 53/53 无回归）。**when-to-delete**：若上游解除该限制或 CN 放弃双源。
 - 验证：新增 `test_local_download_source.py` **16/16**；pm 下载器 5 文件 **53/53**；local 下载链路 4 文件 47 passed（仅 2 个既有 calibrated 基线失败）；health 改动文件 **0 findings**。
-- **挂账**：catalog_cn.json 12 条国产条目的 ModelScope 可用性（repo id / 默认分支）未逐一 HEAD 验证，待实施时按回落链（master→main→HF）实测后回填 `modelscope_repo`/`modelscope_revision`。
+- **挂账**：catalog_cn.json 12 条国产条目的 ModelScope 可用性（repo id / 默认分支）待实测后回填 `modelscope_repo`/`modelscope_revision`。**已实测 1 条（2026-11-14，WSL）**：`minicpm4-0.5b`（QuantFactory/MiniCPM4-0.5B-GGUF）在 ModelScope 200（master/main 同存）、id 与 HF 一致、306MB GGUF 经 pm.downloader 完整下载 + magic 校验通过——证明 resolve URL + downloader 通道端到端可用，且回落链对该条目无需生效。
+
+**P3b+P3c 执行记录（2026-11-14）**：
+- **P3b 体系 B 退役**：删 `subcommands/local_models.py`、`model_manager.py`、`embedded.py` + `test_local_models.py`——本地 LLM 统一由 local_runtime 托管 + ModelScope 下载（P2）承接，语音由 pm extras 承接，moss-tts-nano 无消费者直接消失；入口模块移除 local-models 子命令注册（`hermes --help` 不再列出）。
+- **quickstart 死代码清除（P3a 挂账关闭）**：清 20 个 Ollama / LM Studio / vLLM / embedded 探测链函数 + `agent.model_detection` 共享 import + 两段过时注释，主命令 1909 → **1269 行**；`_parse_default_gateway` 及其测试（A1）随删。
+- **P3c SmartRouter Tier 3 改指 local_runtime**：`check_embedded`/`_select_embedded_model` 从 embedded 资产层改查 `bootstrap.staged_model_ids()`，输出 provider 归一 `llamacpp`；`ModelTier.EMBEDDED` 枚举与 `force_tier`/`embedded-only` 模式保留兼容；status/reason/head 文案同步；删未使用的 `EMBEDDED_MODEL_ORDER`。
+- 验证：quickstart + SmartRouter + 下载链路 **8 文件 101/101**；`code_health --base HEAD` 改动文件 **0 findings**；全仓库无体系 B 残留 import。

@@ -24,43 +24,6 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# A1 — _parse_default_gateway
-# ---------------------------------------------------------------------------
-
-_ROUTE_TABLE = """Iface   Destination Gateway     Flags RefCnt Use Metric Mask
-eth0    00000000    01401CAC    0000  0      0   0      0000
-eth0    AC1C4000    00000000    0003  0      0   0      FFFC
-"""
-
-
-def test_parse_default_gateway_extracts_little_endian_hex():
-    from hermes_cli.quickstart import _parse_default_gateway
-
-    # /proc/net/route 以小端内存字节序显示 u32：172.28.64.1 → 0xAC1C4001
-    # → 内存字节 01 40 1C AC → 显示"01401CAC"。WSL vNIC 网关典型值。
-    assert _parse_default_gateway(_ROUTE_TABLE) == "172.28.64.1"
-
-
-def test_parse_default_gateway_returns_none_without_default_route():
-    from hermes_cli.quickstart import _parse_default_gateway
-
-    assert _parse_default_gateway("") is None
-    assert _parse_default_gateway(
-        "Iface Destination Gateway Flags\neth0 AC1C4000 00000000 0003\n"
-    ) is None
-
-
-def test_parse_default_gateway_skips_loopback_gateway():
-    from hermes_cli.quickstart import _parse_default_gateway
-
-    text = (
-        "Iface Destination Gateway Flags RefCnt Use Metric Mask\n"
-        "lo    00000000    0100007F 0000  0 0 0 0000\n"
-    )
-    assert _parse_default_gateway(text) is None
-
-
-# ---------------------------------------------------------------------------
 # A2 — _probe_gateway_url guards (no request issued for bad input)
 # ---------------------------------------------------------------------------
 
