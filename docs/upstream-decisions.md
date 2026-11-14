@@ -480,3 +480,52 @@ CN `model_manager.py` = **资产层**（`hermes local-models` CLI 下载/登记 
 - **WSL 部署冒烟全绿**：hermes 启动 ✓ / sessions list ✓ / gateway（systemd linger）✓ / **中文 FTS 实测命中**（"测试"175 条、多词 73 条——K-39 reject 上游删除的决策被真机验证）。WSL 树已在 sync-v023 分支，正式同步待 push 后走 hermes-update.sh。
 
 **收口**：cn ff 至 `78708a99d0`，tag **`v0.23.1+cn.1`**。push 照惯例由 user 批量决定。
+
+---
+
+### 2026-11-14 拍板：quickstart 2.0 简化——local_runtime 唯一本地兜底 + ModelScope 默认下载源（K-71）
+
+**背景**：
+- v0.23.1 bump 后 `hermes quickstart` 子命令在 `hermes_cli/main.py` 的接线被上游 main.py 覆盖丢失（与 `a08bfd8463` 上次修复同一回归模式），命令当前实际不可用；`docs/cn-divergences.md:81` 仍声称"2026-09-19 恢复接线"，与代码不符。
+- 上游 local_runtime 已提供完整闭环：硬件探测 → estimator 下载前定价 → `recommended_entry`（常驻且预测 ≥20 tok/s，否则 PhysicsRefusal）→ PM 装引擎 → 下载 → supervisor 常驻。`catalog_cn.json` 12 条国产模型已并入推荐池，`recommended_entry` 对其生效。
+- 现状三套本地模型体系并存：quickstart 自有探测（Ollama / LM Studio / 外部 llama.cpp / embedded ModelScope 0.5B 兜底）、local_runtime 托管、`model_manager.py` 资产层。
+- user 拍板简化：有 local_runtime 就不必在链路上保留 Ollama 和 embedded 小模型；不做多源发现；只支持一个自定义模型保存路径（含 WSL / Windows 路径）；ModelScope 收敛进 local_runtime 作国内下载默认源。
+
+**决策（4 选 1 = reimplement，CN 端编排重构）**：
+
+| 面 | 决策 | what / why | when-to-delete |
+|---|---|---|---|
+| 本地模型兜底 | **local_runtime 唯一** | quickstart 本地档只留 local_runtime 托管；`_detect_ollama()` / `_detect_local_server()` / `_prompt_install_local_model()` 从编排路径移除。理由：上游闭环更准（硬件预算 + 下载前定价 + 推荐），CN 第二套安装栈是技术债 | 若上游撤废 local_runtime |
+| 其他本地服务 | **自定义模型面** | 需接 Ollama / LM Studio / vLLM 等 → 走现有 Phase E `_prompt_add_custom_backend()` 手工加 OpenAI 兼容后端；quickstart 不做原生探测 | 若用户群强烈要求自动探测（复评） |
+| 模型发现 | **单路径扫描** | 不探测多源；只扫一个"模型保存路径"，`bootstrap.staged_models()` 纯目录 `glob("*.gguf")`（分片须全部在盘才收录，`assets/` 天然排除）。路径可指定 `/mnt/d/...`、`D:\...`、`\\wsl$\...` | 若需多磁盘 / 多路径（改为列表） |
+| models_dir | **新增配置键** | `bootstrap.models_dir()` 当前硬编码 `get_default_hermes_root()/"models"`，config 面（`config_defaults.py` local_runtime 段）无对应键。新增 `local_runtime.models_dir`（空 = 默认），quickstart 交互询问；supervisor `--models-dir` 随之 | 若上游提供等价配置键（改用上游） |
+| ModelScope | **默认下载源** | CN 默认 `modelscope`、HF fallback（`local_runtime.download_source`）。下载层抽接口：`_download_plan()` 产出源无关 plan（repo/path/revision/size），SDK `snapshot_download`（`model_manager.py:267` 生产已验证）为主路径，CLI `modelscope download --model ... --local_dir ...` 为等价运维路径。`catalog*.json` 条目加可选 `modelscope_repo`（缺省回落 `repo`）。注意当前 `_hf_url()` 硬编码 HF 域名、catalog `repo` 全是 HF id | 若上游 local_runtime 原生支持多源 |
+| quickstart 接线 | **立即修复（P0）** | `main.py` 注册 `build_quickstart_parser` + `build_local_models_parser`（两者当前均未在 main.py 注册）；同步修正 `docs/cn-divergences.md:81` | 永久（命令存在即需接线） |
+
+**编排链路（简化后）**：
+
+- 扫描源：云端 API key × 9 → AIMC → local_runtime（自定义路径 `staged_models()`）→ 自定义模型（Phase E）
+- 主力优先级：AIMC → 云 provider[0] → local_runtime 托管 → 自定义模型
+- fallback 链：云端(非主力) → local_runtime 托管 → 自定义模型
+- 资源全无：引导三条路（配 API key / local_runtime `recommended_entry` 推荐下载 / 加自定义模型），**不再自动装 embedded 0.5B**
+
+**体系 B 退役（P3b 拍板 2026-11-14）**：`hermes local-models` **整体退役**，不再"保留识别"。LLM 三条（qwen-coder-1.5b / qwen-0.5b / minicpm5-1b）迁入 local_runtime catalog（GGUF + ModelScope id 可直接映射；qwen-0.5b 可退役——推荐池已有更优选择）；语音三条由 pm extras 承接（whisper-small → `voice` extra、edge-tts → `edge-tts` extra），**moss-tts-nano 零消费者直接删**（全仓库仅匹配无关色板/邮箱）。`_has_embedded_models()` / `embedded.py` / `model_manager.py` 随命令一并移除。`smart_model_download.py`（CAND-066 骨架，未接线）不参与本 k，ModelScope 通道直接走生产验证过的 `snapshot_download`。
+
+**分期**：
+- **P0 断裂修复（~30min）**：main.py 接线 + cn-divergences 修正
+- **P1 models_dir 配置化 + 单路径扫描（~3h）**：`models_dir()` 读配置 + quickstart 询问路径 + 扫出已有 GGUF 入编排
+- **P2 ModelScope 下载通道（~1d）**：plan 源无关抽象 + `download_source` 配置 + `modelscope_repo` 字段 + HF fallback
+- **P3 编排与体系收敛（~1-2d，2026-11-14 拍板拆解）**：
+  - **P3a quickstart 编排简化（~2h）**：移除 Ollama / 外部 server / embedded 探测与写入，其他本地服务改走自定义模型面
+  - **P3b local-models 整体退役（~4h）**：删 `subcommands/local_models.py` + `model_manager.py` + `embedded.py`；LLM 三条迁 local_runtime catalog；语音三条归 pm extras；moss-tts-nano 删除
+  - **P3c SmartRouter Tier 3 改指 local_runtime（~2h）**：`agent/zhineng_luyou.py` 的 embedded 兜底（4 处）改为 `llamacpp` provider（local_runtime 托管），保留"本地兜底"语义、删 `EmbeddedProvider` 依赖
+  - **P3d AIMC 门检恢复（~30min）**：从 `c24dc42648` 恢复 `_initialize_aimc_client_or_fail`（含 dict 形态 `model.default` 修复 + 模块级 fail-fast 调用），清 3 个既有基线失败
+
+**验证**：P0 后 `hermes quickstart --help` / `hermes local-models --help` 可用；P1 后指定 Windows 或 WSL 路径下已有 GGUF 能被扫出并作主力/fallback；P2 后 HF 不可达时仍能从 ModelScope 下载 catalog_cn 条目；每阶段 `scripts/run_tests.sh` 零新增失败。
+
+**Revisit**：P2 完成后复核 ModelScope 上 catalog_cn 12 条 repo 的同名可用率（缺者补 `modelscope_repo`）｜若用户群要求自动探测 Ollama 则复评"自定义模型面"｜jev decision onboarding（当前 `model_routing.decision` 手编 YAML）另立项，不在本 k 范围｜下次上游检查（2026-11 月末）复核上游是否已给 `models_dir` / 多源下载等价能力。
+
+**P0 执行记录（2026-11-14）**：
+- `hermes_cli/main.py` 三处恢复：import 区加两个 builder；`cmd_quickstart = _forward_command(...)`（`forward_return=True`，因 `cmd_quickstart` 返回 0/1）；`_build_cli_parser` 中紧接 `build_setup_parser` 注册两个命令。`docs/cn-divergences.md:81` 同步改为"2026-11-14 重新接线"，并修正 local-models 注册历史（`10fa47f0ab` 曾注册，bump 丢失；非"从未注册"）。
+- 验证：`hermes quickstart --help` / `hermes local-models --help` / `hermes --help`（两命令均出现）通过；`tests/hermes_cli/test_local_models.py` 9/9 pass；quickstart 测试集 26 passed + 3 failed。
+- **3 个失败属既有基线，非本次引入**：`test_quickstart_aimc.py` 的 `_initialize_aimc_client_or_fail`（CAND-085 启动门检）实现在 **v0.22 bump 的 main.py 重构中丢失**——bump 前锚点 `cn-pre-v0.23-bump` 的 main.py 同样无此函数而测试一直引用。**P3d 已于同日完成**：从 `c24dc42648` 恢复该函数（含 dict 形态 `model.default` 修复 + 模块级 fail-fast 调用，`asyncio` 改函数内惰性 import），`test_quickstart_aimc.py` **29/29 pass**，相关 5 文件 **64/64 pass**，`hermes --help` 冒烟正常（无 aimc 配置时静默跳过）。
